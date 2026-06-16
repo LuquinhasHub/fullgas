@@ -1,0 +1,53 @@
+# ============================================================
+# Configuração de deploy no Render (https://render.com)
+# Conecte este repositório no Render; ele lê este arquivo.
+# Os valores marcados como sync:false você preenche no painel
+# do Render (não ficam no Git, por segurança).
+# ============================================================
+services:
+  # --- API (Node.js) ---
+  - type: web
+    name: fullgas-api
+    runtime: node
+    rootDir: api
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: PORT
+        value: "3000"
+      - key: DB_SERVER
+        sync: false
+      - key: DB_PORT
+        value: "1433"
+      - key: DB_NAME
+        sync: false
+      - key: DB_USER
+        sync: false
+      - key: DB_PASSWORD
+        sync: false
+      - key: DB_ENCRYPT
+        value: "true"
+      - key: DB_TRUST_CERT
+        value: "false"
+      - key: CORS_ORIGIN
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: JWT_EXPIRES
+        value: "8h"
+
+  # --- Front-end (site estático) ---
+  - type: web
+    name: fullgas-front
+    runtime: static
+    rootDir: frontend
+    plan: free
+    staticPublishPath: .
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html

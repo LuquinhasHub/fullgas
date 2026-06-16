@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FULLGAS B2B — Acesso</title>
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <div class="auth-wrap">
+    <div class="auth-card">
+      <div class="head">
+        <span class="brand big"><span class="g-badge">F</span> FULLGAS</span>
+        <div class="sub">Portal B2B do concessionário</div>
+        <div class="auth-tabs">
+          <button id="tab-login" class="on" type="button">Entrar</button>
+          <button id="tab-cad" type="button">Cadastrar</button>
+        </div>
+      </div>
+
+      <div class="auth-body">
+        <p id="auth-msg" class="auth-msg"></p>
+
+        <!-- LOGIN -->
+        <div id="form-login">
+          <div class="field">
+            <label for="lg-email">E-mail</label>
+            <input id="lg-email" type="email" autocomplete="username" placeholder="voce@suaempresa.com.br">
+          </div>
+          <div class="field">
+            <label for="lg-senha">Senha</label>
+            <input id="lg-senha" type="password" autocomplete="current-password" placeholder="••••••••">
+          </div>
+          <button class="btn red" id="btn-login" type="button" style="width:100%;justify-content:center;">Entrar no portal</button>
+        </div>
+
+        <!-- CADASTRO -->
+        <div id="form-cad" class="hidden">
+          <div class="field">
+            <label for="cd-nome">Nome completo</label>
+            <input id="cd-nome" type="text" placeholder="Seu nome">
+          </div>
+          <div class="field">
+            <label for="cd-empresa">Empresa / Razão social</label>
+            <input id="cd-empresa" type="text" placeholder="Nome da concessionária">
+          </div>
+          <div class="field">
+            <label for="cd-email">E-mail</label>
+            <input id="cd-email" type="email" placeholder="voce@suaempresa.com.br">
+          </div>
+          <div class="field">
+            <label for="cd-senha">Senha</label>
+            <input id="cd-senha" type="password" placeholder="Mínimo 6 caracteres">
+          </div>
+          <button class="btn red" id="btn-cad" type="button" style="width:100%;justify-content:center;">Enviar cadastro para aprovação</button>
+          <p class="muted" style="font-size:12px;margin-top:10px;">Novos cadastros entram como <b>cliente</b> e precisam ser aprovados por um administrador antes do primeiro acesso.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="auth-hint">
+      <b>Acessos de demonstração</b><br>
+      Administrador: <code>admin@fullgas.com.br</code> / <code>admin123</code><br>
+      Cliente: <code>cliente@exemplo.com</code> / <code>cliente123</code><br>
+      Pendente (teste de aprovação): <code>maria@silvaracing.com</code> / <code>maria123</code>
+    </div>
+  </div>
+
+  <script src="js/config.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/api-adapter.js"></script>
+  <script src="js/auth.js"></script>
+</body>
+</html>

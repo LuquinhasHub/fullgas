@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Fullgas DealerNet — Portal B2B</title>
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+
+  <!-- ====== barra superior ====== -->
+  <header class="topbar">
+    <span class="logo">Fullgas<span>Net</span></span>
+
+    <form class="searchbox" id="search-form">
+      <input id="search-input" type="text" placeholder="Pesquisar por NIV, Motos, Artigos">
+      <button type="submit" aria-label="Pesquisar">🔍</button>
+    </form>
+
+    <button class="icon-btn" id="btn-notif" title="Notificações">
+      <span class="pill" id="notif-pill">0</span>
+      <span style="font-size:22px;">✉️</span>
+    </button>
+
+    <a class="pf-link" href="finder.html">
+      <span style="font-size:20px;">🖥️⚙️</span>
+      <span>PARTS<br>FINDER</span>
+    </a>
+
+    <span class="spacer"></span>
+    <span class="brand"><span class="g-badge">F</span> FULLGAS</span>
+  </header>
+
+  <div class="userline">
+    <span class="who" id="user-who"></span>
+    <a href="#" id="btn-sair" class="sair">Sair</a>
+  </div>
+
+  <!-- ====== abas ====== -->
+  <nav class="tabs" id="tabs">
+    <div class="drop hidden" id="tab-admin">
+      <button type="button">Administração</button>
+      <div class="menu">
+        <a href="admin.html">Painel de controle</a>
+        <a href="admin.html#usuarios">Administração de usuários</a>
+        <a href="admin.html#produtos">Catálogo de produtos</a>
+        <a href="admin.html#pedidos">Gestão de pedidos</a>
+        <a href="admin.html#reivindicacoes">Gestão de reivindicações</a>
+      </div>
+    </div>
+    <a href="#notificacoes" data-rota="notificacoes">Notificações</a>
+    <a href="#reivindicacoes" data-rota="reivindicacoes">Reivindicações</a>
+    <a href="loja.html">Loja</a>
+    <a href="#pedidos" data-rota="pedidos">Pedidos</a>
+    <a href="#acoes" data-rota="acoes">Ações do veículo</a>
+    <a href="#estoque" data-rota="estoque">Estoque do revendedor</a>
+    <a href="finder.html">Parts Finder</a>
+    <div class="drop" id="tab-fin">
+      <button type="button">Conta financeira</button>
+      <div class="menu">
+        <a href="#financeiro">Faturas</a>
+        <a href="#financeiro">Resumo financeiro</a>
+      </div>
+    </div>
+  </nav>
+
+  <div class="crumb" id="crumb"><a href="#home">Página inicial</a></div>
+
+  <main class="portal" id="view"></main>
+
+  <div id="print-area" class="hidden" aria-hidden="true"></div>
+
+  <script src="js/config.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/api-adapter.js"></script>
+  <script src="js/portal.js"></script>
+</body>
+</html>

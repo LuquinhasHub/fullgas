@@ -1,0 +1,104 @@
+/* =========================================================
+   FULLGAS B2B — Painel administrativo (estilo Magento 2)
+   ========================================================= */
+:root {
+  --adm-side: #373330;
+  --adm-side-hover: #4a4542;
+  --adm-orange: #eb5202;
+  --adm-blue: #007bdb;
+  --adm-bg: #f8f8f8;
+  --adm-line: #e3e3e3;
+  --adm-ink: #303030;
+}
+
+body.admin { background: var(--adm-bg); color: var(--adm-ink); display: flex; min-height: 100vh; }
+
+/* ---------- sidebar ---------- */
+.adm-side { width: 92px; background: var(--adm-side); flex-shrink: 0; display: flex; flex-direction: column; align-items: stretch; position: sticky; top: 0; height: 100vh; }
+.adm-side .logo-cell { padding: 16px 0 12px; display: flex; justify-content: center; }
+.adm-side .logo-cell .g-badge { width: 34px; height: 34px; border: 3px solid var(--adm-orange); color: var(--adm-orange); border-radius: 8px; font-weight: 900; font-style: italic; display: flex; align-items: center; justify-content: center; font-size: 19px; }
+.adm-side a.item {
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  padding: 13px 4px; color: #aaa6a0; text-decoration: none; font-size: 9px;
+  letter-spacing: .5px; text-transform: uppercase; text-align: center; border-left: 3px solid transparent;
+}
+.adm-side a.item svg { width: 20px; height: 20px; stroke: currentColor; fill: none; stroke-width: 1.8; }
+.adm-side a.item:hover { background: var(--adm-side-hover); color: #fff; }
+.adm-side a.item.on { background: var(--adm-side-hover); color: #fff; border-left-color: var(--adm-orange); }
+
+/* ---------- área principal ---------- */
+.adm-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.adm-top { background: #fff; border-bottom: 1px solid var(--adm-line); display: flex; align-items: center; gap: 18px; padding: 14px 26px; }
+.adm-top h1 { font-size: 24px; font-weight: 400; margin: 0; flex: 1; }
+.adm-top .usr { font-size: 13px; display: flex; align-items: center; gap: 8px; }
+.adm-top .usr button { background: none; border: none; color: var(--adm-blue); cursor: pointer; font-size: 13px; }
+.adm-top .bell { position: relative; font-size: 17px; }
+.adm-top .bell .dot { position: absolute; top: -3px; right: -6px; background: var(--adm-orange); color: #fff; border-radius: 8px; font-size: 9px; padding: 0 4px; }
+
+.adm-body { padding: 22px 26px 60px; }
+
+.adm-banner { background: #fffbdd; border: 1px solid #ffee9c; padding: 11px 16px; font-size: 13px; margin-bottom: 18px; }
+.adm-banner b { color: var(--adm-blue); font-weight: 600; }
+
+.adm-bar { display: flex; align-items: center; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; }
+.adm-bar .scope { font-size: 13px; }
+.adm-bar .grow { flex: 1; }
+
+.btn-orange { background: var(--adm-orange); color: #fff; border: none; padding: 10px 20px; font-size: 14px; font-weight: 600; border-radius: 2px; cursor: pointer; }
+.btn-orange:hover { background: #c64a02; }
+.btn-line { background: #fff; border: 1px solid #adadad; color: #514943; padding: 9px 18px; font-size: 13px; border-radius: 2px; cursor: pointer; }
+.btn-line:hover { border-color: #514943; }
+.btn-mini { font-size: 12px; padding: 5px 10px; }
+
+/* ---------- dashboard ---------- */
+.dash-grid { display: grid; grid-template-columns: 330px 1fr; gap: 26px; align-items: start; }
+@media (max-width: 1020px) { .dash-grid { grid-template-columns: 1fr; } }
+
+.kpi { margin-bottom: 24px; }
+.kpi .k-lbl { font-size: 15px; font-weight: 600; }
+.kpi .k-val { font-size: 25px; color: var(--adm-orange); font-weight: 600; margin-top: 2px; }
+
+.adm-card { background: #fff; border: 1px solid var(--adm-line); margin-bottom: 24px; }
+.adm-card .c-head { padding: 13px 16px; border-bottom: 1px solid var(--adm-line); font-weight: 600; font-size: 14px; }
+.adm-card .c-body { padding: 14px 16px; }
+
+.tbl { width: 100%; border-collapse: collapse; font-size: 13px; background: #fff; }
+.tbl th { text-align: left; padding: 10px 12px; border-bottom: 2px solid #ccc; font-size: 12px; color: #666; font-weight: 600; }
+.tbl td { padding: 10px 12px; border-bottom: 1px solid #eee; vertical-align: middle; }
+.tbl tr:hover td { background: #fafafa; }
+.tbl .r { text-align: right; }
+
+.chart-tabs { display: flex; gap: 4px; margin-bottom: 14px; }
+.chart-tabs button { border: 1px solid #ccc; background: #f1f1f1; padding: 9px 18px; font-size: 13px; cursor: pointer; }
+.chart-tabs button.on { background: #fff; border-bottom-color: #fff; font-weight: 600; }
+.chart { display: flex; align-items: flex-end; gap: 6px; height: 190px; border-bottom: 1px solid #ccc; border-left: 1px solid #ccc; padding: 6px 8px 0; }
+.chart .bar { flex: 1; background: #f8dcc4; border: 1px solid var(--adm-orange); min-height: 2px; position: relative; }
+.chart .bar:hover::after { content: attr(data-v); position: absolute; top: -22px; left: 50%; transform: translateX(-50%); background: #333; color: #fff; font-size: 10px; padding: 2px 6px; white-space: nowrap; }
+.chart-x { display: flex; gap: 6px; padding: 4px 8px 0; }
+.chart-x span { flex: 1; text-align: center; font-size: 10px; color: #888; }
+.chart-stats { display: flex; gap: 40px; margin-top: 18px; flex-wrap: wrap; }
+.chart-stats .s b { display: block; font-size: 13px; font-weight: 600; }
+.chart-stats .s .v { font-size: 19px; color: var(--adm-orange); font-weight: 600; }
+
+.pill-status { display: inline-block; font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 2px; background: #eee; color: #555; text-transform: uppercase; }
+.pill-status.Pendente { background: #fff3cd; color: #8a6d00; }
+.pill-status.Processando { background: #dbeafe; color: #1d4ed8; }
+.pill-status.Enviado { background: #ede9fe; color: #6d28d9; }
+.pill-status.Entregue { background: #dcfce7; color: #15803d; }
+.pill-status.Cancelado, .pill-status.Recusada, .pill-status.bloqueado { background: #fee2e2; color: #b91c1c; }
+.pill-status.aprovado, .pill-status.Aprovada { background: #dcfce7; color: #15803d; }
+.pill-status.pendente, .pill-status.Esboço { background: #fff3cd; color: #8a6d00; }
+.pill-status.admin { background: #ffe1cf; color: var(--adm-orange); }
+.pill-status.cliente { background: #e5e7eb; color: #374151; }
+
+select.inline-status { border: 1px solid #ccc; padding: 5px 8px; font-size: 12px; background: #fff; }
+
+/* modal reaproveita styles.css (.modal-back/.modal) — versão laranja */
+body.admin .modal { border-top-color: var(--adm-orange); }
+body.admin .field input:focus, body.admin .field select:focus, body.admin .field textarea:focus { outline-color: var(--adm-orange); }
+
+@media (max-width: 760px) {
+  .adm-side { width: 64px; }
+  .adm-side a.item { font-size: 8px; }
+  .adm-body { padding: 16px 12px 60px; }
+}

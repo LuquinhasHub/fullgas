@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Fullgas Admin — Painel de Controle</title>
+  <link rel="stylesheet" href="css/styles.css">
+  <link rel="stylesheet" href="css/admin.css">
+</head>
+<body class="admin">
+
+  <!-- ====== sidebar ====== -->
+  <aside class="adm-side">
+    <div class="logo-cell"><span class="g-badge">F</span></div>
+
+    <a class="item" href="#dashboard" data-rota="dashboard">
+      <svg viewBox="0 0 24 24"><path d="M12 14 L17 7"/><path d="M4 18 a8 8 0 0 1 16 0"/></svg>
+      Painel de Controle
+    </a>
+    <a class="item" href="#pedidos" data-rota="pedidos">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M14.5 8.5 c-3.5 -2 -6 1 -3 3 l2 1 c3 2 -1 5 -4 3 M12 5.5 v2 M12 16.5 v2"/></svg>
+      Vendas
+    </a>
+    <a class="item" href="#produtos" data-rota="produtos">
+      <svg viewBox="0 0 24 24"><path d="M12 3 L21 8 V16 L12 21 L3 16 V8 Z"/><path d="M3 8 L12 13 L21 8 M12 13 V21"/></svg>
+      Catálogo
+    </a>
+    <a class="item" href="#usuarios" data-rota="usuarios">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21 a8 8 0 0 1 16 0"/></svg>
+      Clientes
+    </a>
+    <a class="item" href="#reivindicacoes" data-rota="reivindicacoes">
+      <svg viewBox="0 0 24 24"><path d="M12 3 L20 6 V12 c0 5 -4 8 -8 9 c-4 -1 -8 -4 -8 -9 V6 Z"/><path d="M9 12 l2 2 l4 -4"/></svg>
+      Reivindicações
+    </a>
+    <a class="item" href="portal.html">
+      <svg viewBox="0 0 24 24"><path d="M14 5 H5 V19 H14 M10 12 H21 M17 8 l4 4 -4 4"/></svg>
+      Portal
+    </a>
+  </aside>
+
+  <!-- ====== área principal ====== -->
+  <div class="adm-main">
+    <header class="adm-top">
+      <h1 id="adm-h1">Painel de Controle</h1>
+      <span class="bell" id="adm-bell" title="Cadastros pendentes">🔔<span class="dot hidden" id="adm-dot">0</span></span>
+      <span class="usr">👤 <span id="adm-user"></span> <button id="adm-sair" type="button">Sair</button></span>
+    </header>
+
+    <div class="adm-body" id="adm-view"></div>
+  </div>
+
+  <script src="js/config.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/api-adapter.js"></script>
+  <script src="js/admin.js"></script>
+</body>
+</html>
