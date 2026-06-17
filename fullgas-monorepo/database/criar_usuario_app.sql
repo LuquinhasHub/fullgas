@@ -29,6 +29,18 @@ ALTER ROLE db_datareader ADD MEMBER fullgas_app;
 ALTER ROLE db_datawriter ADD MEMBER fullgas_app;
 GO
 
+-- 4) Uso das sequências de numeração (migração 002). NEXT VALUE FOR exige
+--    permissão UPDATE na sequência; db_datawriter não cobre isso. Concedemos
+--    se as sequências já existirem (rode as migrações antes deste script).
+IF EXISTS (SELECT 1 FROM sys.sequences WHERE name = N'Seq_NumeroPedido' AND schema_id = SCHEMA_ID(N'dbo'))
+BEGIN
+    GRANT UPDATE ON OBJECT::dbo.Seq_NumeroPedido    TO fullgas_app;
+    GRANT UPDATE ON OBJECT::dbo.Seq_NumeroFatura    TO fullgas_app;
+    GRANT UPDATE ON OBJECT::dbo.Seq_NumeroEntrega   TO fullgas_app;
+    GRANT UPDATE ON OBJECT::dbo.Seq_RastreioEntrega TO fullgas_app;
+END
+GO
+
 PRINT N'Usuário fullgas_app criado. Use estas credenciais no .env (DB_USER / DB_PASSWORD).';
 GO
 

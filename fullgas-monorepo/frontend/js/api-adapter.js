@@ -61,7 +61,8 @@
     if (!token()) return;
     var prod = apiSync('/produtos'); if (prod) CACHE.products = prod;
     var cat = apiSync('/categorias'); if (cat) CACHE.categories = cat;
-    // (demais coleções entram nas próximas rotas: pedidos, veículos, etc.)
+    var ped = apiSync('/pedidos'); if (ped) CACHE.orders = ped;
+    // (demais coleções entram nas próximas rotas: veículos, reivindicações, etc.)
   }
 
   /* ---------- sobrescreve a camada de dados do FG ---------- */
@@ -114,6 +115,60 @@
   function recarregarProdutos() {
     return api('/produtos').then(function (lista) { CACHE.products = lista; return lista; });
   }
+
+  // Recarrega o cache de pedidos de forma SÍNCRONA (usado logo após criar
+  // pedido ou mudar status, para as telas já renderizarem o estado novo).
+  function recarregarPedidos() {
+    var lista = apiSync('/pedidos'); if (lista) CACHE.orders = lista; return lista;
+  }
+  FG.recarregarPedidos = recarregarPedidos;
+
+  /* ---------- pedidos: substitui o miolo do store.js ---------- */
+  // Cria o pedido a partir da cesta atual. Mantém a assinatura síncrona que o
+  // shop.js espera (usa o retorno {cx,id} na confirmação imediata).
+  FG.createOrder = function () {
+    var s = FG.session(); var cart = FG.cart();
+    if (!s || !cart.length) return null;
+    var itens = cart.map(function (i) { return { sku: i.artigo, quantidade: i.qtd }; });
+    try {
+      var xhr = new XMLHttpRequest();
+      xhr.open('POST', API_BASE + '/pedidos', false);
+      xhr.setRequestHeader('Content-Type', 'application/json');
+      if (token()) xhr.setRequestHeader('Authorization', 'Bearer ' + token());
+      xhr.send(JSON.stringify({ itens: itens }));
+      var data = JSON.parse(xhr.responseText || '{}');
+      if (xhr.status < 200 || xhr.status >= 300) {
+        FG.toast(data.erro || 'Não foi possível finalizar o pedido.');
+        return null;
+      }
+      FG.cartClear();
+      recarregarPedidos();                       // pedido novo entra no histórico
+      var prod = apiSync('/produtos'); if (prod) CACHE.products = prod; // estoque baixou
+      return data;
+    } catch (e) {
+      FG.toast('Servidor indisponível.');
+      return null;
+    }
+  };
+
+  // Muda o status do pedido (admin). Ao enviar, a API gera entrega + fatura.
+  FG.setOrderStatus = function (id, status) {
+    try {
+      var xhr = new XMLHttpRequest();
+      xhr.open('PUT', API_BASE + '/pedidos/' + encodeURIComponent(id) + '/status', false);
+      xhr.setRequestHeader('Content-Type', 'application/json');
+      if (token()) xhr.setRequestHeader('Authorization', 'Bearer ' + token());
+      xhr.send(JSON.stringify({ status: status }));
+      var data = JSON.parse(xhr.responseText || '{}');
+      if (xhr.status < 200 || xhr.status >= 300) {
+        FG.toast(data.erro || 'Não foi possível mudar o status.');
+        return;
+      }
+      recarregarPedidos();
+    } catch (e) {
+      FG.toast('Servidor indisponível.');
+    }
+  };
 
   // Expõe helpers para depuração no console.
   FG._api = api;

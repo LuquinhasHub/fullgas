@@ -8,6 +8,7 @@ import 'dotenv/config';
 import { getPool } from './db.js';
 import authRoutes from './routes/auth.routes.js';
 import produtosRoutes from './routes/produtos.routes.js';
+import pedidosRoutes from './routes/pedidos.routes.js';
 
 const app = express();
 
@@ -26,6 +27,7 @@ app.get('/api/health', (_req, res) => res.json({ ok: true, ts: new Date().toISOS
 // Rotas
 app.use('/api/auth', authRoutes);
 app.use('/api', produtosRoutes);
+app.use('/api', pedidosRoutes);
 
 // 404
 app.use((req, res) => res.status(404).json({ erro: 'Rota não encontrada.' }));
