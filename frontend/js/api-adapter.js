@@ -165,6 +165,9 @@
         return;
       }
       recarregarPedidos();
+      // Mudar status pode mexer no estoque (cancelar devolve as quantidades ao
+      // estoque). Recarrega os produtos para a tela refletir o valor atual.
+      var prod = apiSync('/produtos'); if (prod) CACHE.products = prod;
     } catch (e) {
       FG.toast('Servidor indisponível.');
     }
