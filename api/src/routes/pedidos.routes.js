@@ -292,6 +292,27 @@ router.put('/pedidos/:numero/status', requireAuth, requireAdmin, async (req, res
                   FROM dbo.Produto p
                   JOIN dbo.PedidoItem pi ON pi.ProdutoId = p.ProdutoId
                  WHERE pi.PedidoId = @pid`);
+
+      // Estorna os documentos gerados quando o pedido foi enviado: marca a(s)
+      // fatura(s) e entrega(s) ligadas como 'Anulada' (preserva o histórico em
+      // vez de apagar). Se o pedido nunca foi enviado, não há nada ligado e os
+      // UPDATEs afetam 0 linhas.
+      await new sql.Request(tx)
+        .input('pid', sql.Int, ped.PedidoId)
+        .query(`UPDATE f
+                   SET f.Status = 'Anulada'
+                  FROM dbo.Fatura f
+                  JOIN dbo.Entrega e ON e.FaturaId = f.FaturaId
+                  JOIN dbo.EntregaPedido ep ON ep.EntregaId = e.EntregaId
+                 WHERE ep.PedidoId = @pid`);
+
+      await new sql.Request(tx)
+        .input('pid', sql.Int, ped.PedidoId)
+        .query(`UPDATE e
+                   SET e.Status = 'Anulada'
+                  FROM dbo.Entrega e
+                  JOIN dbo.EntregaPedido ep ON ep.EntregaId = e.EntregaId
+                 WHERE ep.PedidoId = @pid`);
     }
 
     await tx.commit();
