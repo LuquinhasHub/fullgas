@@ -161,15 +161,16 @@
       xhr.send(JSON.stringify({ status: status }));
       var data = JSON.parse(xhr.responseText || '{}');
       if (xhr.status < 200 || xhr.status >= 300) {
-        FG.toast(data.erro || 'Não foi possível mudar o status.');
-        return;
+        // Ex.: 409 quando o pedido já está Entregue/Cancelado (terminal).
+        return { ok: false, msg: data.erro || 'Não foi possível mudar o status.' };
       }
       recarregarPedidos();
       // Mudar status pode mexer no estoque (cancelar devolve as quantidades ao
       // estoque). Recarrega os produtos para a tela refletir o valor atual.
       var prod = apiSync('/produtos'); if (prod) CACHE.products = prod;
+      return { ok: true, status: status };
     } catch (e) {
-      FG.toast('Servidor indisponível.');
+      return { ok: false, msg: 'Servidor indisponível.' };
     }
   };
 

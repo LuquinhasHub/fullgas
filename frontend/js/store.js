@@ -445,7 +445,9 @@
     setOrderStatus: function (id, status) {
       var db = FG.db();
       var o = db.orders.find(function (x) { return x.id === id; });
-      if (!o) return;
+      if (!o) return { ok: false, msg: 'Pedido não encontrado.' };
+      if (o.status === 'Entregue' || o.status === 'Cancelado')
+        return { ok: false, msg: 'Pedido ' + o.status.toLowerCase() + ' não pode mudar de status.' };
       o.status = status;
       if (status === 'Enviado' && !o.entrega) {
         var fat = '17260' + pad(17700 + db.invoices.length, 5);
@@ -522,11 +524,11 @@
       document.body.appendChild(a); a.click(); a.remove();
     },
 
-    toast: function (msg) {
+    toast: function (msg, type) {
       var box = document.getElementById('toast');
       if (!box) { box = document.createElement('div'); box.id = 'toast'; document.body.appendChild(box); }
       var el = document.createElement('div');
-      el.className = 'toast-item'; el.textContent = msg;
+      el.className = 'toast-item' + (type ? ' toast-' + type : ''); el.textContent = msg;
       box.appendChild(el);
       setTimeout(function () { el.classList.add('out'); setTimeout(function () { el.remove(); }, 400); }, 2600);
     },

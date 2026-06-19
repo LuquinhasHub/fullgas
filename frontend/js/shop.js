@@ -364,7 +364,7 @@
           return '<div class="order-card"><div class="oc-head">' +
             '<span><b>' + o.cx + ' / ' + o.id + '</b></span>' +
             '<span>' + FG.fmtDateTime(o.data) + '</span>' +
-            '<span>' + esc(o.status) + '</span>' +
+            '<span><span class="pill-status ' + esc(o.status) + '">' + esc(o.status) + '</span></span>' +
             '<span style="margin-left:auto;"><b>' + FG.fmtMoney(o.total) + '</b></span></div>' +
             '<div class="oc-items">' + o.itens.map(function (it) {
               return '<div>' + it.qtd + '× <a href="#/produto/' + it.artigo + '">' + esc(it.nome) + '</a> ' +

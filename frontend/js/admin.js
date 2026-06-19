@@ -246,6 +246,8 @@
      PEDIDOS
      ========================================================= */
   var STATUS = ['Pendente', 'Processando', 'Enviado', 'Entregue', 'Cancelado'];
+  // Status terminais: uma vez aqui, o pedido não pode mais mudar de status.
+  var STATUS_TERMINAIS = ['Entregue', 'Cancelado'];
 
   function renderPedidos() {
     h1.textContent = 'Gestão de pedidos'; setOn('pedidos');
@@ -262,9 +264,13 @@
           '<td>' + esc(o.empresa) + '<br><span class="muted">' + esc(o.usuario) + '</span></td>' +
           '<td>' + FG.fmtDateTime(o.data) + '</td>' +
           '<td class="r">' + FG.fmtMoney(o.total) + '</td>' +
-          '<td>' + pill(o.status) + '<br><select class="inline-status" data-id="' + o.id + '" style="margin-top:6px;">' +
-          STATUS.map(function (s) { return '<option' + (s === o.status ? ' selected' : '') + '>' + s + '</option>'; }).join('') +
-          '</select></td>' +
+          '<td>' + pill(o.status) +
+          (STATUS_TERMINAIS.indexOf(o.status) >= 0
+            ? '<br><span class="muted" style="font-size:11px;">Pedido ' + esc(o.status.toLowerCase()) + ' — status final.</span>'
+            : '<br><select class="inline-status" data-id="' + o.id + '" style="margin-top:6px;">' +
+              STATUS.map(function (s) { return '<option' + (s === o.status ? ' selected' : '') + '>' + s + '</option>'; }).join('') +
+              '</select>') +
+          '</td>' +
           '<td><button class="btn-line btn-mini od-open" data-i="' + i + '">Itens</button></td></tr>';
       }).join('') + '</tbody></table></div></div>';
 
@@ -275,8 +281,12 @@
     });
     Array.prototype.forEach.call(view.querySelectorAll('select.inline-status'), function (sel) {
       sel.addEventListener('change', function () {
-        FG.setOrderStatus(sel.getAttribute('data-id'), sel.value);
-        FG.toast('Status atualizado' + (sel.value === 'Enviado' ? ' — entrega e fatura geradas.' : '.'));
+        var res = FG.setOrderStatus(sel.getAttribute('data-id'), sel.value);
+        if (res && res.ok === false) {
+          FG.toast(res.msg || 'Não foi possível mudar o status.', 'erro');
+        } else {
+          FG.toast('Status atualizado' + (sel.value === 'Enviado' ? ' — entrega e fatura geradas.' : '.'));
+        }
         renderPedidos();
       });
     });

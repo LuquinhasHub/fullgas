@@ -109,7 +109,21 @@ h1, h2, h3 { margin: 0 0 .5em; }
   box-shadow: var(--shadow); font-size: 13px; max-width: 320px; animation: tin .25s ease;
 }
 .toast-item.out { opacity: 0; transition: opacity .4s; }
+/* Variante de erro: fundo vermelho para sinalizar falha (ex.: status que não pode mudar). */
+.toast-item.toast-erro { background: #b91c1c; border-left-color: #7f1010; }
 @keyframes tin { from { transform: translateY(8px); opacity: 0; } }
+
+/* ---------- badges de status (compartilhado: admin e loja) ---------- */
+.pill-status { display: inline-block; font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 2px; background: #eee; color: #555; text-transform: uppercase; }
+.pill-status.Pendente { background: #fff3cd; color: #8a6d00; }
+.pill-status.Processando { background: #dbeafe; color: #1d4ed8; }
+.pill-status.Enviado { background: #ede9fe; color: #6d28d9; }
+.pill-status.Entregue { background: #dcfce7; color: #15803d; }
+.pill-status.Cancelado, .pill-status.Recusada, .pill-status.bloqueado { background: #fee2e2; color: #b91c1c; }
+.pill-status.aprovado, .pill-status.Aprovada { background: #dcfce7; color: #15803d; }
+.pill-status.pendente, .pill-status.Esboço { background: #fff3cd; color: #8a6d00; }
+.pill-status.admin { background: #ffe1cf; color: var(--adm-orange); }
+.pill-status.cliente { background: #e5e7eb; color: #374151; }
 
 /* ---------- modal ---------- */
 .modal-back {
