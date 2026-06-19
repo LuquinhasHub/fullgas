@@ -280,6 +280,20 @@ router.put('/pedidos/:numero/status', requireAuth, requireAdmin, async (req, res
       }
     }
 
+    if (novo === 'Cancelado') {
+      // Devolve ao estoque a quantidade de cada item do pedido. Seguro contra
+      // dupla devolução: 'Cancelado' é status terminal (STATUS_FINAIS), então o
+      // guard no início rejeita cancelar um pedido já cancelado antes de chegar aqui.
+      await new sql.Request(tx)
+        .input('pid', sql.Int, ped.PedidoId)
+        .query(`UPDATE p
+                   SET p.Estoque = p.Estoque + pi.Quantidade,
+                       p.AtualizadoEm = SYSUTCDATETIME()
+                  FROM dbo.Produto p
+                  JOIN dbo.PedidoItem pi ON pi.ProdutoId = p.ProdutoId
+                 WHERE pi.PedidoId = @pid`);
+    }
+
     await tx.commit();
     res.json({ ok: true, status: novo });
   } catch (e) {
