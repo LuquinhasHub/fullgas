@@ -1,7 +1,9 @@
 // ============================================================
-// Rotas de pedidos (e itens). Espelha o que o store.js fazia
-// no front: criar pedido a partir da cesta, listar, detalhar e
-// mudar status (gerando entrega + fatura ao enviar).
+// Rotas de pedidos (e itens).
+// Cria pedido a partir da cesta (aceitando itens em pré-venda/backorder
+// quando não há estoque), lista, detalha e controla o envio — que pode ser
+// segmentado por escopo (itens normais vs. itens em pré-venda), gerando uma
+// Entrega + Fatura próprias por envio.
 // ============================================================
 import { Router } from 'express';
 import { query, getPool, sql } from '../db.js';
@@ -13,35 +15,56 @@ const router = Router();
 const STATUS_VALIDOS = ['Pendente', 'Processando', 'Enviado', 'Entregue', 'Cancelado'];
 // Status terminais: uma vez aqui, o pedido não muda mais.
 const STATUS_FINAIS = ['Entregue', 'Cancelado'];
+// Escopos de envio aceitos.
+const ESCOPOS = ['normal', 'backorder', 'tudo'];
 
 function toIso(d) {
   return d instanceof Date ? d.toISOString() : (d || null);
 }
 
-// Monta a lista de pedidos no MESMO formato que o store.js devolvia, para o
-// front (portal/shop/admin) não precisar mudar: { id, cx, data, usuario,
-// empresa, itens:[{artigo,nome,preco,qtd}], total, status }.
+// Snapshot de um item no formato que o front espera, enriquecido com os campos
+// de envio parcial e pré-venda.
+function montarItem(r) {
+  return {
+    itemId: r.PedidoItemId,
+    artigo: r.Sku,
+    nome: r.NomeProduto,
+    preco: Number(r.PrecoUnitario),
+    qtd: r.Quantidade,
+    qtdEnviada: r.QuantidadeEnviada,
+    backorder: !!r.EmBackorder
+  };
+}
+
+// Lista de pedidos no formato do store.js + progresso de envio por pedido.
 function montarPedidos(pedidoRows, itemRows) {
   const porPedido = new Map();
   for (const r of itemRows) {
     if (!porPedido.has(r.PedidoId)) porPedido.set(r.PedidoId, []);
-    porPedido.get(r.PedidoId).push({
-      artigo: r.Sku,
-      nome: r.NomeProduto,
-      preco: Number(r.PrecoUnitario),
-      qtd: r.Quantidade
-    });
+    porPedido.get(r.PedidoId).push(montarItem(r));
   }
-  return pedidoRows.map(p => ({
-    id: p.NumeroPedido,
-    cx: p.CodigoCx,
-    data: toIso(p.DataPedido),
-    usuario: p.UsuarioEmail,
-    empresa: p.Empresa,
-    itens: porPedido.get(p.PedidoId) || [],
-    total: Number(p.Total),
-    status: p.Status
-  }));
+  return pedidoRows.map(p => {
+    const itens = porPedido.get(p.PedidoId) || [];
+    const somaQtd = itens.reduce((s, i) => s + i.qtd, 0);
+    const somaEnv = itens.reduce((s, i) => s + i.qtdEnviada, 0);
+    return {
+      id: p.NumeroPedido,
+      cx: p.CodigoCx,
+      data: toIso(p.DataPedido),
+      usuario: p.UsuarioEmail,
+      empresa: p.Empresa,
+      itens,
+      total: Number(p.Total),
+      status: p.Status,
+      progresso: {
+        qtd: somaQtd,
+        enviada: somaEnv,
+        pct: somaQtd ? Math.round((somaEnv / somaQtd) * 100) : 0,
+        parcial: somaEnv > 0 && somaEnv < somaQtd
+      },
+      temBackorder: itens.some(i => i.backorder)
+    };
+  });
 }
 
 const SELECT_PEDIDO =
@@ -51,9 +74,45 @@ const SELECT_PEDIDO =
      JOIN dbo.Usuario u ON u.UsuarioId = p.UsuarioId
      JOIN dbo.Empresa e ON e.EmpresaId = p.EmpresaId`;
 
+const SELECT_ITENS =
+  `SELECT pi.PedidoId, pi.PedidoItemId, pi.Sku, pi.NomeProduto, pi.PrecoUnitario,
+          pi.Quantidade, pi.QuantidadeEnviada, pi.EmBackorder`;
+
+// Gera Fatura + Entrega + vínculos (PedidoFatura, EntregaPedido) + rastreio para
+// um envio já decidido, com o total informado. Retorna os números gerados.
+async function gerarEntregaFatura(tx, pedidoId, empresaId, total) {
+  const fat = await new sql.Request(tx)
+    .input('eid', sql.Int, empresaId)
+    .input('val', sql.Decimal(12, 2), total)
+    .query(`INSERT INTO dbo.Fatura (NumeroFatura, Tipo, EmpresaId, Valor)
+            OUTPUT inserted.FaturaId, inserted.NumeroFatura
+            VALUES (CAST(NEXT VALUE FOR dbo.Seq_NumeroFatura AS VARCHAR(24)), 'Fatura', @eid, @val)`);
+  const { FaturaId, NumeroFatura } = fat.recordset[0];
+
+  await new sql.Request(tx)
+    .input('pid', sql.Int, pedidoId).input('fid', sql.Int, FaturaId)
+    .query('INSERT INTO dbo.PedidoFatura (PedidoId, FaturaId) VALUES (@pid, @fid)');
+
+  const ent = await new sql.Request(tx)
+    .input('eid', sql.Int, empresaId).input('fid', sql.Int, FaturaId)
+    .query(`INSERT INTO dbo.Entrega (NumeroEntrega, EmpresaId, FaturaId)
+            OUTPUT inserted.EntregaId, inserted.NumeroEntrega
+            VALUES (RIGHT('0000000000' + CAST(NEXT VALUE FOR dbo.Seq_NumeroEntrega AS VARCHAR(20)), 10), @eid, @fid)`);
+  const { EntregaId, NumeroEntrega } = ent.recordset[0];
+
+  await new sql.Request(tx)
+    .input('entid', sql.Int, EntregaId).input('pid', sql.Int, pedidoId)
+    .query('INSERT INTO dbo.EntregaPedido (EntregaId, PedidoId) VALUES (@entid, @pid)');
+
+  await new sql.Request(tx)
+    .input('entid', sql.Int, EntregaId)
+    .query(`INSERT INTO dbo.RastreioEntrega (EntregaId, Codigo)
+            VALUES (@entid, '000' + RIGHT('000000' + CAST(NEXT VALUE FOR dbo.Seq_RastreioEntrega AS VARCHAR(20)), 6))`);
+
+  return { numeroFatura: NumeroFatura, numeroEntrega: NumeroEntrega };
+}
+
 // GET /api/pedidos — cliente vê os da sua empresa; admin vê todos.
-// O filtro é por EmpresaId; o UsuarioId fica como auditoria (o front ainda
-// separa "meus" x "da empresa" pelo e-mail/razão que vão em cada pedido).
 router.get('/pedidos', requireAuth, async (req, res, next) => {
   try {
     const admin = req.user.papel === 'admin';
@@ -65,44 +124,111 @@ router.get('/pedidos', requireAuth, async (req, res, next) => {
       { eid }
     );
     const itemRows = await query(
-      `SELECT pi.PedidoId, pi.Sku, pi.NomeProduto, pi.PrecoUnitario, pi.Quantidade
-         FROM dbo.PedidoItem pi
-         JOIN dbo.Pedido p ON p.PedidoId = pi.PedidoId
-        WHERE (@eid IS NULL OR p.EmpresaId = @eid)
-        ORDER BY pi.PedidoItemId`,
+      SELECT_ITENS +
+      `   FROM dbo.PedidoItem pi
+          JOIN dbo.Pedido p ON p.PedidoId = pi.PedidoId
+         WHERE (@eid IS NULL OR p.EmpresaId = @eid)
+         ORDER BY pi.PedidoItemId`,
       { eid }
     );
     res.json(montarPedidos(pedidoRows, itemRows));
   } catch (e) { next(e); }
 });
 
-// GET /api/pedidos/:numero — detalhe + itens (mesmo escopo da listagem).
+// GET /api/pedidos/:numero — detalhe + itens (com estoque atual de cada item)
+// + entregas/faturas ligadas + progresso de envio.
 router.get('/pedidos/:numero', requireAuth, async (req, res, next) => {
   try {
     const admin = req.user.papel === 'admin';
     const eid = admin ? null : req.user.empresaId;
+    const num = req.params.numero;
 
     const pedidoRows = await query(
       SELECT_PEDIDO + ' WHERE p.NumeroPedido = @num AND (@eid IS NULL OR p.EmpresaId = @eid)',
-      { num: req.params.numero, eid }
+      { num, eid }
     );
     if (!pedidoRows.length) return res.status(404).json({ erro: 'Pedido não encontrado.' });
+    const p = pedidoRows[0];
 
     const itemRows = await query(
-      `SELECT pi.PedidoId, pi.Sku, pi.NomeProduto, pi.PrecoUnitario, pi.Quantidade
+      SELECT_ITENS + `, pr.Estoque AS EstoqueAtual
          FROM dbo.PedidoItem pi
          JOIN dbo.Pedido p ON p.PedidoId = pi.PedidoId
+         LEFT JOIN dbo.Produto pr ON pr.ProdutoId = pi.ProdutoId
         WHERE p.NumeroPedido = @num
         ORDER BY pi.PedidoItemId`,
-      { num: req.params.numero }
+      { num }
     );
-    res.json(montarPedidos(pedidoRows, itemRows)[0]);
+    const itens = itemRows.map(r => Object.assign(montarItem(r), {
+      estoque: r.EstoqueAtual == null ? null : r.EstoqueAtual
+    }));
+
+    const entregaRows = await query(
+      `SELECT e.NumeroEntrega, e.DataEntrega, e.Status AS EntregaStatus,
+              f.NumeroFatura, f.Valor AS FaturaValor, f.Status AS FaturaStatus
+         FROM dbo.EntregaPedido ep
+         JOIN dbo.Entrega e ON e.EntregaId = ep.EntregaId
+         LEFT JOIN dbo.Fatura f ON f.FaturaId = e.FaturaId
+         JOIN dbo.Pedido p ON p.PedidoId = ep.PedidoId
+        WHERE p.NumeroPedido = @num
+        ORDER BY e.EntregaId`,
+      { num }
+    );
+    const rastreioRows = await query(
+      `SELECT e.NumeroEntrega, r.Codigo
+         FROM dbo.RastreioEntrega r
+         JOIN dbo.Entrega e ON e.EntregaId = r.EntregaId
+         JOIN dbo.EntregaPedido ep ON ep.EntregaId = e.EntregaId
+         JOIN dbo.Pedido p ON p.PedidoId = ep.PedidoId
+        WHERE p.NumeroPedido = @num`,
+      { num }
+    );
+    const rastPorEnt = {};
+    for (const r of rastreioRows) {
+      (rastPorEnt[r.NumeroEntrega] = rastPorEnt[r.NumeroEntrega] || []).push(r.Codigo);
+    }
+    const entregas = entregaRows.map(e => ({
+      numero: e.NumeroEntrega,
+      data: toIso(e.DataEntrega),
+      status: e.EntregaStatus,
+      fatura: e.NumeroFatura,
+      faturaValor: e.FaturaValor == null ? null : Number(e.FaturaValor),
+      faturaStatus: e.FaturaStatus,
+      rastreios: rastPorEnt[e.NumeroEntrega] || []
+    }));
+    const faturas = entregaRows
+      .filter(e => e.NumeroFatura)
+      .map(e => ({ numero: e.NumeroFatura, valor: Number(e.FaturaValor), status: e.FaturaStatus }));
+
+    const somaQtd = itens.reduce((s, i) => s + i.qtd, 0);
+    const somaEnv = itens.reduce((s, i) => s + i.qtdEnviada, 0);
+
+    res.json({
+      id: p.NumeroPedido,
+      cx: p.CodigoCx,
+      data: toIso(p.DataPedido),
+      usuario: p.UsuarioEmail,
+      empresa: p.Empresa,
+      total: Number(p.Total),
+      status: p.Status,
+      itens,
+      entregas,
+      faturas,
+      progresso: {
+        qtd: somaQtd,
+        enviada: somaEnv,
+        pct: somaQtd ? Math.round((somaEnv / somaQtd) * 100) : 0,
+        parcial: somaEnv > 0 && somaEnv < somaQtd
+      },
+      temBackorder: itens.some(i => i.backorder)
+    });
   } catch (e) { next(e); }
 });
 
 // POST /api/pedidos — cria a partir da cesta: { itens: [{ sku, quantidade }] }.
-// Tudo em transação: lê preço/nome atuais (sem desconto), grava snapshot e
-// baixa estoque de forma atômica (409 se faltar estoque para qualquer item).
+// Itens com estoque suficiente baixam estoque normalmente (EmBackorder=0). Itens
+// sem estoque entram em pré-venda (EmBackorder=1) SEM decrementar — o pedido
+// inteiro é aceito, nunca rejeitado por falta de estoque. Tudo em transação.
 router.post('/pedidos', requireAuth, async (req, res, next) => {
   const itensReq = Array.isArray(req.body?.itens) ? req.body.itens : [];
   if (!itensReq.length) return res.status(400).json({ erro: 'A cesta está vazia.' });
@@ -125,8 +251,7 @@ router.post('/pedidos', requireAuth, async (req, res, next) => {
     const itensSnap = [];
     let total = 0;
     for (const [skuItem, qtd] of merged) {
-      // Baixa atômica: só decrementa se houver estoque suficiente. Devolve o
-      // snapshot (preço/nome atuais) na mesma operação.
+      // Tenta a baixa atômica. Se houver estoque, decrementa e o item é normal.
       const upd = await new sql.Request(tx)
         .input('sku', sql.VarChar(40), skuItem)
         .input('qtd', sql.Int, qtd)
@@ -135,26 +260,31 @@ router.post('/pedidos', requireAuth, async (req, res, next) => {
                 OUTPUT inserted.ProdutoId, inserted.Nome, inserted.Preco
                  WHERE Sku = @sku AND Estoque >= @qtd`);
 
-      if (!upd.recordset.length) {
-        // Diferencia SKU inexistente de estoque insuficiente.
-        const existe = await new sql.Request(tx)
+      let row, backorder;
+      if (upd.recordset.length) {
+        row = upd.recordset[0];
+        backorder = false;
+      } else {
+        // Sem estoque: aceita em pré-venda (não decrementa). Confirma que o SKU
+        // existe — só aí é pré-venda; senão é erro de produto inexistente.
+        const prod = await new sql.Request(tx)
           .input('sku', sql.VarChar(40), skuItem)
-          .query('SELECT 1 FROM dbo.Produto WHERE Sku = @sku');
-        await tx.rollback();
-        if (!existe.recordset.length)
+          .query('SELECT ProdutoId, Nome, Preco FROM dbo.Produto WHERE Sku = @sku');
+        if (!prod.recordset.length) {
+          await tx.rollback();
           return res.status(400).json({ erro: 'Produto não encontrado: ' + skuItem });
-        return res.status(409).json({ erro: 'Estoque insuficiente para o produto ' + skuItem + '.' });
+        }
+        row = prod.recordset[0];
+        backorder = true;
       }
 
-      const row = upd.recordset[0];
       const preco = Number(row.Preco);
-      itensSnap.push({ produtoId: row.ProdutoId, sku: skuItem, nome: row.Nome, preco, qtd });
+      itensSnap.push({ produtoId: row.ProdutoId, sku: skuItem, nome: row.Nome, preco, qtd, backorder });
       total += preco * qtd;
     }
 
     // Numeração no banco. NumeroPedido por SEQUENCE global ('0005' + 6 dígitos).
     // CodigoCx: 'CX' + AAMMDD + 7 dígitos sequenciais que reiniciam por dia.
-    // O UPDLOCK/HOLDLOCK serializa inserções do mesmo dia (evita corrida).
     const num = await new sql.Request(tx).query(`
       DECLARE @now DATETIME2(0) = SYSUTCDATETIME();
       DECLARE @dia DATE = CAST(@now AS DATE);
@@ -188,15 +318,16 @@ router.post('/pedidos', requireAuth, async (req, res, next) => {
         .input('nome', sql.NVarChar(200), it.nome)
         .input('preco', sql.Decimal(12, 2), it.preco)
         .input('qtd', sql.Int, it.qtd)
-        .query(`INSERT INTO dbo.PedidoItem (PedidoId, ProdutoId, Sku, NomeProduto, PrecoUnitario, Quantidade)
-                VALUES (@pid, @prod, @sku, @nome, @preco, @qtd)`);
+        .input('back', sql.Bit, it.backorder ? 1 : 0)
+        .query(`INSERT INTO dbo.PedidoItem (PedidoId, ProdutoId, Sku, NomeProduto, PrecoUnitario, Quantidade, EmBackorder)
+                VALUES (@pid, @prod, @sku, @nome, @preco, @qtd, @back)`);
     }
 
     await tx.commit();
 
-    // Razão social da empresa para devolver o pedido completo (o front filtra
-    // por empresa). Leitura fora da transação, já confirmada.
     const emp = await query('SELECT RazaoSocial FROM dbo.Empresa WHERE EmpresaId = @id', { id: req.user.empresaId });
+    const itensEmBackorder = itensSnap.filter(i => i.backorder)
+      .map(i => ({ sku: i.sku, nome: i.nome, quantidade: i.qtd }));
 
     res.status(201).json({
       id: NumeroPedido,
@@ -204,7 +335,8 @@ router.post('/pedidos', requireAuth, async (req, res, next) => {
       data: toIso(Agora),
       usuario: req.user.email,
       empresa: emp[0]?.RazaoSocial || '',
-      itens: itensSnap.map(i => ({ artigo: i.sku, nome: i.nome, preco: i.preco, qtd: i.qtd })),
+      itens: itensSnap.map(i => ({ artigo: i.sku, nome: i.nome, preco: i.preco, qtd: i.qtd, backorder: i.backorder })),
+      itensEmBackorder,
       total,
       status: 'Pendente'
     });
@@ -214,13 +346,29 @@ router.post('/pedidos', requireAuth, async (req, res, next) => {
   }
 });
 
-// PUT /api/pedidos/:numero/status (admin) — transição livre, exceto saindo de
-// um status terminal. Ao virar 'Enviado', gera Entrega + Fatura ligadas (mesma
-// lógica do setOrderStatus do store.js). Idempotente: não duplica entrega.
+// PUT /api/pedidos/:numero/status (admin) — controla status e envio.
+// Body: { status?, escopo? }.
+//  - status 'Cancelado'  -> cancela: devolve ao estoque só o que foi baixado
+//    (itens normais: Quantidade; pré-venda: só a parte já enviada) e anula as
+//    faturas/entregas geradas.
+//  - escopo presente OU status 'Enviado' -> ENVIO segmentado: gera Entrega +
+//    Fatura próprias cobrindo apenas os itens do escopo que ainda faltam enviar
+//    (pré-venda só envia o que já tem estoque, baixando-o agora). O status do
+//    pedido vira 'Enviado' se tudo foi enviado, senão 'Processando'.
+//  - demais status (Pendente/Processando/Entregue) -> apenas muda o status.
 router.put('/pedidos/:numero/status', requireAuth, requireAdmin, async (req, res, next) => {
-  const novo = String(req.body?.status || '').trim();
-  if (!STATUS_VALIDOS.includes(novo))
+  const status = String(req.body?.status || '').trim();
+  let escopo = String(req.body?.escopo || '').trim().toLowerCase();
+
+  if (escopo && !ESCOPOS.includes(escopo))
+    return res.status(400).json({ erro: 'Escopo inválido.' });
+  if (status && !STATUS_VALIDOS.includes(status))
     return res.status(400).json({ erro: 'Status inválido.' });
+  if (!status && !escopo)
+    return res.status(400).json({ erro: 'Informe um status ou um escopo de envio.' });
+
+  const isShip = !!escopo || status === 'Enviado';
+  if (isShip && !escopo) escopo = 'tudo';
 
   const pool = await getPool();
   const tx = new sql.Transaction(pool);
@@ -229,7 +377,7 @@ router.put('/pedidos/:numero/status', requireAuth, requireAdmin, async (req, res
 
     const cur = await new sql.Request(tx)
       .input('num', sql.VarChar(20), req.params.numero)
-      .query('SELECT PedidoId, Status, Total, EmpresaId FROM dbo.Pedido WHERE NumeroPedido = @num');
+      .query('SELECT PedidoId, Status, EmpresaId FROM dbo.Pedido WHERE NumeroPedido = @num');
     if (!cur.recordset.length) {
       await tx.rollback();
       return res.status(404).json({ erro: 'Pedido não encontrado.' });
@@ -240,83 +388,164 @@ router.put('/pedidos/:numero/status', requireAuth, requireAdmin, async (req, res
       return res.status(409).json({ erro: `Pedido ${ped.Status.toLowerCase()} não pode mudar de status.` });
     }
 
-    await new sql.Request(tx)
-      .input('num', sql.VarChar(20), req.params.numero)
-      .input('st', sql.VarChar(14), novo)
-      .query('UPDATE dbo.Pedido SET Status = @st, AtualizadoEm = SYSUTCDATETIME() WHERE NumeroPedido = @num');
-
-    if (novo === 'Enviado') {
-      // Idempotência: só gera entrega/fatura se ainda não houver entrega ligada.
-      const jaTem = await new sql.Request(tx)
-        .input('pid', sql.Int, ped.PedidoId)
-        .query('SELECT 1 FROM dbo.EntregaPedido WHERE PedidoId = @pid');
-
-      if (!jaTem.recordset.length) {
-        const fat = await new sql.Request(tx)
-          .input('eid', sql.Int, ped.EmpresaId)
-          .input('val', sql.Decimal(12, 2), ped.Total)
-          .query(`INSERT INTO dbo.Fatura (NumeroFatura, Tipo, EmpresaId, Valor)
-                  OUTPUT inserted.FaturaId
-                  VALUES (CAST(NEXT VALUE FOR dbo.Seq_NumeroFatura AS VARCHAR(24)), 'Fatura', @eid, @val)`);
-        const faturaId = fat.recordset[0].FaturaId;
-
-        const ent = await new sql.Request(tx)
-          .input('eid', sql.Int, ped.EmpresaId)
-          .input('fid', sql.Int, faturaId)
-          .query(`INSERT INTO dbo.Entrega (NumeroEntrega, EmpresaId, FaturaId)
-                  OUTPUT inserted.EntregaId
-                  VALUES (RIGHT('0000000000' + CAST(NEXT VALUE FOR dbo.Seq_NumeroEntrega AS VARCHAR(20)), 10), @eid, @fid)`);
-        const entregaId = ent.recordset[0].EntregaId;
-
-        await new sql.Request(tx)
-          .input('entid', sql.Int, entregaId)
-          .input('pid', sql.Int, ped.PedidoId)
-          .query('INSERT INTO dbo.EntregaPedido (EntregaId, PedidoId) VALUES (@entid, @pid)');
-
-        await new sql.Request(tx)
-          .input('entid', sql.Int, entregaId)
-          .query(`INSERT INTO dbo.RastreioEntrega (EntregaId, Codigo)
-                  VALUES (@entid, '000' + RIGHT('000000' + CAST(NEXT VALUE FOR dbo.Seq_RastreioEntrega AS VARCHAR(20)), 6))`);
-      }
-    }
-
-    if (novo === 'Cancelado') {
-      // Devolve ao estoque a quantidade de cada item do pedido. Seguro contra
-      // dupla devolução: 'Cancelado' é status terminal (STATUS_FINAIS), então o
-      // guard no início rejeita cancelar um pedido já cancelado antes de chegar aqui.
+    // ---- Cancelamento ----
+    if (status === 'Cancelado') {
       await new sql.Request(tx)
         .input('pid', sql.Int, ped.PedidoId)
         .query(`UPDATE p
-                   SET p.Estoque = p.Estoque + pi.Quantidade,
+                   SET p.Estoque = p.Estoque +
+                       CASE WHEN pi.EmBackorder = 0 THEN pi.Quantidade ELSE pi.QuantidadeEnviada END,
                        p.AtualizadoEm = SYSUTCDATETIME()
                   FROM dbo.Produto p
                   JOIN dbo.PedidoItem pi ON pi.ProdutoId = p.ProdutoId
                  WHERE pi.PedidoId = @pid`);
 
-      // Estorna os documentos gerados quando o pedido foi enviado: marca a(s)
-      // fatura(s) e entrega(s) ligadas como 'Anulada' (preserva o histórico em
-      // vez de apagar). Se o pedido nunca foi enviado, não há nada ligado e os
-      // UPDATEs afetam 0 linhas.
       await new sql.Request(tx)
         .input('pid', sql.Int, ped.PedidoId)
-        .query(`UPDATE f
-                   SET f.Status = 'Anulada'
+        .query(`UPDATE f SET f.Status = 'Anulada'
                   FROM dbo.Fatura f
                   JOIN dbo.Entrega e ON e.FaturaId = f.FaturaId
                   JOIN dbo.EntregaPedido ep ON ep.EntregaId = e.EntregaId
                  WHERE ep.PedidoId = @pid`);
-
       await new sql.Request(tx)
         .input('pid', sql.Int, ped.PedidoId)
-        .query(`UPDATE e
-                   SET e.Status = 'Anulada'
+        .query(`UPDATE e SET e.Status = 'Anulada'
                   FROM dbo.Entrega e
                   JOIN dbo.EntregaPedido ep ON ep.EntregaId = e.EntregaId
                  WHERE ep.PedidoId = @pid`);
+
+      await new sql.Request(tx)
+        .input('pid', sql.Int, ped.PedidoId)
+        .query("UPDATE dbo.Pedido SET Status = 'Cancelado', AtualizadoEm = SYSUTCDATETIME() WHERE PedidoId = @pid");
+
+      await tx.commit();
+      return res.json({ ok: true, status: 'Cancelado' });
     }
 
+    // ---- Envio segmentado ----
+    if (isShip) {
+      const escTudo = escopo === 'tudo' ? 1 : 0;
+      const escBack = escopo === 'backorder' ? 1 : 0;
+      const cand = await new sql.Request(tx)
+        .input('pid', sql.Int, ped.PedidoId)
+        .input('escTudo', sql.Bit, escTudo)
+        .input('escBack', sql.Bit, escBack)
+        .query(`SELECT pi.PedidoItemId, pi.ProdutoId, pi.PrecoUnitario, pi.Quantidade,
+                       pi.QuantidadeEnviada, pi.EmBackorder
+                  FROM dbo.PedidoItem pi
+                 WHERE pi.PedidoId = @pid AND pi.Quantidade > pi.QuantidadeEnviada
+                   AND (@escTudo = 1 OR pi.EmBackorder = @escBack)`);
+
+      let totalEnvio = 0;
+      let enviados = 0;
+      for (const it of cand.recordset) {
+        const restante = it.Quantidade - it.QuantidadeEnviada;
+        if (it.EmBackorder) {
+          // Pré-venda só sai se houver estoque agora; baixa atômica.
+          const dec = await new sql.Request(tx)
+            .input('prod', sql.Int, it.ProdutoId)
+            .input('rem', sql.Int, restante)
+            .query(`UPDATE dbo.Produto SET Estoque = Estoque - @rem, AtualizadoEm = SYSUTCDATETIME()
+                     WHERE ProdutoId = @prod AND Estoque >= @rem`);
+          if (!dec.rowsAffected[0]) continue; // sem estoque: fica pendente
+        }
+        await new sql.Request(tx)
+          .input('iid', sql.Int, it.PedidoItemId)
+          .query('UPDATE dbo.PedidoItem SET QuantidadeEnviada = Quantidade WHERE PedidoItemId = @iid');
+        totalEnvio += Number(it.PrecoUnitario) * restante;
+        enviados++;
+      }
+
+      if (!enviados) {
+        await tx.rollback();
+        return res.status(409).json({ erro: 'Nenhum item disponível para envio neste escopo.' });
+      }
+
+      const docs = await gerarEntregaFatura(tx, ped.PedidoId, ped.EmpresaId, totalEnvio);
+
+      // Status do pedido: 'Enviado' se nada mais falta; senão 'Processando'.
+      const rest = await new sql.Request(tx)
+        .input('pid', sql.Int, ped.PedidoId)
+        .query('SELECT COUNT(*) AS pend FROM dbo.PedidoItem WHERE PedidoId = @pid AND Quantidade > QuantidadeEnviada');
+      const faltam = rest.recordset[0].pend > 0;
+      const novoStatus = faltam ? 'Processando' : 'Enviado';
+      await new sql.Request(tx)
+        .input('pid', sql.Int, ped.PedidoId)
+        .input('st', sql.VarChar(14), novoStatus)
+        .query('UPDATE dbo.Pedido SET Status = @st, AtualizadoEm = SYSUTCDATETIME() WHERE PedidoId = @pid');
+
+      await tx.commit();
+      return res.json({
+        ok: true, status: novoStatus, parcial: faltam,
+        entrega: docs.numeroEntrega, fatura: docs.numeroFatura, valor: totalEnvio
+      });
+    }
+
+    // ---- Mudança simples de status (Pendente/Processando/Entregue) ----
+    await new sql.Request(tx)
+      .input('num', sql.VarChar(20), req.params.numero)
+      .input('st', sql.VarChar(14), status)
+      .query('UPDATE dbo.Pedido SET Status = @st, AtualizadoEm = SYSUTCDATETIME() WHERE NumeroPedido = @num');
+
     await tx.commit();
-    res.json({ ok: true, status: novo });
+    res.json({ ok: true, status });
+  } catch (e) {
+    try { await tx.rollback(); } catch { /* já desfeita */ }
+    next(e);
+  }
+});
+
+// PUT /api/pedidos/:numero/itens/:itemId/enviado (admin) — ajuste manual da
+// quantidade enviada de um item. { qtd } entre 0 e Quantidade. Para itens em
+// pré-venda, aumentar consome estoque (e exige tê-lo); diminuir devolve.
+router.put('/pedidos/:numero/itens/:itemId/enviado', requireAuth, requireAdmin, async (req, res, next) => {
+  const qtd = Number(req.body?.qtd);
+  if (!Number.isInteger(qtd) || qtd < 0)
+    return res.status(400).json({ erro: 'Quantidade inválida.' });
+
+  const pool = await getPool();
+  const tx = new sql.Transaction(pool);
+  try {
+    await tx.begin();
+
+    const cur = await new sql.Request(tx)
+      .input('num', sql.VarChar(20), req.params.numero)
+      .input('iid', sql.Int, Number(req.params.itemId))
+      .query(`SELECT pi.PedidoItemId, pi.ProdutoId, pi.Quantidade, pi.QuantidadeEnviada, pi.EmBackorder
+                FROM dbo.PedidoItem pi
+                JOIN dbo.Pedido p ON p.PedidoId = pi.PedidoId
+               WHERE p.NumeroPedido = @num AND pi.PedidoItemId = @iid`);
+    if (!cur.recordset.length) {
+      await tx.rollback();
+      return res.status(404).json({ erro: 'Item não encontrado neste pedido.' });
+    }
+    const it = cur.recordset[0];
+    if (qtd > it.Quantidade) {
+      await tx.rollback();
+      return res.status(400).json({ erro: 'Quantidade enviada não pode exceder a pedida.' });
+    }
+
+    const delta = qtd - it.QuantidadeEnviada;
+    if (it.EmBackorder && delta !== 0) {
+      // Aumentar consome estoque; diminuir devolve. Baixa atômica no aumento.
+      const dec = await new sql.Request(tx)
+        .input('prod', sql.Int, it.ProdutoId)
+        .input('d', sql.Int, delta)
+        .query(`UPDATE dbo.Produto SET Estoque = Estoque - @d, AtualizadoEm = SYSUTCDATETIME()
+                 WHERE ProdutoId = @prod AND (@d <= 0 OR Estoque >= @d)`);
+      if (!dec.rowsAffected[0]) {
+        await tx.rollback();
+        return res.status(409).json({ erro: 'Estoque insuficiente para enviar essa quantidade.' });
+      }
+    }
+
+    await new sql.Request(tx)
+      .input('iid', sql.Int, it.PedidoItemId)
+      .input('q', sql.Int, qtd)
+      .query('UPDATE dbo.PedidoItem SET QuantidadeEnviada = @q WHERE PedidoItemId = @iid');
+
+    await tx.commit();
+    res.json({ ok: true, itemId: it.PedidoItemId, qtdEnviada: qtd });
   } catch (e) {
     try { await tx.rollback(); } catch { /* já desfeita */ }
     next(e);
