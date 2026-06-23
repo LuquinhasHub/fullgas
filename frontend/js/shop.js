@@ -301,7 +301,21 @@
         '<span class="right"><b>' + FG.fmtMoney(p.preco * i.qtd) + '</b></span>' +
         '<button class="del link-action ct-del" data-art="' + p.artigo + '" title="Remover">✕</button></div>';
     });
+    // Itens sem estoque suficiente entram em pré-venda (backorder) ao confirmar.
+    var preVenda = cart.filter(function (i) { var p = FG.product(i.artigo); return p && p.estoque < i.qtd; });
+    var avisoHTML = '';
+    if (preVenda.length) {
+      avisoHTML = '<div class="backorder-aviso"><b>⚠ Aviso:</b> ' + preVenda.length +
+        ' item(ns) será(ão) enviado(s) em <b>pré-venda</b>. Prazo de envio depende de reposição.<ul>' +
+        preVenda.map(function (i) {
+          var p = FG.product(i.artigo);
+          return '<li>' + esc(p.nome) + ' <span class="muted">(' + p.artigo + ')</span> — ' + i.qtd + ' un.' +
+            (p.previsao ? ' · previsão: ' + esc(p.previsao) : '') + '</li>';
+        }).join('') + '</ul></div>';
+    }
+
     html += '<div class="cart-tot"><span>Total da cesta</span><span class="v">' + FG.fmtMoney(FG.cartTotal()) + '</span></div>' +
+      avisoHTML +
       '<div style="display:flex;justify-content:flex-end;gap:10px;">' +
       '<button class="btn" id="ct-limpar">Limpar cesta</button>' +
       '<button class="btn red" id="ct-enviar">Enviar pedido</button></div>';
@@ -321,8 +335,16 @@
       var o = FG.createOrder();
       refreshCart();
       if (!o) return;
+      var backHTML = (o.itensEmBackorder && o.itensEmBackorder.length) ?
+        '<div class="backorder-aviso" style="max-width:540px;margin:14px auto;text-align:left;">' +
+        '<b>⚠ Itens em pré-venda:</b> serão enviados quando o estoque for reposto, ' +
+        'em uma entrega/fatura separada.<ul>' +
+        o.itensEmBackorder.map(function (b) {
+          return '<li>' + esc(b.nome) + ' <span class="muted">(' + b.sku + ')</span> — ' + b.quantidade + ' un.</li>';
+        }).join('') + '</ul></div>' : '';
       view.innerHTML = '<div class="empty-box"><h2 style="color:var(--green);">✔ Pedido enviado!</h2>' +
         '<p>Número do pedido: <b>' + o.cx + ' / ' + o.id + '</b></p>' +
+        backHTML +
         '<p class="muted">Acompanhe o andamento no histórico de pedidos.</p>' +
         '<a class="btn red" href="#/pedidos">Ver histórico</a> <a class="btn" href="#/">Continuar comprando</a></div>';
     });

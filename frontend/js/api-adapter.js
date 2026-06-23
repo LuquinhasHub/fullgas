@@ -151,27 +151,48 @@
     }
   };
 
-  // Muda o status do pedido (admin). Ao enviar, a API gera entrega + fatura.
-  FG.setOrderStatus = function (id, status) {
+  // PUT síncrono genérico que devolve { ok, ... }. Em sucesso recarrega os
+  // caches de pedidos e produtos (status/envio podem mexer no estoque).
+  function putSync(path, body) {
     try {
       var xhr = new XMLHttpRequest();
-      xhr.open('PUT', API_BASE + '/pedidos/' + encodeURIComponent(id) + '/status', false);
+      xhr.open('PUT', API_BASE + path, false);
       xhr.setRequestHeader('Content-Type', 'application/json');
       if (token()) xhr.setRequestHeader('Authorization', 'Bearer ' + token());
-      xhr.send(JSON.stringify({ status: status }));
+      xhr.send(JSON.stringify(body || {}));
       var data = JSON.parse(xhr.responseText || '{}');
-      if (xhr.status < 200 || xhr.status >= 300) {
-        // Ex.: 409 quando o pedido já está Entregue/Cancelado (terminal).
-        return { ok: false, msg: data.erro || 'Não foi possível mudar o status.' };
-      }
+      if (xhr.status < 200 || xhr.status >= 300)
+        return { ok: false, msg: data.erro || 'Operação não concluída.' };
       recarregarPedidos();
-      // Mudar status pode mexer no estoque (cancelar devolve as quantidades ao
-      // estoque). Recarrega os produtos para a tela refletir o valor atual.
       var prod = apiSync('/produtos'); if (prod) CACHE.products = prod;
-      return { ok: true, status: status };
+      data.ok = true;
+      return data;
     } catch (e) {
       return { ok: false, msg: 'Servidor indisponível.' };
     }
+  }
+
+  // Muda o status do pedido (admin). Ao enviar, a API gera entrega + fatura.
+  // Devolve { ok, ... }; em 409 (ex.: pedido terminal) vem { ok:false, msg }.
+  FG.setOrderStatus = function (id, status) {
+    return putSync('/pedidos/' + encodeURIComponent(id) + '/status', { status: status });
+  };
+
+  // Detalhe rico do pedido (itens com qtdEnviada/backorder/estoque, entregas,
+  // faturas e progresso). Síncrono — as telas renderizam direto.
+  FG.pedidoDetalhe = function (numero) {
+    return apiSync('/pedidos/' + encodeURIComponent(numero));
+  };
+
+  // Envio segmentado por escopo: 'normal' | 'backorder' | 'tudo' (admin).
+  // Gera Entrega + Fatura cobrindo só os itens daquele escopo.
+  FG.enviarPedidoEscopo = function (numero, escopo) {
+    return putSync('/pedidos/' + encodeURIComponent(numero) + '/status', { escopo: escopo });
+  };
+
+  // Ajuste manual da quantidade enviada de um item do pedido (admin).
+  FG.setItemEnviado = function (numero, itemId, qtd) {
+    return putSync('/pedidos/' + encodeURIComponent(numero) + '/itens/' + itemId + '/enviado', { qtd: qtd });
   };
 
   // Expõe helpers para depuração no console.

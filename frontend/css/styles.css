@@ -113,6 +113,11 @@ h1, h2, h3 { margin: 0 0 .5em; }
 .toast-item.toast-erro { background: #b91c1c; border-left-color: #7f1010; }
 @keyframes tin { from { transform: translateY(8px); opacity: 0; } }
 
+/* ---------- aviso de pré-venda / backorder ---------- */
+.backorder-aviso { background: #fff3cd; border: 1px solid #ffe08a; border-left: 4px solid #d99a00; color: #6b5200; padding: 10px 14px; border-radius: 4px; margin: 12px 0; font-size: 13px; }
+.backorder-aviso ul { margin: 6px 0 0; padding-left: 18px; }
+.backorder-aviso li { margin: 2px 0; }
+
 /* ---------- badges de status (compartilhado: admin e loja) ---------- */
 .pill-status { display: inline-block; font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 2px; background: #eee; color: #555; text-transform: uppercase; }
 .pill-status.Pendente { background: #fff3cd; color: #8a6d00; }
@@ -124,6 +129,21 @@ h1, h2, h3 { margin: 0 0 .5em; }
 .pill-status.pendente, .pill-status.Esboço { background: #fff3cd; color: #8a6d00; }
 .pill-status.admin { background: #ffe1cf; color: var(--adm-orange); }
 .pill-status.cliente { background: #e5e7eb; color: #374151; }
+.pill-status.Parcial { background: #fde68a; color: #92400e; }
+.pill-status.Emitida { background: #dcfce7; color: #15803d; }
+.pill-status.Anulada { background: #fee2e2; color: #b91c1c; }
+
+/* ---------- detalhe do pedido (envio parcial / pré-venda) ---------- */
+.ped-det-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.prog-wrap { display: flex; align-items: center; gap: 10px; margin: 10px 0 4px; }
+.prog-bar { flex: 1; height: 14px; background: #eee; border-radius: 7px; overflow: hidden; }
+.prog-fill { height: 100%; background: var(--red); transition: width .3s; }
+.prog-label { font-size: 12px; font-weight: 600; white-space: nowrap; }
+.sec-title { margin: 18px 0 6px; font-size: 15px; }
+.item-dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; vertical-align: middle; }
+.item-dot.dot-ok { background: #15803d; }
+.item-dot.dot-parcial { background: #d99a00; }
+.item-dot.dot-pendente { background: #cbd5e1; }
 
 /* ---------- modal ---------- */
 .modal-back {

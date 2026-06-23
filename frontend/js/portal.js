@@ -337,12 +337,16 @@
       '<table class="table"><thead><tr><th class="filt">Título</th><th class="filt">Classe de pedido</th>' +
       '<th class="filt">Criado</th><th>Status</th><th class="right">Total</th></tr></thead><tbody id="pd-rows">' +
       (meus.length ? meus.map(function (o, i) {
-        return '<tr><td><a href="#" class="pd-open" data-i="' + i + '">' + o.cx + ' / ' + o.id + '</a>' +
+        var statusCol = '<span class="pill-status ' + esc(o.status) + '">' + esc(o.status) + '</span>' +
+          (o.progresso && o.progresso.parcial ? ' <span class="pill-status Parcial">Parcial</span>' : '') +
+          (o.temBackorder ? '<br><span class="muted" style="font-size:11px;">contém pré-venda</span>' : '');
+        return '<tr><td><a href="#pedido/' + esc(o.id) + '">' + o.cx + ' / ' + o.id + '</a>' +
+          ' <button class="link-action pd-open" data-i="' + i + '" title="Ver itens">⤢</button>' +
           '<div class="pd-itens hidden" data-i="' + i + '">' +
           o.itens.map(function (it) { return '<div class="muted">' + it.qtd + '× ' + esc(it.nome) + ' (' + it.artigo + ')</div>'; }).join('') +
           '</div></td>' +
           '<td>Peças de reposição</td><td>' + FG.fmtDateTime(o.data) + '</td>' +
-          '<td>' + esc(o.status) + '</td><td class="right">' + FG.fmtMoney(o.total) + '</td></tr>';
+          '<td>' + statusCol + '</td><td class="right">' + FG.fmtMoney(o.total) + '</td></tr>';
       }).join('') : '<tr><td colspan="5" class="muted">Vazio</td></tr>') +
       '</tbody></table>';
 
@@ -360,6 +364,73 @@
       meus.forEach(function (o) { linhas.push([o.id, o.cx, FG.fmtDateTime(o.data), o.status, o.total.toFixed(2)]); });
       FG.exportCSV('pedidos', linhas);
     });
+  }
+
+  /* =========================================================
+     DETALHE DO PEDIDO (#pedido/:numero)
+     ========================================================= */
+  // Indicador circular por item: verde=enviado, amarelo=parcial, cinza=pendente.
+  function dotItem(it) {
+    var cls = it.qtdEnviada >= it.qtd ? 'dot-ok' : (it.qtdEnviada > 0 ? 'dot-parcial' : 'dot-pendente');
+    var t = it.qtdEnviada >= it.qtd ? 'Enviado' : (it.qtdEnviada > 0 ? 'Parcial' : 'Não enviado');
+    return '<span class="item-dot ' + cls + '" title="' + t + '"></span>';
+  }
+
+  function tabelaItens(itens) {
+    return '<table class="table"><thead><tr><th></th><th>SKU</th><th>Produto</th>' +
+      '<th class="right">Qtd. pedida</th><th class="right">Qtd. enviada</th>' +
+      '<th class="right">Preço un.</th><th class="right">Subtotal</th></tr></thead><tbody>' +
+      itens.map(function (it) {
+        return '<tr><td>' + dotItem(it) + '</td><td>' + esc(it.artigo) + '</td><td>' + esc(it.nome) + '</td>' +
+          '<td class="right">' + it.qtd + '</td><td class="right">' + it.qtdEnviada + '</td>' +
+          '<td class="right">' + FG.fmtMoney(it.preco) + '</td>' +
+          '<td class="right">' + FG.fmtMoney(it.preco * it.qtd) + '</td></tr>';
+      }).join('') + '</tbody></table>';
+  }
+
+  function renderPedidoDetalhe(numero) {
+    setCrumb(['Pedidos', numero]); setTabOn('pedidos');
+    var d = FG.pedidoDetalhe(numero);
+    if (!d || !d.id) {
+      view.innerHTML = '<div class="empty-box">Pedido não encontrado.<br>' +
+        '<a class="btn red" href="#pedidos">Voltar para Pedidos</a></div>';
+      return;
+    }
+    var normais = d.itens.filter(function (i) { return !i.backorder; });
+    var preVenda = d.itens.filter(function (i) { return i.backorder; });
+    var pg = d.progresso;
+
+    var html =
+      '<div style="margin-bottom:12px;"><a class="btn" href="#pedidos">← Voltar para Pedidos</a></div>' +
+      '<div class="ped-det-head"><h2 style="margin:0;">Pedido ' + esc(d.cx) + ' / ' + esc(d.id) + '</h2>' +
+      '<span class="pill-status ' + esc(d.status) + '">' + esc(d.status) + '</span>' +
+      (pg.parcial ? ' <span class="pill-status Parcial">Parcial</span>' : '') + '</div>' +
+      '<p class="muted">' + FG.fmtDateTime(d.data) + ' · ' + esc(d.empresa) + ' · Total ' + FG.fmtMoney(d.total) + '</p>' +
+      '<div class="prog-wrap"><div class="prog-bar"><div class="prog-fill" style="width:' + pg.pct + '%;"></div></div>' +
+      '<span class="prog-label">' + pg.pct + '% (' + pg.enviada + ' de ' + pg.qtd + ' enviadas)</span></div>';
+
+    if (normais.length)
+      html += '<h3 class="sec-title">Itens em envio normal</h3>' + tabelaItens(normais);
+
+    if (preVenda.length)
+      html += '<h3 class="sec-title">Itens em pré-venda</h3>' +
+        '<div class="backorder-aviso">Estes itens serão enviados quando o estoque for reposto. ' +
+        'Eles farão parte de uma entrega/fatura separada.</div>' + tabelaItens(preVenda);
+
+    if (d.entregas.length)
+      html += '<h3 class="sec-title">Entregas e faturas</h3>' +
+        '<table class="table"><thead><tr><th>Entrega</th><th>Data</th><th>Status</th>' +
+        '<th>Rastreio(s)</th><th>Fatura</th><th class="right">Valor</th></tr></thead><tbody>' +
+        d.entregas.map(function (e) {
+          return '<tr><td>' + esc(e.numero) + '</td><td>' + (e.data ? FG.fmtDate(e.data) : '—') + '</td>' +
+            '<td><span class="pill-status ' + esc(e.status) + '">' + esc(e.status) + '</span></td>' +
+            '<td>' + (e.rastreios.join('<br>') || '—') + '</td>' +
+            '<td>' + (e.fatura || '—') +
+              (e.faturaStatus ? ' <span class="pill-status ' + esc(e.faturaStatus) + '">' + esc(e.faturaStatus) + '</span>' : '') + '</td>' +
+            '<td class="right">' + (e.faturaValor != null ? FG.fmtMoney(e.faturaValor) : '—') + '</td></tr>';
+        }).join('') + '</tbody></table>';
+
+    view.innerHTML = html;
   }
 
   /* =========================================================
@@ -558,6 +629,7 @@
       case 'notificacoes': renderNotifs(); break;
       case 'reivindicacoes': renderClaims(); break;
       case 'pedidos': renderPedidos(); break;
+      case 'pedido': renderPedidoDetalhe(partes[1]); break;
       case 'acoes': renderAcoes(partes[1]); break;
       case 'estoque': renderEstoque(); break;
       case 'financeiro': renderFinanceiro(); break;
