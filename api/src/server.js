@@ -9,6 +9,7 @@ import { getPool } from './db.js';
 import authRoutes from './routes/auth.routes.js';
 import produtosRoutes from './routes/produtos.routes.js';
 import pedidosRoutes from './routes/pedidos.routes.js';
+import veiculosRoutes from './routes/veiculos.routes.js';
 
 const app = express();
 
@@ -28,6 +29,7 @@ app.get('/api/health', (_req, res) => res.json({ ok: true, ts: new Date().toISOS
 app.use('/api/auth', authRoutes);
 app.use('/api', produtosRoutes);
 app.use('/api', pedidosRoutes);
+app.use('/api', veiculosRoutes);
 
 // 404
 app.use((req, res) => res.status(404).json({ erro: 'Rota não encontrada.' }));

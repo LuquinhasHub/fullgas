@@ -62,8 +62,16 @@
     var prod = apiSync('/produtos'); if (prod) CACHE.products = prod;
     var cat = apiSync('/categorias'); if (cat) CACHE.categories = cat;
     var ped = apiSync('/pedidos'); if (ped) CACHE.orders = ped;
-    // (demais coleções entram nas próximas rotas: veículos, reivindicações, etc.)
+    var mod = apiSync('/veiculos/modelos'); if (mod) CACHE.models = mod;
+    var veic = apiSync('/veiculos'); if (veic) CACHE.vehicles = veic;
+    // (demais coleções entram nas próximas rotas: reivindicações, etc.)
   }
+
+  // Recarrega o cache de veículos de forma síncrona (após venda/garantia).
+  function recarregarVeiculos() {
+    var lista = apiSync('/veiculos'); if (lista) CACHE.vehicles = lista; return lista;
+  }
+  FG.recarregarVeiculos = recarregarVeiculos;
 
   /* ---------- sobrescreve a camada de dados do FG ---------- */
   // Leituras passam a ler do cache em memória.
@@ -193,6 +201,39 @@
   // Ajuste manual da quantidade enviada de um item do pedido (admin).
   FG.setItemEnviado = function (numero, itemId, qtd) {
     return putSync('/pedidos/' + encodeURIComponent(numero) + '/itens/' + itemId + '/enviado', { qtd: qtd });
+  };
+
+  /* ---------- veículos: substitui as ações inline do portal.js ---------- */
+  // POST síncrono genérico; em sucesso devolve { ok, ... } com o corpo da API.
+  function postSync(path, body) {
+    try {
+      var xhr = new XMLHttpRequest();
+      xhr.open('POST', API_BASE + path, false);
+      xhr.setRequestHeader('Content-Type', 'application/json');
+      if (token()) xhr.setRequestHeader('Authorization', 'Bearer ' + token());
+      xhr.send(JSON.stringify(body || {}));
+      var data = JSON.parse(xhr.responseText || '{}');
+      if (xhr.status < 200 || xhr.status >= 300)
+        return { ok: false, msg: data.erro || 'Operação não concluída.' };
+      data.ok = true;
+      return data;
+    } catch (e) {
+      return { ok: false, msg: 'Servidor indisponível.' };
+    }
+  }
+
+  // Registra venda do veículo (Status=Vendido + garantia). Recarrega o cache.
+  FG.registrarVenda = function (niv, cliente) {
+    var r = postSync('/veiculos/' + encodeURIComponent(niv) + '/venda', { cliente: cliente });
+    if (r.ok) recarregarVeiculos();
+    return r;
+  };
+
+  // Ativa a garantia do veículo. Recarrega o cache em caso de sucesso.
+  FG.ativarGarantia = function (niv) {
+    var r = postSync('/veiculos/' + encodeURIComponent(niv) + '/garantia');
+    if (r.ok) recarregarVeiculos();
+    return r;
   };
 
   // Expõe helpers para depuração no console.

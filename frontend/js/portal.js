@@ -475,20 +475,16 @@
       if (bv) bv.addEventListener('click', function () {
         var cliente = prompt('Nome do cliente final:');
         if (!cliente) return;
-        var db = FG.db();
-        var veh = db.vehicles.find(function (x) { return x.niv === v.niv; });
-        veh.status = 'Vendido';
-        veh.venda = { data: new Date().toISOString(), cliente: cliente };
-        veh.garantia = veh.garantia || new Date().toISOString();
-        FG.save(db); FG.toast('Venda registrada e garantia ativada.');
+        var r = FG.registrarVenda(v.niv, cliente);
+        if (!r.ok) { FG.toast(r.msg || 'Não foi possível registrar a venda.'); return; }
+        FG.toast('Venda registrada e garantia ativada.');
         buscar();
       });
       var bg = document.getElementById('av-gar');
       if (bg) bg.addEventListener('click', function () {
-        var db = FG.db();
-        var veh = db.vehicles.find(function (x) { return x.niv === v.niv; });
-        veh.garantia = new Date().toISOString();
-        FG.save(db); FG.toast('Garantia ativada.');
+        var r = FG.ativarGarantia(v.niv);
+        if (!r.ok) { FG.toast(r.msg || 'Não foi possível ativar a garantia.'); return; }
+        FG.toast('Garantia ativada.');
         buscar();
       });
     }
