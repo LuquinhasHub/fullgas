@@ -59,7 +59,12 @@ A frente 1 fecha essa lacuna.
 outras telas do portal exibem dados em cache vazio. Esta frente faz cada área
 do front passar a ler do banco real.
 
-## 1.1 Pedidos
+## 1.1 Pedidos ✅ CONCLUÍDO
+
+> Entregue no branch `feat/pedidos`. Além do escopo original, inclui
+> cancelamento com devolução de estoque e estorno de fatura/entrega,
+> pré-venda/backorder com envio segmentado/parcial (ver
+> `docs/06-pre-venda-backorder.md`) e tela de detalhe do pedido.
 
 **Rotas a criar** em `api/src/routes/pedidos.routes.js`:
 
