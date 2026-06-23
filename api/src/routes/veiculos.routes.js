@@ -18,14 +18,22 @@ function toVeiculo(r) {
     entrada: r.EntradaEstoque,
     numeroMotor: r.NumeroMotor || null
   };
-  if (r.VendaData) v.venda = { data: r.VendaData, cliente: r.VendaCliente || '' };
+  if (r.VendaData) v.venda = {
+    data: r.VendaData,
+    cliente: r.VendaCliente || '',
+    cpf: r.ClienteCpf || '',
+    email: r.ClienteEmail || '',
+    telefone: r.ClienteTelefone || '',
+    endereco: r.ClienteEndereco || ''
+  };
   if (r.GarantiaAtivaEm) v.garantia = r.GarantiaAtivaEm;
   return v;
 }
 
 const SELECT_VEIC =
   `SELECT v.VeiculoId, v.Niv, v.Cor, v.Status, v.EntradaEstoque, v.VendaData,
-          v.VendaCliente, v.GarantiaAtivaEm, v.NumeroMotor, v.EmpresaId,
+          v.VendaCliente, v.ClienteCpf, v.ClienteEmail, v.ClienteTelefone,
+          v.ClienteEndereco, v.GarantiaAtivaEm, v.NumeroMotor, v.EmpresaId,
           m.Codigo AS ModeloCodigo
      FROM dbo.Veiculo v
      JOIN dbo.ModeloMoto m ON m.ModeloId = v.ModeloId`;
@@ -90,9 +98,14 @@ async function acharVeiculo(niv, user) {
 // não estiver ativa. Só vale para veículo 'Disponível'.
 router.post('/veiculos/:niv/venda', requireAuth, async (req, res, next) => {
   try {
-    const { cliente } = req.body;
-    if (!cliente || !String(cliente).trim())
-      return res.status(400).json({ erro: 'Informe o nome do cliente.' });
+    const { cliente, cpf, email, telefone, endereco } = req.body;
+    const nome = (cliente || '').trim();
+    if (!nome) return res.status(400).json({ erro: 'Informe o nome do cliente.' });
+    if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email))
+      return res.status(400).json({ erro: 'E-mail do cliente inválido.' });
+    // CPF: aceita com ou sem máscara, mas precisa ter 11 dígitos se informado.
+    if (cpf && (String(cpf).replace(/\D/g, '').length !== 11))
+      return res.status(400).json({ erro: 'CPF do cliente inválido.' });
 
     const veic = await acharVeiculo(req.params.niv, req.user);
     if (!veic) return res.status(404).json({ erro: 'Veículo não encontrado.' });
@@ -104,10 +117,21 @@ router.post('/veiculos/:niv/venda', requireAuth, async (req, res, next) => {
           SET Status = 'Vendido',
               VendaData = SYSUTCDATETIME(),
               VendaCliente = @cliente,
+              ClienteCpf = @cpf,
+              ClienteEmail = @email,
+              ClienteTelefone = @telefone,
+              ClienteEndereco = @endereco,
               GarantiaAtivaEm = COALESCE(GarantiaAtivaEm, SYSUTCDATETIME()),
               AtualizadoEm = SYSUTCDATETIME()
         WHERE VeiculoId = @id`,
-      { cliente: String(cliente).trim(), id: veic.VeiculoId }
+      {
+        cliente: nome,
+        cpf: (cpf || '').trim() || null,
+        email: (email || '').trim() || null,
+        telefone: (telefone || '').trim() || null,
+        endereco: (endereco || '').trim() || null,
+        id: veic.VeiculoId
+      }
     );
 
     const rows = await query(SELECT_VEIC + ' WHERE v.VeiculoId = @id', { id: veic.VeiculoId });

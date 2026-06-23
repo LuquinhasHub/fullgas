@@ -436,6 +436,59 @@
   /* =========================================================
      AÇÕES DO VEÍCULO
      ========================================================= */
+  // Modal estilizado para registrar a venda com os dados do comprador final.
+  // onDone() é chamado após sucesso (re-renderiza a busca do veículo).
+  function modalVenda(v, onDone) {
+    var back = document.createElement('div');
+    back.className = 'modal-back';
+    back.innerHTML =
+      '<div class="modal"><header><h3>Registrar venda — ' + esc(v.niv) + '</h3><button class="x">×</button></header>' +
+      '<div class="modal-body">' +
+      '<p class="muted" style="margin-top:0;">Dados do comprador final. A garantia é ativada automaticamente na venda. Campos marcados com * são obrigatórios.</p>' +
+      '<div class="form-grid">' +
+      '<div class="field full"><label>Nome do cliente *</label><input id="vd-nome" type="text" placeholder="Nome completo" autocomplete="off"></div>' +
+      '<div class="field"><label>CPF</label><input id="vd-cpf" type="text" inputmode="numeric" placeholder="000.000.000-00" maxlength="14"></div>' +
+      '<div class="field"><label>Telefone</label><input id="vd-tel" type="tel" placeholder="(00) 00000-0000"></div>' +
+      '<div class="field full"><label>E-mail pessoal</label><input id="vd-email" type="email" placeholder="cliente@email.com"></div>' +
+      '<div class="field full"><label>Endereço</label><input id="vd-end" type="text" placeholder="Rua, número, bairro, cidade/UF, CEP"></div>' +
+      '</div></div>' +
+      '<div class="modal-foot"><button class="btn-line" id="vd-canc">Cancelar</button>' +
+      '<button class="btn red" id="vd-ok">Confirmar venda</button></div></div>';
+    document.body.appendChild(back);
+
+    function fechar() { back.remove(); }
+    back.querySelector('.x').addEventListener('click', fechar);
+    back.querySelector('#vd-canc').addEventListener('click', fechar);
+    back.addEventListener('click', function (e) { if (e.target === back) fechar(); });
+    document.getElementById('vd-nome').focus();
+
+    // Máscara leve de CPF enquanto digita (000.000.000-00).
+    var cpf = document.getElementById('vd-cpf');
+    cpf.addEventListener('input', function () {
+      var d = cpf.value.replace(/\D/g, '').slice(0, 11), out = d;
+      if (d.length > 9) out = d.slice(0, 3) + '.' + d.slice(3, 6) + '.' + d.slice(6, 9) + '-' + d.slice(9);
+      else if (d.length > 6) out = d.slice(0, 3) + '.' + d.slice(3, 6) + '.' + d.slice(6);
+      else if (d.length > 3) out = d.slice(0, 3) + '.' + d.slice(3);
+      cpf.value = out;
+    });
+
+    document.getElementById('vd-ok').addEventListener('click', function () {
+      var nome = document.getElementById('vd-nome').value.trim();
+      if (!nome) { FG.toast('Informe o nome do cliente.'); return; }
+      var r = FG.registrarVenda(v.niv, {
+        cliente: nome,
+        cpf: document.getElementById('vd-cpf').value.trim(),
+        telefone: document.getElementById('vd-tel').value.trim(),
+        email: document.getElementById('vd-email').value.trim(),
+        endereco: document.getElementById('vd-end').value.trim()
+      });
+      if (!r.ok) { FG.toast(r.msg || 'Não foi possível registrar a venda.'); return; }
+      fechar();
+      FG.toast('Venda registrada e garantia ativada.');
+      if (onDone) onDone();
+    });
+  }
+
   function renderAcoes(nivBusca) {
     setCrumb(['Ações do veículo']); setTabOn('acoes');
     view.innerHTML =
@@ -461,7 +514,11 @@
         '<div><b>Cor</b>' + esc(v.cor) + '</div>' +
         '<div><b>Status</b>' + esc(v.status) + '</div>' +
         '<div><b>Entrada no estoque</b>' + FG.fmtDate(v.entrada) + '</div>' +
-        (v.venda ? '<div><b>Venda</b>' + FG.fmtDate(v.venda.data) + ' — ' + esc(v.venda.cliente) + '</div>' : '') +
+        (v.venda ? '<div><b>Venda</b>' + FG.fmtDate(v.venda.data) + ' — ' + esc(v.venda.cliente) + '</div>' +
+          (v.venda.cpf ? '<div><b>CPF</b>' + esc(v.venda.cpf) + '</div>' : '') +
+          (v.venda.telefone ? '<div><b>Telefone</b>' + esc(v.venda.telefone) + '</div>' : '') +
+          (v.venda.email ? '<div><b>E-mail</b>' + esc(v.venda.email) + '</div>' : '') +
+          (v.venda.endereco ? '<div><b>Endereço</b>' + esc(v.venda.endereco) + '</div>' : '') : '') +
         (v.garantia ? '<div><b>Garantia ativada em</b>' + FG.fmtDate(v.garantia) + '</div>' : '') +
         '</div>' +
         '<div style="display:flex;gap:10px;flex-wrap:wrap;">' +
@@ -472,14 +529,7 @@
         '</div></div>';
 
       var bv = document.getElementById('av-venda');
-      if (bv) bv.addEventListener('click', function () {
-        var cliente = prompt('Nome do cliente final:');
-        if (!cliente) return;
-        var r = FG.registrarVenda(v.niv, cliente);
-        if (!r.ok) { FG.toast(r.msg || 'Não foi possível registrar a venda.'); return; }
-        FG.toast('Venda registrada e garantia ativada.');
-        buscar();
-      });
+      if (bv) bv.addEventListener('click', function () { modalVenda(v, buscar); });
       var bg = document.getElementById('av-gar');
       if (bg) bg.addEventListener('click', function () {
         var r = FG.ativarGarantia(v.niv);

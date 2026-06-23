@@ -223,8 +223,9 @@
   }
 
   // Registra venda do veículo (Status=Vendido + garantia). Recarrega o cache.
-  FG.registrarVenda = function (niv, cliente) {
-    var r = postSync('/veiculos/' + encodeURIComponent(niv) + '/venda', { cliente: cliente });
+  // `dados` = { cliente, cpf, email, telefone, endereco }.
+  FG.registrarVenda = function (niv, dados) {
+    var r = postSync('/veiculos/' + encodeURIComponent(niv) + '/venda', dados || {});
     if (r.ok) recarregarVeiculos();
     return r;
   };
