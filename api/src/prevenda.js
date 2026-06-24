@@ -29,18 +29,9 @@ async function recalcularFatura(tx, faturaId) {
              WHERE FaturaId = @fid`);
 }
 
-// Acha ou cria a fatura de pré-venda (status informado) aberta da empresa na
-// competência. NumeroFatura prefixado com 'PV' para distinguir das normais.
-async function acharOuCriarFatura(tx, empresaId, competencia, status) {
-  const found = await new sql.Request(tx)
-    .input('eid', sql.Int, empresaId)
-    .input('comp', sql.Char(7), competencia)
-    .input('st', sql.VarChar(16), status)
-    .query(`SELECT TOP 1 FaturaId FROM dbo.Fatura
-             WHERE Tipo='PreVenda' AND Status=@st AND EmpresaId=@eid AND Competencia=@comp
-             ORDER BY FaturaId DESC`);
-  if (found.recordset.length) return found.recordset[0].FaturaId;
-
+// Cria uma fatura de pré-venda nova (status informado).
+// NumeroFatura prefixado com 'PV' para distinguir das normais.
+async function criarFatura(tx, empresaId, competencia, status) {
   const ins = await new sql.Request(tx)
     .input('eid', sql.Int, empresaId)
     .input('comp', sql.Char(7), competencia)
@@ -52,11 +43,24 @@ async function acharOuCriarFatura(tx, empresaId, competencia, status) {
   return ins.recordset[0].FaturaId;
 }
 
+// Acha (ou cria) a fatura STANDBY aberta da empresa na competência — esta sim
+// acumula (uma por cliente por mês) enquanto os itens aguardam reposição.
+async function acharOuCriarFaturaStandby(tx, empresaId, competencia) {
+  const found = await new sql.Request(tx)
+    .input('eid', sql.Int, empresaId)
+    .input('comp', sql.Char(7), competencia)
+    .query(`SELECT TOP 1 FaturaId FROM dbo.Fatura
+             WHERE Tipo='PreVenda' AND Status='Standby' AND EmpresaId=@eid AND Competencia=@comp
+             ORDER BY FaturaId DESC`);
+  if (found.recordset.length) return found.recordset[0].FaturaId;
+  return criarFatura(tx, empresaId, competencia, 'Standby');
+}
+
 // Vincula os itens em backorder de um pedido à fatura standby da empresa
 // (criando-a se necessário) e recalcula o valor. Chamada no POST /pedidos,
 // dentro da transação de criação do pedido.
 export async function vincularBackorderDoPedido(tx, empresaId, pedidoId) {
-  const faturaId = await acharOuCriarFatura(tx, empresaId, competenciaAtual(), 'Standby');
+  const faturaId = await acharOuCriarFaturaStandby(tx, empresaId, competenciaAtual());
   await new sql.Request(tx)
     .input('fid', sql.Int, faturaId)
     .input('pid', sql.Int, pedidoId)
@@ -110,7 +114,9 @@ export async function ativarPreVendaPorProduto(produtoId) {
     let movidas = 0;
 
     for (const empresaId of empresas) {
-      const ativaId = await acharOuCriarFatura(tx, empresaId, comp, 'Ativa');
+      // Cada produto que sai do standby ganha a SUA fatura ativa (individual),
+      // por isso criamos uma nova fatura a cada ativação em vez de reaproveitar.
+      const ativaId = await criarFatura(tx, empresaId, comp, 'Ativa');
       const upd = await new sql.Request(tx)
         .input('prod', sql.Int, produtoId).input('eid', sql.Int, empresaId).input('fid', sql.Int, ativaId)
         .query(`UPDATE pi SET pi.PreVendaFaturaId=@fid
