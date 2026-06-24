@@ -100,7 +100,13 @@ e recarregar `CACHE.orders` ao final. Adicionar `recarregarPedidos()`.
 - Admin muda o pedido para "Enviado" no painel — aparece uma `Entrega` nova
   com número e uma `Fatura` no `Conta financeira` do cliente.
 
-## 1.2 Veículos (motos no estoque)
+## 1.2 Veículos (motos no estoque) ✅ CONCLUÍDO
+
+> Entregue no branch `feat/veiculos`. Além do escopo original, a venda captura
+> dados detalhados do cliente (CPF, e-mail, telefone e endereço) por um
+> formulário em modal estilizado, persistidos via migração
+> `005_dados_cliente_veiculo.sql`. Inclui ainda `GET /api/veiculos/modelos`
+> para alimentar `FG.model` no front.
 
 **Rotas em `api/src/routes/veiculos.routes.js`**:
 
@@ -108,12 +114,15 @@ e recarregar `CACHE.orders` ao final. Adicionar `recarregarPedidos()`.
 |---|---|---|---|
 | GET | `/api/veiculos` | autenticado | lista da empresa do usuário; admin vê todos |
 | GET | `/api/veiculos/:niv` | autenticado | detalhe pelo NIV |
-| POST | `/api/veiculos/:niv/venda` | autenticado | registra venda (recebe `{ cliente }`) |
+| GET | `/api/veiculos/modelos` | autenticado | lista de modelos (alimenta `FG.model`) |
+| POST | `/api/veiculos/:niv/venda` | autenticado | registra venda (recebe `{ cliente, cpf, email, telefone, endereco }`) |
 | POST | `/api/veiculos/:niv/garantia` | autenticado | ativa garantia |
 
 **Detalhes**:
-- A venda muda `Status='Vendido'`, grava `VendaData` e `VendaCliente`, e ativa
-  `GarantiaAtivaEm` se ainda for NULL.
+- A venda muda `Status='Vendido'`, grava `VendaData`, `VendaCliente` e os dados
+  do cliente (`ClienteCpf`, `ClienteEmail`, `ClienteTelefone`, `ClienteEndereco`),
+  e ativa `GarantiaAtivaEm` se ainda for NULL. Valida e-mail e CPF (11 dígitos)
+  quando informados; só aceita veículo `Disponível`.
 - Adapter substitui as funções que o `portal.js` usa hoje em "Ações do veículo"
   e "Estoque do revendedor".
 
