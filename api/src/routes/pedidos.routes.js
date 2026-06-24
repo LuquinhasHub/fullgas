@@ -8,6 +8,7 @@
 import { Router } from 'express';
 import { query, getPool, sql } from '../db.js';
 import { requireAuth, requireAdmin } from '../auth.js';
+import { vincularBackorderDoPedido, desvincularPedido } from '../prevenda.js';
 
 const router = Router();
 
@@ -110,6 +111,39 @@ async function gerarEntregaFatura(tx, pedidoId, empresaId, total) {
             VALUES (@entid, '000' + RIGHT('000000' + CAST(NEXT VALUE FOR dbo.Seq_RastreioEntrega AS VARCHAR(20)), 6))`);
 
   return { numeroFatura: NumeroFatura, numeroEntrega: NumeroEntrega };
+}
+
+// Gera Entrega + rastreio ligados a uma Fatura JÁ existente (caso da fatura de
+// pré-venda ativada): não cria fatura nova, evitando faturamento duplicado.
+// Marca a fatura de pré-venda como 'Emitida' (foi enviada/cobrada).
+async function gerarEntregaParaFatura(tx, pedidoId, empresaId, faturaId) {
+  await new sql.Request(tx)
+    .input('pid', sql.Int, pedidoId).input('fid', sql.Int, faturaId)
+    .query(`IF NOT EXISTS (SELECT 1 FROM dbo.PedidoFatura WHERE PedidoId=@pid AND FaturaId=@fid)
+              INSERT INTO dbo.PedidoFatura (PedidoId, FaturaId) VALUES (@pid, @fid)`);
+
+  const ent = await new sql.Request(tx)
+    .input('eid', sql.Int, empresaId).input('fid', sql.Int, faturaId)
+    .query(`INSERT INTO dbo.Entrega (NumeroEntrega, EmpresaId, FaturaId)
+            OUTPUT inserted.EntregaId, inserted.NumeroEntrega
+            VALUES (RIGHT('0000000000' + CAST(NEXT VALUE FOR dbo.Seq_NumeroEntrega AS VARCHAR(20)), 10), @eid, @fid)`);
+  const { EntregaId, NumeroEntrega } = ent.recordset[0];
+
+  await new sql.Request(tx)
+    .input('entid', sql.Int, EntregaId).input('pid', sql.Int, pedidoId)
+    .query('INSERT INTO dbo.EntregaPedido (EntregaId, PedidoId) VALUES (@entid, @pid)');
+
+  await new sql.Request(tx)
+    .input('entid', sql.Int, EntregaId)
+    .query(`INSERT INTO dbo.RastreioEntrega (EntregaId, Codigo)
+            VALUES (@entid, '000' + RIGHT('000000' + CAST(NEXT VALUE FOR dbo.Seq_RastreioEntrega AS VARCHAR(20)), 6))`);
+
+  await new sql.Request(tx)
+    .input('fid', sql.Int, faturaId)
+    .query(`UPDATE dbo.Fatura SET Status='Emitida', AtualizadoEm=SYSUTCDATETIME()
+             WHERE FaturaId=@fid AND Tipo='PreVenda' AND Status='Ativa'`);
+
+  return { numeroEntrega: NumeroEntrega };
 }
 
 // GET /api/pedidos — cliente vê os da sua empresa; admin vê todos.
@@ -323,6 +357,12 @@ router.post('/pedidos', requireAuth, async (req, res, next) => {
                 VALUES (@pid, @prod, @sku, @nome, @preco, @qtd, @back)`);
     }
 
+    // Itens em pré-venda abrem/alimentam a fatura de pré-venda (Standby) da
+    // empresa no mês corrente, separada das faturas normais.
+    if (itensSnap.some(i => i.backorder)) {
+      await vincularBackorderDoPedido(tx, req.user.empresaId, pedidoId);
+    }
+
     await tx.commit();
 
     const emp = await query('SELECT RazaoSocial FROM dbo.Empresa WHERE EmpresaId = @id', { id: req.user.empresaId });
@@ -414,6 +454,9 @@ router.put('/pedidos/:numero/status', requireAuth, requireAdmin, async (req, res
                   JOIN dbo.EntregaPedido ep ON ep.EntregaId = e.EntregaId
                  WHERE ep.PedidoId = @pid`);
 
+      // Desvincula itens em pré-venda e limpa faturas standby/ativa vazias.
+      await desvincularPedido(tx, ped.PedidoId);
+
       await new sql.Request(tx)
         .input('pid', sql.Int, ped.PedidoId)
         .query("UPDATE dbo.Pedido SET Status = 'Cancelado', AtualizadoEm = SYSUTCDATETIME() WHERE PedidoId = @pid");
@@ -431,13 +474,18 @@ router.put('/pedidos/:numero/status', requireAuth, requireAdmin, async (req, res
         .input('escTudo', sql.Bit, escTudo)
         .input('escBack', sql.Bit, escBack)
         .query(`SELECT pi.PedidoItemId, pi.ProdutoId, pi.PrecoUnitario, pi.Quantidade,
-                       pi.QuantidadeEnviada, pi.EmBackorder
+                       pi.QuantidadeEnviada, pi.EmBackorder, pi.PreVendaFaturaId,
+                       f.Status AS PvStatus
                   FROM dbo.PedidoItem pi
+                  LEFT JOIN dbo.Fatura f ON f.FaturaId = pi.PreVendaFaturaId AND f.Tipo = 'PreVenda'
                  WHERE pi.PedidoId = @pid AND pi.Quantidade > pi.QuantidadeEnviada
                    AND (@escTudo = 1 OR pi.EmBackorder = @escBack)`);
 
-      let totalEnvio = 0;
+      let totalEnvio = 0;        // valor total enviado (resposta informativa)
+      let totalNovaFatura = 0;   // só itens que geram fatura NOVA
+      let itensNovaFatura = 0;
       let enviados = 0;
+      const faturasPreVenda = new Set(); // faturas de pré-venda ativadas a reusar
       for (const it of cand.recordset) {
         const restante = it.Quantidade - it.QuantidadeEnviada;
         if (it.EmBackorder) {
@@ -454,6 +502,13 @@ router.put('/pedidos/:numero/status', requireAuth, requireAdmin, async (req, res
           .query('UPDATE dbo.PedidoItem SET QuantidadeEnviada = Quantidade WHERE PedidoItemId = @iid');
         totalEnvio += Number(it.PrecoUnitario) * restante;
         enviados++;
+        // Itens em pré-venda já ativados reusam a própria fatura (sem duplicar).
+        if (it.EmBackorder && it.PreVendaFaturaId && it.PvStatus === 'Ativa') {
+          faturasPreVenda.add(it.PreVendaFaturaId);
+        } else {
+          totalNovaFatura += Number(it.PrecoUnitario) * restante;
+          itensNovaFatura++;
+        }
       }
 
       if (!enviados) {
@@ -461,7 +516,18 @@ router.put('/pedidos/:numero/status', requireAuth, requireAdmin, async (req, res
         return res.status(409).json({ erro: 'Nenhum item disponível para envio neste escopo.' });
       }
 
-      const docs = await gerarEntregaFatura(tx, ped.PedidoId, ped.EmpresaId, totalEnvio);
+      // Fatura nova só para itens normais/legados; itens de pré-venda ativados
+      // ligam a entrega à própria fatura de pré-venda (vira 'Emitida').
+      let numeroEntrega = null, numeroFatura = null;
+      if (itensNovaFatura > 0) {
+        const d = await gerarEntregaFatura(tx, ped.PedidoId, ped.EmpresaId, totalNovaFatura);
+        numeroEntrega = d.numeroEntrega; numeroFatura = d.numeroFatura;
+      }
+      for (const fid of faturasPreVenda) {
+        const d = await gerarEntregaParaFatura(tx, ped.PedidoId, ped.EmpresaId, fid);
+        if (!numeroEntrega) numeroEntrega = d.numeroEntrega;
+      }
+      const docs = { numeroEntrega, numeroFatura };
 
       // Status do pedido: 'Enviado' se nada mais falta; senão 'Processando'.
       const rest = await new sql.Request(tx)
