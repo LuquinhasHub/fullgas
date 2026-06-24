@@ -251,6 +251,15 @@
   // Status terminais: uma vez aqui, o pedido não pode mais mudar de status.
   var STATUS_TERMINAIS = ['Entregue', 'Cancelado'];
 
+  // Grupo de itens do pedido (separa "Em estoque" das peças em "Pré-venda").
+  function grupoItens(titulo, itens) {
+    if (!itens.length) return '';
+    return '<div style="margin-top:4px;"><b style="font-size:11px;text-transform:uppercase;color:#555;">' + titulo + '</b>' +
+      itens.map(function (it) {
+        return '<div class="muted">' + it.qtd + '× ' + esc(it.nome) + ' (' + it.artigo + ')</div>';
+      }).join('') + '</div>';
+  }
+
   function renderPedidos() {
     h1.textContent = 'Gestão de pedidos'; setOn('pedidos');
     var orders = FG.all('orders');
@@ -259,9 +268,12 @@
       '<table class="tbl"><thead><tr><th>Pedido</th><th>Empresa</th><th>Data</th>' +
       '<th class="r">Total</th><th>Status</th><th></th></tr></thead><tbody>' +
       orders.map(function (o, i) {
+        var emEstoque = o.itens.filter(function (it) { return !it.backorder; });
+        var preVenda = o.itens.filter(function (it) { return it.backorder; });
         return '<tr><td><b>' + o.cx + '</b><br><span class="muted">' + o.id + '</span>' +
           '<div class="od-itens hidden" data-i="' + i + '" style="margin-top:6px;">' +
-          o.itens.map(function (it) { return '<div class="muted">' + it.qtd + '× ' + esc(it.nome) + ' (' + it.artigo + ')</div>'; }).join('') +
+          grupoItens('Em estoque', emEstoque) +
+          grupoItens('Pré-venda (fatura separada)', preVenda) +
           '</div></td>' +
           '<td>' + esc(o.empresa) + '<br><span class="muted">' + esc(o.usuario) + '</span></td>' +
           '<td>' + FG.fmtDateTime(o.data) + '</td>' +
@@ -339,6 +351,7 @@
       '<div class="adm-card"><div class="c-head">Faturas de pré-venda (' + faturas.length + ')</div>' +
       '<div class="c-body">' +
       faturas.map(function (f) {
+        var orig = (f.itens && f.itens[0]) || {};
         var itens = (f.itens || []).map(function (it) {
           return '<tr><td>' + esc(it.artigo) + '</td><td>' + esc(it.nome) + '</td>' +
             '<td class="r">' + it.qtd + '</td><td class="r">' + FG.fmtMoney(it.preco) + '</td>' +
@@ -349,7 +362,7 @@
           '<div class="venda-meta">' +
           '<div><span class="muted">Cliente</span><br><b>' + esc(f.empresa) + '</b></div>' +
           '<div><span class="muted">Fatura</span><br><b>' + esc(f.numero) + '</b></div>' +
-          '<div><span class="muted">Competência</span><br><b>' + esc(f.competencia || '—') + '</b></div>' +
+          '<div><span class="muted">Pedido de origem</span><br><b>' + esc(orig.cx || '—') + '</b><br><span class="muted">' + esc(orig.pedido || '') + '</span></div>' +
           '<div><span class="muted">Status</span><br>' + pill(f.status) + '</div>' +
           '<div><span class="muted">Valor</span><br><b>' + FG.fmtMoney(f.valor) + '</b></div>' +
           '</div>' +

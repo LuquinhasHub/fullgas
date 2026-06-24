@@ -466,25 +466,24 @@ router.put('/pedidos/:numero/status', requireAuth, requireAdmin, async (req, res
     }
 
     // ---- Envio segmentado ----
+    // Peças em pré-venda (EmBackorder=1) vivem numa fatura separada e NÃO entram
+    // no fluxo de envio normal do pedido. O status 'Enviado' (escopo 'normal'/
+    // 'tudo') envia só as peças em estoque; o escopo 'backorder' envia as de
+    // pré-venda que já voltaram ao estoque, reusando a fatura ativada.
     if (isShip) {
-      const escTudo = escopo === 'tudo' ? 1 : 0;
-      const escBack = escopo === 'backorder' ? 1 : 0;
+      const alvoBackorder = escopo === 'backorder' ? 1 : 0;
       const cand = await new sql.Request(tx)
         .input('pid', sql.Int, ped.PedidoId)
-        .input('escTudo', sql.Bit, escTudo)
-        .input('escBack', sql.Bit, escBack)
+        .input('alvo', sql.Bit, alvoBackorder)
         .query(`SELECT pi.PedidoItemId, pi.ProdutoId, pi.PrecoUnitario, pi.Quantidade,
                        pi.QuantidadeEnviada, pi.EmBackorder, pi.PreVendaFaturaId,
                        f.Status AS PvStatus
                   FROM dbo.PedidoItem pi
                   LEFT JOIN dbo.Fatura f ON f.FaturaId = pi.PreVendaFaturaId AND f.Tipo = 'PreVenda'
                  WHERE pi.PedidoId = @pid AND pi.Quantidade > pi.QuantidadeEnviada
-                   AND (@escTudo = 1 OR pi.EmBackorder = @escBack)`);
+                   AND pi.EmBackorder = @alvo`);
 
-      let totalEnvio = 0;        // valor total enviado (resposta informativa)
-      let totalNovaFatura = 0;   // só itens que geram fatura NOVA
-      let itensNovaFatura = 0;
-      let enviados = 0;
+      let totalEnvio = 0, totalNovaFatura = 0, itensNovaFatura = 0, enviados = 0;
       const faturasPreVenda = new Set(); // faturas de pré-venda ativadas a reusar
       for (const it of cand.recordset) {
         const restante = it.Quantidade - it.QuantidadeEnviada;
@@ -502,7 +501,7 @@ router.put('/pedidos/:numero/status', requireAuth, requireAdmin, async (req, res
           .query('UPDATE dbo.PedidoItem SET QuantidadeEnviada = Quantidade WHERE PedidoItemId = @iid');
         totalEnvio += Number(it.PrecoUnitario) * restante;
         enviados++;
-        // Itens em pré-venda já ativados reusam a própria fatura (sem duplicar).
+        // Itens de pré-venda ativados reusam a própria fatura (sem duplicar).
         if (it.EmBackorder && it.PreVendaFaturaId && it.PvStatus === 'Ativa') {
           faturasPreVenda.add(it.PreVendaFaturaId);
         } else {
@@ -511,13 +510,16 @@ router.put('/pedidos/:numero/status', requireAuth, requireAdmin, async (req, res
         }
       }
 
-      if (!enviados) {
+      // Envio de pré-venda exige estoque; sem nada disponível é erro. Para o
+      // envio normal, não enviar nada não é erro (ex.: marcar 'Enviado' com as
+      // peças em estoque já enviadas e só pré-venda pendente) — apenas atualiza
+      // o status do pedido.
+      if (alvoBackorder && !enviados) {
         await tx.rollback();
-        return res.status(409).json({ erro: 'Nenhum item disponível para envio neste escopo.' });
+        return res.status(409).json({ erro: 'Nenhuma peça de pré-venda disponível para envio (sem estoque).' });
       }
 
-      // Fatura nova só para itens normais/legados; itens de pré-venda ativados
-      // ligam a entrega à própria fatura de pré-venda (vira 'Emitida').
+      // Entrega/fatura para o que foi enviado agora.
       let numeroEntrega = null, numeroFatura = null;
       if (itensNovaFatura > 0) {
         const d = await gerarEntregaFatura(tx, ped.PedidoId, ped.EmpresaId, totalNovaFatura);
@@ -527,14 +529,15 @@ router.put('/pedidos/:numero/status', requireAuth, requireAdmin, async (req, res
         const d = await gerarEntregaParaFatura(tx, ped.PedidoId, ped.EmpresaId, fid);
         if (!numeroEntrega) numeroEntrega = d.numeroEntrega;
       }
-      const docs = { numeroEntrega, numeroFatura };
 
-      // Status do pedido: 'Enviado' se nada mais falta; senão 'Processando'.
+      // Status do pedido considera APENAS as peças em estoque (não-backorder);
+      // as de pré-venda seguem o ciclo na fatura separada.
       const rest = await new sql.Request(tx)
         .input('pid', sql.Int, ped.PedidoId)
-        .query('SELECT COUNT(*) AS pend FROM dbo.PedidoItem WHERE PedidoId = @pid AND Quantidade > QuantidadeEnviada');
-      const faltam = rest.recordset[0].pend > 0;
-      const novoStatus = faltam ? 'Processando' : 'Enviado';
+        .query(`SELECT COUNT(*) AS pend FROM dbo.PedidoItem
+                 WHERE PedidoId = @pid AND EmBackorder = 0 AND Quantidade > QuantidadeEnviada`);
+      const faltamNormais = rest.recordset[0].pend > 0;
+      const novoStatus = faltamNormais ? 'Processando' : 'Enviado';
       await new sql.Request(tx)
         .input('pid', sql.Int, ped.PedidoId)
         .input('st', sql.VarChar(14), novoStatus)
@@ -542,8 +545,8 @@ router.put('/pedidos/:numero/status', requireAuth, requireAdmin, async (req, res
 
       await tx.commit();
       return res.json({
-        ok: true, status: novoStatus, parcial: faltam,
-        entrega: docs.numeroEntrega, fatura: docs.numeroFatura, valor: totalEnvio
+        ok: true, status: novoStatus, parcial: faltamNormais,
+        entrega: numeroEntrega, fatura: numeroFatura, valor: totalEnvio
       });
     }
 

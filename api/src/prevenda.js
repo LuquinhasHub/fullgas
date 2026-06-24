@@ -43,24 +43,11 @@ async function criarFatura(tx, empresaId, competencia, status) {
   return ins.recordset[0].FaturaId;
 }
 
-// Acha (ou cria) a fatura STANDBY aberta da empresa na competência — esta sim
-// acumula (uma por cliente por mês) enquanto os itens aguardam reposição.
-async function acharOuCriarFaturaStandby(tx, empresaId, competencia) {
-  const found = await new sql.Request(tx)
-    .input('eid', sql.Int, empresaId)
-    .input('comp', sql.Char(7), competencia)
-    .query(`SELECT TOP 1 FaturaId FROM dbo.Fatura
-             WHERE Tipo='PreVenda' AND Status='Standby' AND EmpresaId=@eid AND Competencia=@comp
-             ORDER BY FaturaId DESC`);
-  if (found.recordset.length) return found.recordset[0].FaturaId;
-  return criarFatura(tx, empresaId, competencia, 'Standby');
-}
-
-// Vincula os itens em backorder de um pedido à fatura standby da empresa
-// (criando-a se necessário) e recalcula o valor. Chamada no POST /pedidos,
-// dentro da transação de criação do pedido.
+// Cria a fatura STANDBY de pré-venda DESTE pedido (uma por pedido — nunca junta
+// pedidos diferentes) e vincula os itens em backorder. Cada peça referencia o
+// pedido de origem via PedidoId. Chamada no POST /pedidos, dentro da transação.
 export async function vincularBackorderDoPedido(tx, empresaId, pedidoId) {
-  const faturaId = await acharOuCriarFaturaStandby(tx, empresaId, competenciaAtual());
+  const faturaId = await criarFatura(tx, empresaId, competenciaAtual(), 'Standby');
   await new sql.Request(tx)
     .input('fid', sql.Int, faturaId)
     .input('pid', sql.Int, pedidoId)
@@ -90,49 +77,42 @@ export async function desvincularPedido(tx, pedidoId) {
   }
 }
 
-// Gatilho: produto voltou ao estoque. Move as linhas standby desse produto para
-// a fatura 'Ativa' da respectiva empresa. Abre transação própria.
+// Gatilho: produto voltou ao estoque. Para CADA fatura standby de origem (que é
+// uma por pedido) que contém esse produto, move as linhas do produto para uma
+// NOVA fatura 'Ativa' própria — preservando a separação por pedido e por
+// produto (nunca junta pedidos diferentes). Abre transação própria.
 export async function ativarPreVendaPorProduto(produtoId) {
   const pool = await getPool();
   const tx = new sql.Transaction(pool);
   await tx.begin();
   try {
-    // Faturas standby de origem (para recalcular/limpar) e empresas afetadas.
-    const orig = await new sql.Request(tx)
+    // Faturas standby (uma por pedido) com esse produto pendente.
+    const standbys = await new sql.Request(tx)
       .input('prod', sql.Int, produtoId)
-      .query(`SELECT DISTINCT pi.PreVendaFaturaId, p.EmpresaId
+      .query(`SELECT DISTINCT pi.PreVendaFaturaId AS fid, f.EmpresaId
                 FROM dbo.PedidoItem pi
-                JOIN dbo.Pedido p ON p.PedidoId = pi.PedidoId
                 JOIN dbo.Fatura f ON f.FaturaId = pi.PreVendaFaturaId
                WHERE pi.ProdutoId=@prod AND pi.EmBackorder=1
                  AND f.Tipo='PreVenda' AND f.Status='Standby'`);
 
-    if (!orig.recordset.length) { await tx.commit(); return 0; }
+    if (!standbys.recordset.length) { await tx.commit(); return 0; }
 
     const comp = competenciaAtual();
-    const empresas = [...new Set(orig.recordset.map(r => r.EmpresaId))];
     let movidas = 0;
-
-    for (const empresaId of empresas) {
-      // Cada produto que sai do standby ganha a SUA fatura ativa (individual),
-      // por isso criamos uma nova fatura a cada ativação em vez de reaproveitar.
-      const ativaId = await criarFatura(tx, empresaId, comp, 'Ativa');
+    for (const row of standbys.recordset) {
+      const origFid = row.fid;
+      // Fatura ativa própria para este produto, ainda referenciando o mesmo
+      // pedido (a standby de origem é por pedido).
+      const ativaId = await criarFatura(tx, row.EmpresaId, comp, 'Ativa');
       const upd = await new sql.Request(tx)
-        .input('prod', sql.Int, produtoId).input('eid', sql.Int, empresaId).input('fid', sql.Int, ativaId)
-        .query(`UPDATE pi SET pi.PreVendaFaturaId=@fid
-                  FROM dbo.PedidoItem pi
-                  JOIN dbo.Pedido p ON p.PedidoId=pi.PedidoId
-                  JOIN dbo.Fatura f ON f.FaturaId=pi.PreVendaFaturaId
-                 WHERE pi.ProdutoId=@prod AND pi.EmBackorder=1 AND p.EmpresaId=@eid
-                   AND f.Tipo='PreVenda' AND f.Status='Standby'`);
+        .input('prod', sql.Int, produtoId).input('orig', sql.Int, origFid).input('fid', sql.Int, ativaId)
+        .query(`UPDATE dbo.PedidoItem SET PreVendaFaturaId=@fid
+                 WHERE ProdutoId=@prod AND EmBackorder=1 AND PreVendaFaturaId=@orig`);
       movidas += upd.rowsAffected[0] || 0;
       await recalcularFatura(tx, ativaId);
-    }
-
-    // Recalcula as standby de origem e apaga as que ficaram sem itens.
-    for (const fid of [...new Set(orig.recordset.map(r => r.PreVendaFaturaId))]) {
-      await recalcularFatura(tx, fid);
-      await new sql.Request(tx).input('fid', sql.Int, fid)
+      // Recalcula a standby de origem e apaga se ficou vazia.
+      await recalcularFatura(tx, origFid);
+      await new sql.Request(tx).input('fid', sql.Int, origFid)
         .query(`DELETE FROM dbo.Fatura
                  WHERE FaturaId=@fid AND Tipo='PreVenda' AND Status='Standby'
                    AND NOT EXISTS (SELECT 1 FROM dbo.PedidoItem WHERE PreVendaFaturaId=@fid)`);
