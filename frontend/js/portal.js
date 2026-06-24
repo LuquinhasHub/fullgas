@@ -574,33 +574,39 @@
      ========================================================= */
   function renderFinanceiro() {
     setCrumb(['Conta financeira', 'Faturas']); setTabOn('financeiro');
-    var todas = FG.all('invoices');
-    // Faturas de pré-venda em espera ficam numa seção à parte; ao serem ativadas
-    // (produto reposto) entram na lista principal — que já vem ordenada pela
-    // API por última atualização, então as recém-ativadas aparecem no topo.
-    var emEspera = todas.filter(function (i) { return i.preVenda && i.status === 'Standby'; });
-    var inv = todas.filter(function (i) { return !(i.preVenda && i.status === 'Standby'); });
+    var inv = FG.all('invoices'); // faturas reais (cobrança)
     var faturado = 0, credito = 0;
     inv.forEach(function (i) { if (i.valor >= 0) faturado += i.valor; else credito += i.valor; });
 
+    // Pré-venda: peças já compradas (incluídas na fatura do pedido, sem cobrança
+    // à parte) que aguardam envio. Derivado dos pedidos; status pelo estoque atual.
+    var preParts = [];
+    FG.all('orders').forEach(function (o) {
+      (o.itens || []).forEach(function (it) {
+        if (!it.backorder) return;
+        var p = FG.product(it.artigo);
+        var st = it.qtdEnviada >= it.qtd ? 'Enviado' : ((p && p.estoque > 0) ? 'Disponivel' : 'Aguardando');
+        preParts.push({ it: it, o: o, st: st, prev: p && p.previsao });
+      });
+    });
+
     var preVendaHTML = '';
-    if (emEspera.length) {
+    if (preParts.length) {
       preVendaHTML =
-        '<h3 class="sec-title">Pré-venda — aguardando reposição</h3>' +
-        '<div class="backorder-aviso">Estas faturas ficam em espera até os produtos voltarem ao ' +
-        'estoque. Quando isso acontece, cada peça é ativada e passa a aparecer na lista acima.</div>' +
-        emEspera.map(function (f) {
-          return '<div class="fin-prevenda"><div class="fin-prevenda-head">' +
-            esc(f.numero) + ' · ' + esc(f.competencia || '') + ' · <b>' + FG.fmtMoney(f.valor) + '</b>' +
-            ' <span class="pill-status Standby">Em espera</span></div>' +
-            '<table class="table"><thead><tr><th>Artigo</th><th>Peça</th><th class="right">Qtd.</th>' +
-            '<th class="right">Preço un.</th><th>Pedido</th></tr></thead><tbody>' +
-            (f.itens || []).map(function (it) {
-              return '<tr><td>' + esc(it.artigo) + '</td><td>' + esc(it.nome) + '</td>' +
-                '<td class="right">' + it.qtd + '</td><td class="right">' + FG.fmtMoney(it.preco) + '</td>' +
-                '<td><a href="#pedido/' + esc(it.pedido) + '">' + esc(it.cx || it.pedido) + '</a></td></tr>';
-            }).join('') + '</tbody></table></div>';
-        }).join('');
+        '<h3 class="sec-title">Pré-venda — peças a enviar</h3>' +
+        '<div class="backorder-aviso">Estas peças já estão incluídas na fatura do pedido (sem cobrança ' +
+        'à parte). São enviadas assim que voltam ao estoque — acompanhe o status abaixo.</div>' +
+        '<table class="table"><thead><tr><th>Artigo</th><th>Peça</th><th class="right">Qtd.</th>' +
+        '<th>Pedido</th><th>Status do envio</th></tr></thead><tbody>' +
+        preParts.map(function (x) {
+          var pill = x.st === 'Enviado' ? '<span class="pill-status Enviado">Enviado</span>'
+            : x.st === 'Disponivel' ? '<span class="pill-status Disponivel">Disponível — envio em breve</span>'
+            : '<span class="pill-status Aguardando">Aguardando reposição' + (x.prev ? ' · ' + esc(x.prev) : '') + '</span>';
+          return '<tr><td>' + esc(x.it.artigo) + '</td><td>' + esc(x.it.nome) + '</td>' +
+            '<td class="right">' + x.it.qtd + '</td>' +
+            '<td><a href="#pedido/' + esc(x.o.id) + '">' + esc(x.o.cx) + '</a></td>' +
+            '<td>' + pill + '</td></tr>';
+        }).join('') + '</tbody></table>';
     }
 
     view.innerHTML =

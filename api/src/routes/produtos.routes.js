@@ -4,7 +4,6 @@
 import { Router } from 'express';
 import { query } from '../db.js';
 import { requireAuth, requireAdmin } from '../auth.js';
-import { ativarPreVendaPorProduto } from '../prevenda.js';
 
 const router = Router();
 
@@ -88,24 +87,17 @@ router.put('/produtos/:sku', requireAuth, requireAdmin, async (req, res, next) =
     const c = await query('SELECT CategoriaId FROM dbo.Categoria WHERE Codigo = @cat', { cat });
     if (!c.length) return res.status(400).json({ erro: 'Categoria inválida.' });
 
-    const r = await query(
+    await query(
       `UPDATE dbo.Produto
           SET Nome=@nome, CategoriaId=@catId, Descricao=@desc,
               Preco=@preco, Estoque=@est, PrevisaoChegada=@prev, AtualizadoEm=SYSUTCDATETIME()
-        OUTPUT inserted.ProdutoId, inserted.Estoque
         WHERE Sku=@sku`,
       {
         sku: req.params.sku, nome, catId: c[0].CategoriaId, desc: descricao || null,
         preco, est: estoque || 0, prev: previsao || null
       }
     );
-
-    // Reposição de estoque destrava (ativa) as pré-vendas pendentes do produto.
-    let preVendaAtivadas = 0;
-    if (r.length && r[0].Estoque > 0) {
-      preVendaAtivadas = await ativarPreVendaPorProduto(r[0].ProdutoId);
-    }
-    res.json({ ok: true, preVendaAtivadas });
+    res.json({ ok: true });
   } catch (e) { next(e); }
 });
 

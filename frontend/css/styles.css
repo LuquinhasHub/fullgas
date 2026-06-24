@@ -134,6 +134,8 @@ h1, h2, h3 { margin: 0 0 .5em; }
 .pill-status.Anulada { background: #fee2e2; color: #b91c1c; }
 .pill-status.Standby { background: #e2e8f0; color: #475569; }
 .pill-status.Ativa { background: #ccfbf1; color: #0f766e; }
+.pill-status.Aguardando { background: #e2e8f0; color: #475569; }
+.pill-status.Disponivel { background: #ccfbf1; color: #0f766e; }
 
 /* ---------- fatura de pré-venda (admin e cliente) ---------- */
 .venda-det { padding: 4px 2px 10px; }

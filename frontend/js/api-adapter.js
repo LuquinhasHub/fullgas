@@ -55,7 +55,7 @@
   // Cache em memória que espelha o antigo "db".
   var CACHE = { products: [], categories: [], models: [], vehicles: [],
                 orders: [], claims: [], invoices: [], deliveries: [],
-                notifications: [], users: [], searches: [] };
+                notifications: [], users: [], searches: [], prevenda: [] };
 
   function carregarCache() {
     if (!token()) return;
@@ -65,15 +65,21 @@
     var mod = apiSync('/veiculos/modelos'); if (mod) CACHE.models = mod;
     var veic = apiSync('/veiculos'); if (veic) CACHE.vehicles = veic;
     var fat = apiSync('/faturas'); if (fat) CACHE.invoices = fat;
+    var pv = apiSync('/prevenda'); if (pv) CACHE.prevenda = pv;
     // (demais coleções entram nas próximas rotas: reivindicações, etc.)
   }
 
-  // Recarrega o cache de faturas de forma síncrona (após mudanças que afetam
-  // faturas de pré-venda, ex.: reposição de estoque que ativa pré-vendas).
+  // Recarrega o cache de faturas (cobrança) de forma síncrona.
   function recarregarFaturas() {
     var lista = apiSync('/faturas'); if (lista) CACHE.invoices = lista; return lista;
   }
   FG.recarregarFaturas = recarregarFaturas;
+
+  // Recarrega o rastreador de pré-venda (peças a enviar) de forma síncrona.
+  function recarregarPreVenda() {
+    var lista = apiSync('/prevenda'); if (lista) CACHE.prevenda = lista; return lista;
+  }
+  FG.recarregarPreVenda = recarregarPreVenda;
 
   // Recarrega o cache de veículos de forma síncrona (após venda/garantia).
   function recarregarVeiculos() {
@@ -124,9 +130,9 @@
   };
 
   // Produtos (admin) — gravações assíncronas que atualizam o cache no fim.
-  // Após gravar produto, recarrega produtos E faturas (a reposição de estoque
-  // pode ter ativado faturas de pré-venda no servidor).
-  function aposGravarProduto(lista) { recarregarFaturas(); return lista; }
+  // Após gravar produto, recarrega o rastreador de pré-venda (a reposição de
+  // estoque muda o status das peças de "Aguardando" para "Disponível").
+  function aposGravarProduto(lista) { recarregarPreVenda(); return lista; }
   FG.apiCriarProduto = function (p) { return api('/produtos', { method: 'POST', body: p }).then(recarregarProdutos).then(aposGravarProduto); };
   FG.apiEditarProduto = function (sku, p) { return api('/produtos/' + encodeURIComponent(sku), { method: 'PUT', body: p }).then(recarregarProdutos).then(aposGravarProduto); };
   FG.apiExcluirProduto = function (sku) { return api('/produtos/' + encodeURIComponent(sku), { method: 'DELETE' }).then(recarregarProdutos).then(aposGravarProduto); };
@@ -209,9 +215,12 @@
     return putSync('/pedidos/' + encodeURIComponent(numero) + '/status', { escopo: escopo });
   };
 
-  // Ajuste manual da quantidade enviada de um item do pedido (admin).
+  // Ajuste manual da quantidade enviada de um item do pedido (admin). Também é
+  // a ação "Enviado" do rastreador de pré-venda — recarrega o rastreador no fim.
   FG.setItemEnviado = function (numero, itemId, qtd) {
-    return putSync('/pedidos/' + encodeURIComponent(numero) + '/itens/' + itemId + '/enviado', { qtd: qtd });
+    var r = putSync('/pedidos/' + encodeURIComponent(numero) + '/itens/' + itemId + '/enviado', { qtd: qtd });
+    if (r && r.ok) recarregarPreVenda();
+    return r;
   };
 
   /* ---------- veículos: substitui as ações inline do portal.js ---------- */
