@@ -295,7 +295,8 @@
       var p = FG.product(i.artigo); if (!p) return;
       html += '<div class="cart-line">' +
         '<span>' + prodImg(p, 70) + '</span>' +
-        '<span><b><a href="#/produto/' + p.artigo + '">' + esc(p.nome) + '</a></b><br><span class="muted">' + p.artigo + '</span></span>' +
+        '<span><b><a href="#/produto/' + p.artigo + '">' + esc(p.nome) + '</a></b><br><span class="muted">' + p.artigo + '</span>' +
+        '<br>' + stockHTML(p) + '</span>' +
         '<span>' + FG.fmtMoney(p.preco) + '</span>' +
         '<span><input class="qty-in ct-qty" data-art="' + p.artigo + '" type="number" min="0" value="' + i.qtd + '"></span>' +
         '<span class="right"><b>' + FG.fmtMoney(p.preco * i.qtd) + '</b></span>' +
