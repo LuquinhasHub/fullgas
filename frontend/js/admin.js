@@ -176,7 +176,12 @@
         var c = FG.category(p.cat);
         return '<tr><td>' + p.artigo + '</td><td>' + esc(p.nome) + '</td><td>' + esc(c ? c.nome : p.cat) + '</td>' +
           '<td class="r">' + FG.fmtMoney(p.preco) + '</td>' +
-          '<td class="r">' + (p.estoque > 0 ? p.estoque : '<span style="color:#b91c1c;font-weight:700;">0</span>') + '</td>' +
+          '<td class="r">' + (p.estoque > 0
+            ? p.estoque
+            : '<span style="color:#b91c1c;font-weight:700;">Fora de estoque</span>' +
+              (p.previsao
+                ? '<div style="color:#92600a;font-weight:600;font-size:12px;margin-top:2px;">⏳ Chega em ' + esc(p.previsao) + '</div>'
+                : '<div style="color:#92600a;font-size:12px;margin-top:2px;">sem previsão</div>')) + '</td>' +
           '<td><button class="btn-line btn-mini" data-ac="edit" data-art="' + p.artigo + '">Editar</button> ' +
           '<button class="btn-line btn-mini" data-ac="del" data-art="' + p.artigo + '">Excluir</button></td></tr>';
       }).join('') + '</tbody></table></div></div>';
