@@ -187,8 +187,9 @@
         var art = b.getAttribute('data-art');
         if (b.getAttribute('data-ac') === 'edit') { modalProduto(FG.product(art)); return; }
         if (!confirm('Excluir o artigo ' + art + '?')) return;
-        FG.setCol('products', FG.all('products').filter(function (p) { return p.artigo !== art; }));
-        FG.toast('Artigo excluído.'); renderProdutos();
+        FG.apiExcluirProduto(art)
+          .then(function () { FG.toast('Artigo excluído.'); renderProdutos(); })
+          .catch(function (e) { FG.toast((e && e.message) || 'Falha ao excluir.', 'erro'); });
       });
     });
   }
@@ -235,10 +236,11 @@
         previsao: document.getElementById('mp-prev').value.trim() || null,
         descricao: document.getElementById('mp-desc').value.trim()
       };
-      if (novo) prods.push(dados);
-      else prods = prods.map(function (x) { return x.artigo === art ? dados : x; });
-      FG.setCol('products', prods);
-      fechar(); FG.toast('Produto salvo.'); renderProdutos();
+      function fail(e) { FG.toast((e && e.message) || 'Falha ao salvar o produto.', 'erro'); }
+      var acao = novo ? FG.apiCriarProduto(dados) : FG.apiEditarProduto(art, dados);
+      acao.then(function () {
+        fechar(); FG.toast(novo ? 'Produto criado.' : 'Produto salvo.'); renderProdutos();
+      }).catch(fail);
     });
   }
 
@@ -322,6 +324,42 @@
   }
 
   /* =========================================================
+     PRÉ-VENDA (faturas em standby / ativadas)
+     ========================================================= */
+  function renderPreVenda() {
+    h1.textContent = 'Faturas de pré-venda'; setOn('prevenda');
+    var faturas = FG.all('invoices').filter(function (f) { return f.preVenda; });
+    if (!faturas.length) {
+      view.innerHTML = '<div class="adm-card"><div class="c-body muted">' +
+        'Nenhuma fatura de pré-venda no momento. Elas surgem quando um pedido inclui ' +
+        'itens sem estoque e ficam em espera até a reposição.</div></div>';
+      return;
+    }
+    view.innerHTML =
+      '<div class="adm-card"><div class="c-head">Faturas de pré-venda (' + faturas.length + ')</div>' +
+      '<div class="c-body">' +
+      faturas.map(function (f) {
+        var itens = (f.itens || []).map(function (it) {
+          return '<tr><td>' + esc(it.artigo) + '</td><td>' + esc(it.nome) + '</td>' +
+            '<td class="r">' + it.qtd + '</td><td class="r">' + FG.fmtMoney(it.preco) + '</td>' +
+            '<td><a href="#pedidos" title="Ver em Vendas">' + esc(it.cx || '') + '</a>' +
+            ' <span class="muted">' + esc(it.pedido || '') + '</span></td></tr>';
+        }).join('');
+        return '<div class="venda-det">' +
+          '<div class="venda-meta">' +
+          '<div><span class="muted">Cliente</span><br><b>' + esc(f.empresa) + '</b></div>' +
+          '<div><span class="muted">Fatura</span><br><b>' + esc(f.numero) + '</b></div>' +
+          '<div><span class="muted">Competência</span><br><b>' + esc(f.competencia || '—') + '</b></div>' +
+          '<div><span class="muted">Status</span><br>' + pill(f.status) + '</div>' +
+          '<div><span class="muted">Valor</span><br><b>' + FG.fmtMoney(f.valor) + '</b></div>' +
+          '</div>' +
+          '<table class="tbl"><thead><tr><th>Artigo</th><th>Peça</th><th class="r">Qtd.</th>' +
+          '<th class="r">Preço un.</th><th>Pedido de origem</th></tr></thead><tbody>' +
+          itens + '</tbody></table></div>';
+      }).join('') + '</div></div>';
+  }
+
+  /* =========================================================
      ROUTER
      ========================================================= */
   function route() {
@@ -331,6 +369,7 @@
       case 'usuarios': renderUsuarios(); break;
       case 'produtos': renderProdutos(); break;
       case 'pedidos': renderPedidos(); break;
+      case 'prevenda': renderPreVenda(); break;
       case 'reivindicacoes': renderClaims(); break;
       default: renderDash();
     }

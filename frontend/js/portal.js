@@ -574,9 +574,34 @@
      ========================================================= */
   function renderFinanceiro() {
     setCrumb(['Conta financeira', 'Faturas']); setTabOn('financeiro');
-    var inv = FG.all('invoices');
+    var todas = FG.all('invoices');
+    // Faturas de pré-venda em espera ficam numa seção à parte; ao serem ativadas
+    // (produto reposto) entram na lista principal — que já vem ordenada pela
+    // API por última atualização, então as recém-ativadas aparecem no topo.
+    var emEspera = todas.filter(function (i) { return i.preVenda && i.status === 'Standby'; });
+    var inv = todas.filter(function (i) { return !(i.preVenda && i.status === 'Standby'); });
     var faturado = 0, credito = 0;
     inv.forEach(function (i) { if (i.valor >= 0) faturado += i.valor; else credito += i.valor; });
+
+    var preVendaHTML = '';
+    if (emEspera.length) {
+      preVendaHTML =
+        '<h3 class="sec-title">Pré-venda — aguardando reposição</h3>' +
+        '<div class="backorder-aviso">Estas faturas ficam em espera até os produtos voltarem ao ' +
+        'estoque. Quando isso acontece, cada peça é ativada e passa a aparecer na lista acima.</div>' +
+        emEspera.map(function (f) {
+          return '<div class="fin-prevenda"><div class="fin-prevenda-head">' +
+            esc(f.numero) + ' · ' + esc(f.competencia || '') + ' · <b>' + FG.fmtMoney(f.valor) + '</b>' +
+            ' <span class="pill-status Standby">Em espera</span></div>' +
+            '<table class="table"><thead><tr><th>Artigo</th><th>Peça</th><th class="right">Qtd.</th>' +
+            '<th class="right">Preço un.</th><th>Pedido</th></tr></thead><tbody>' +
+            (f.itens || []).map(function (it) {
+              return '<tr><td>' + esc(it.artigo) + '</td><td>' + esc(it.nome) + '</td>' +
+                '<td class="right">' + it.qtd + '</td><td class="right">' + FG.fmtMoney(it.preco) + '</td>' +
+                '<td><a href="#pedido/' + esc(it.pedido) + '">' + esc(it.cx || it.pedido) + '</a></td></tr>';
+            }).join('') + '</tbody></table></div>';
+        }).join('');
+    }
 
     view.innerHTML =
       '<h2>Conta financeira</h2>' +
@@ -589,11 +614,13 @@
       '<table class="table"><thead><tr><th class="filt">Tipo</th><th class="filt">N° da fatura</th>' +
       '<th class="filt">Data da fatura ↓</th><th class="right filt">Quantia cobrada</th><th>Moeda</th><th></th></tr></thead><tbody>' +
       inv.map(function (i, idx) {
-        return '<tr><td>' + esc(i.tipo) + '</td><td>' + i.numero + '</td><td>' + FG.fmtDate(i.data) + '</td>' +
+        return '<tr><td>' + esc(i.tipo) +
+          (i.status && i.status !== 'Emitida' ? ' <span class="pill-status ' + esc(i.status) + '">' + esc(i.status) + '</span>' : '') +
+          '</td><td>' + i.numero + '</td><td>' + FG.fmtDate(i.data) + '</td>' +
           '<td class="right">' + i.valor.toLocaleString('pt-BR', { minimumFractionDigits: 2 }) + '</td>' +
           '<td>' + esc(i.moeda) + '</td><td><button class="pdf-ico" data-i="' + idx + '">PDF</button></td></tr>';
       }).join('') +
-      '</tbody></table>';
+      '</tbody></table>' + preVendaHTML;
 
     document.getElementById('fi-csv').addEventListener('click', function () {
       var linhas = [['Tipo', 'N°', 'Data', 'Valor', 'Moeda']];

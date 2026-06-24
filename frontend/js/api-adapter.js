@@ -64,8 +64,16 @@
     var ped = apiSync('/pedidos'); if (ped) CACHE.orders = ped;
     var mod = apiSync('/veiculos/modelos'); if (mod) CACHE.models = mod;
     var veic = apiSync('/veiculos'); if (veic) CACHE.vehicles = veic;
+    var fat = apiSync('/faturas'); if (fat) CACHE.invoices = fat;
     // (demais coleções entram nas próximas rotas: reivindicações, etc.)
   }
+
+  // Recarrega o cache de faturas de forma síncrona (após mudanças que afetam
+  // faturas de pré-venda, ex.: reposição de estoque que ativa pré-vendas).
+  function recarregarFaturas() {
+    var lista = apiSync('/faturas'); if (lista) CACHE.invoices = lista; return lista;
+  }
+  FG.recarregarFaturas = recarregarFaturas;
 
   // Recarrega o cache de veículos de forma síncrona (após venda/garantia).
   function recarregarVeiculos() {
@@ -116,9 +124,12 @@
   };
 
   // Produtos (admin) — gravações assíncronas que atualizam o cache no fim.
-  FG.apiCriarProduto = function (p) { return api('/produtos', { method: 'POST', body: p }).then(recarregarProdutos); };
-  FG.apiEditarProduto = function (sku, p) { return api('/produtos/' + encodeURIComponent(sku), { method: 'PUT', body: p }).then(recarregarProdutos); };
-  FG.apiExcluirProduto = function (sku) { return api('/produtos/' + encodeURIComponent(sku), { method: 'DELETE' }).then(recarregarProdutos); };
+  // Após gravar produto, recarrega produtos E faturas (a reposição de estoque
+  // pode ter ativado faturas de pré-venda no servidor).
+  function aposGravarProduto(lista) { recarregarFaturas(); return lista; }
+  FG.apiCriarProduto = function (p) { return api('/produtos', { method: 'POST', body: p }).then(recarregarProdutos).then(aposGravarProduto); };
+  FG.apiEditarProduto = function (sku, p) { return api('/produtos/' + encodeURIComponent(sku), { method: 'PUT', body: p }).then(recarregarProdutos).then(aposGravarProduto); };
+  FG.apiExcluirProduto = function (sku) { return api('/produtos/' + encodeURIComponent(sku), { method: 'DELETE' }).then(recarregarProdutos).then(aposGravarProduto); };
 
   function recarregarProdutos() {
     return api('/produtos').then(function (lista) { CACHE.products = lista; return lista; });
