@@ -254,6 +254,38 @@
   // Status terminais: uma vez aqui, o pedido não pode mais mudar de status.
   var STATUS_TERMINAIS = ['Entregue', 'Cancelado'];
 
+  // Status de cada peça do pedido (a partir de qtd/qtdEnviada/backorder):
+  // Enviado (tudo), Parcial (parte), Pré-venda (backorder não enviado),
+  // Pendente (normal não enviado). Não altera o status do pedido em si.
+  function itemStatus(it) {
+    if (it.qtdEnviada >= it.qtd) return { cls: 'Enviado', txt: 'Enviado' };
+    if (it.qtdEnviada > 0) return { cls: 'Parcial', txt: 'Parcial ' + it.qtdEnviada + '/' + it.qtd };
+    if (it.backorder) return { cls: 'PreVenda', txt: 'Pré-venda' };
+    return { cls: 'Pendente', txt: 'Pendente' };
+  }
+
+  // Bloco de detalhe (cliente + data + peças com status) que abre sob o pedido.
+  function detalheVenda(o) {
+    var pg = o.progresso || { enviada: 0, qtd: 0, pct: 0 };
+    var linhas = o.itens.map(function (it) {
+      var st = itemStatus(it);
+      return '<tr><td>' + esc(it.artigo) + '</td><td>' + esc(it.nome) + '</td>' +
+        '<td class="r">' + it.qtd + '</td><td class="r">' + it.qtdEnviada + '</td>' +
+        '<td class="r">' + FG.fmtMoney(it.preco) + '</td>' +
+        '<td><span class="pill-status ' + st.cls + '">' + esc(st.txt) + '</span></td></tr>';
+    }).join('');
+    return '<div class="venda-det">' +
+      '<div class="venda-meta">' +
+      '<div><span class="muted">Cliente</span><br><b>' + esc(o.empresa) + '</b><br><span class="muted">' + esc(o.usuario) + '</span></div>' +
+      '<div><span class="muted">Data da compra</span><br><b>' + FG.fmtDateTime(o.data) + '</b></div>' +
+      '<div><span class="muted">Pedido</span><br><b>' + esc(o.cx) + '</b><br><span class="muted">' + esc(o.id) + '</span></div>' +
+      '<div><span class="muted">Envio</span><br><b>' + pg.enviada + '/' + pg.qtd + '</b> peças (' + pg.pct + '%)</div>' +
+      '</div>' +
+      '<table class="tbl"><thead><tr><th>Artigo</th><th>Peça</th><th class="r">Qtd.</th>' +
+      '<th class="r">Enviada</th><th class="r">Preço un.</th><th>Status da peça</th></tr></thead><tbody>' +
+      linhas + '</tbody></table></div>';
+  }
+
   function renderPedidos() {
     h1.textContent = 'Gestão de pedidos'; setOn('pedidos');
     var orders = FG.all('orders');
@@ -262,10 +294,7 @@
       '<table class="tbl"><thead><tr><th>Pedido</th><th>Empresa</th><th>Data</th>' +
       '<th class="r">Total</th><th>Status</th><th></th></tr></thead><tbody>' +
       orders.map(function (o, i) {
-        return '<tr><td><b>' + o.cx + '</b><br><span class="muted">' + o.id + '</span>' +
-          '<div class="od-itens hidden" data-i="' + i + '" style="margin-top:6px;">' +
-          o.itens.map(function (it) { return '<div class="muted">' + it.qtd + '× ' + esc(it.nome) + ' (' + it.artigo + ')</div>'; }).join('') +
-          '</div></td>' +
+        return '<tr><td><b>' + o.cx + '</b><br><span class="muted">' + o.id + '</span></td>' +
           '<td>' + esc(o.empresa) + '<br><span class="muted">' + esc(o.usuario) + '</span></td>' +
           '<td>' + FG.fmtDateTime(o.data) + '</td>' +
           '<td class="r">' + FG.fmtMoney(o.total) + '</td>' +
@@ -276,12 +305,15 @@
               STATUS.map(function (s) { return '<option' + (s === o.status ? ' selected' : '') + '>' + s + '</option>'; }).join('') +
               '</select>') +
           '</td>' +
-          '<td><button class="btn-line btn-mini od-open" data-i="' + i + '">Itens</button></td></tr>';
+          '<td><button class="btn-line btn-mini od-open" data-i="' + i + '">Detalhes ▾</button></td></tr>' +
+          '<tr class="venda-row hidden" data-i="' + i + '"><td colspan="6">' + detalheVenda(o) + '</td></tr>';
       }).join('') + '</tbody></table></div></div>';
 
     Array.prototype.forEach.call(view.querySelectorAll('.od-open'), function (b) {
       b.addEventListener('click', function () {
-        view.querySelector('.od-itens[data-i="' + b.getAttribute('data-i') + '"]').classList.toggle('hidden');
+        var row = view.querySelector('.venda-row[data-i="' + b.getAttribute('data-i') + '"]');
+        var aberto = row.classList.toggle('hidden') === false;
+        b.textContent = aberto ? 'Detalhes ▴' : 'Detalhes ▾';
       });
     });
     Array.prototype.forEach.call(view.querySelectorAll('select.inline-status'), function (sel) {
