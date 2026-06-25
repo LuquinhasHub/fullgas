@@ -369,13 +369,14 @@
             : '<span class="muted" style="font-size:11px;">sem estoque</span>';
           return '<tr><td>' + esc(it.artigo) + '</td><td>' + esc(it.nome) + '</td>' +
             '<td class="r">' + it.pendente + '</td>' +
+            '<td>' + (it.data ? FG.fmtDate(it.data) : '—') + '</td>' +
             '<td><a href="#pedidos" title="Ver em Vendas">' + esc(it.cx) + '</a>' +
             ' <span class="muted">' + esc(it.pedido) + '</span></td>' +
             '<td>' + pvStatusPill(it) + '</td><td>' + acao + '</td></tr>';
         }).join('');
         return '<div class="venda-det"><div style="font-weight:600;margin:6px 0 2px;">' + esc(emp) + '</div>' +
           '<table class="tbl"><thead><tr><th>Artigo</th><th>Peça</th><th class="r">Qtd.</th>' +
-          '<th>Pedido de origem</th><th>Status</th><th>Ação</th></tr></thead><tbody>' +
+          '<th>Data do pedido</th><th>Pedido de origem</th><th>Status</th><th>Ação</th></tr></thead><tbody>' +
           linhas + '</tbody></table></div>';
       }).join('') + '</div></div>';
 

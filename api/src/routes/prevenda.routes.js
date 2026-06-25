@@ -20,7 +20,7 @@ router.get('/prevenda', requireAuth, async (req, res, next) => {
     const eid = req.user.papel === 'admin' ? null : req.user.empresaId;
     const rows = await query(
       `SELECT pi.PedidoItemId, pi.Sku, pi.NomeProduto, pi.Quantidade, pi.QuantidadeEnviada,
-              p.NumeroPedido, p.CodigoCx, p.EmpresaId, e.RazaoSocial AS Empresa,
+              p.NumeroPedido, p.CodigoCx, p.DataPedido, p.EmpresaId, e.RazaoSocial AS Empresa,
               pr.Estoque AS EstoqueAtual, pr.PrevisaoChegada
          FROM dbo.PedidoItem pi
          JOIN dbo.Pedido p ON p.PedidoId = pi.PedidoId
@@ -41,6 +41,7 @@ router.get('/prevenda', requireAuth, async (req, res, next) => {
       pendente: r.Quantidade - r.QuantidadeEnviada,
       pedido: r.NumeroPedido,
       cx: r.CodigoCx,
+      data: r.DataPedido instanceof Date ? r.DataPedido.toISOString() : (r.DataPedido || null),
       empresa: r.Empresa,
       empresaId: r.EmpresaId,
       estoque: r.EstoqueAtual == null ? 0 : r.EstoqueAtual,
