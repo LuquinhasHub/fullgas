@@ -144,8 +144,10 @@
         '<div class="m"><b>Article No.</b>' + p.artigo + '</div>' +
         '<div class="m"><b>Stock</b>' + stockHTML(p) + '</div>' +
         '<div class="m"><b>Preço</b>' + FG.fmtMoney(p.preco) + '</div>' +
-        '<div class="prod-buy"><input class="qty-in" type="number" min="1" value="1" data-art="' + p.artigo + '">' +
-        '<button class="btn dark add-cart" data-art="' + p.artigo + '">🛒 Adicionar</button></div>' +
+        (FG.compravel(p.artigo)
+          ? '<div class="prod-buy"><input class="qty-in" type="number" min="1" value="1"' + (p.estoque > 0 ? ' max="' + p.estoque + '"' : '') + ' data-art="' + p.artigo + '">' +
+            '<button class="btn dark add-cart" data-art="' + p.artigo + '">🛒 Adicionar</button></div>'
+          : '<div class="prod-buy"><button class="btn dark" disabled style="opacity:.55;cursor:not-allowed;">Indisponível</button></div>') +
         '</div></div></div>';
     }).join('');
     if (!lista.length) rows = '<div class="empty-box">Nenhum artigo encontrado com os filtros atuais.</div>';
@@ -194,7 +196,10 @@
         var lim = FG.limiteCompra(art);
         var jaNoCarro = (FG.cart().find(function (i) { return i.artigo === art; }) || {}).qtd || 0;
         var ajustou = (jaNoCarro + qtd) > lim;
-        if (!FG.cartAdd(art, qtd)) return;
+        if (!FG.cartAdd(art, qtd)) {
+          if (!FG.compravel(art)) FG.toast('Produto indisponível para compra.', 'erro');
+          return;
+        }
         if (ajustou) FG.toast('Estoque disponível: ' + lim + ' un. Quantidade ajustada.', 'erro');
         else FG.toast(qtd + '× adicionado à cesta.');
         refreshCart();
@@ -222,9 +227,13 @@
       '<p>' + esc(p.descricao) + '</p>' +
       '<div class="price-big">' + FG.fmtMoney(p.preco) + '</div>' +
       '<p><b>Stock:</b> ' + stockHTML(p) + (p.estoque > 0 ? ' <span class="muted">(' + p.estoque + ' un.)</span>' : '') + '</p>' +
-      '<div class="prod-buy" style="margin:0 0 18px;justify-content:flex-start;">' +
-      '<input class="qty-in" type="number" min="1" value="1"' + (p.estoque > 0 ? ' max="' + p.estoque + '"' : '') + ' data-art="' + p.artigo + '">' +
-      '<button class="btn dark add-cart" data-art="' + p.artigo + '">🛒 Adicionar ao carrinho</button></div>' +
+      (FG.compravel(p.artigo)
+        ? '<div class="prod-buy" style="margin:0 0 18px;justify-content:flex-start;">' +
+          '<input class="qty-in" type="number" min="1" value="1"' + (p.estoque > 0 ? ' max="' + p.estoque + '"' : '') + ' data-art="' + p.artigo + '">' +
+          '<button class="btn dark add-cart" data-art="' + p.artigo + '">🛒 Adicionar ao carrinho</button></div>'
+        : '<div class="prod-buy" style="margin:0 0 18px;justify-content:flex-start;">' +
+          '<button class="btn dark" disabled style="opacity:.55;cursor:not-allowed;">Indisponível</button>' +
+          '<span class="muted" style="font-size:12px;">Produto sem estoque e sem previsão de chegada.</span></div>') +
       (usados.length ? '<p class="muted" style="font-size:12px;">Aplicação (Parts Finder): ' +
         usados.map(function (m) { return '<a href="finder.html#/modelo/' + m.id + '/chassi">' + esc(m.nome + ' ' + m.ano) + '</a>'; }).join(' · ') + '</p>' : '') +
       '</div></div>';
@@ -271,12 +280,13 @@
     });
     document.getElementById('qo-reset').addEventListener('click', renderQuickOrder);
     document.getElementById('qo-add').addEventListener('click', function () {
-      var add = 0, ajustados = 0;
+      var add = 0, ajustados = 0, indisp = 0;
       for (var i = 0; i < LINHAS; i++) {
         var art = view.querySelector('.art[data-i="' + i + '"]').value.trim();
         if (!art) continue;
         var p = FG.product(art.toUpperCase()) || FG.product(art);
         if (!p) continue;
+        if (!FG.compravel(p.artigo)) { indisp++; continue; }   // indisponível: ignora
         var qtd = Math.max(1, Number(view.querySelector('.qo-qty[data-i="' + i + '"]').value) || 1);
         var ja = (FG.cart().find(function (c) { return c.artigo === p.artigo; }) || {}).qtd || 0;
         if (ja + qtd > FG.limiteCompra(p.artigo)) ajustados++;
@@ -284,9 +294,12 @@
       }
       if (add) {
         FG.toast(add + ' item(ns) adicionados à cesta.' +
-          (ajustados ? ' ' + ajustados + ' ajustado(s) ao estoque disponível.' : ''),
-          ajustados ? 'erro' : undefined);
+          (ajustados ? ' ' + ajustados + ' ajustado(s) ao estoque disponível.' : '') +
+          (indisp ? ' ' + indisp + ' indisponível(is) ignorado(s).' : ''),
+          (ajustados || indisp) ? 'erro' : undefined);
         refreshCart(); location.hash = '#/carrinho';
+      } else if (indisp) {
+        FG.toast(indisp + ' produto(s) indisponível(is) — nada adicionado.', 'erro');
       } else FG.toast('Nenhum artigo válido informado.');
     });
   }
@@ -314,11 +327,23 @@
         '<span class="right"><b>' + FG.fmtMoney(p.preco * i.qtd) + '</b></span>' +
         '<button class="del link-action ct-del" data-art="' + p.artigo + '" title="Remover">✕</button></div>';
     });
-    // Itens sem estoque suficiente entram em pré-venda (backorder) ao confirmar.
-    var preVenda = cart.filter(function (i) { var p = FG.product(i.artigo); return p && p.estoque < i.qtd; });
+    // Itens indisponíveis (sem estoque e sem previsão) não podem ser comprados;
+    // bloqueiam o envio. Itens em pré-venda (sem estoque, com previsão) entram
+    // em backorder ao confirmar.
+    var indispItens = cart.filter(function (i) { return !FG.compravel(i.artigo); });
+    var preVenda = cart.filter(function (i) { var p = FG.product(i.artigo); return p && p.estoque < i.qtd && FG.compravel(i.artigo); });
     var avisoHTML = '';
+    if (indispItens.length) {
+      avisoHTML += '<div class="backorder-aviso" style="background:#fef2f2;border-color:#fecaca;">' +
+        '<b>⛔ Indisponível:</b> remova para enviar o pedido — ' +
+        indispItens.length + ' item(ns) sem estoque e sem previsão de chegada.<ul>' +
+        indispItens.map(function (i) {
+          var p = FG.product(i.artigo);
+          return '<li>' + esc(p.nome) + ' <span class="muted">(' + p.artigo + ')</span></li>';
+        }).join('') + '</ul></div>';
+    }
     if (preVenda.length) {
-      avisoHTML = '<div class="backorder-aviso"><b>⚠ Aviso:</b> ' + preVenda.length +
+      avisoHTML += '<div class="backorder-aviso"><b>⚠ Aviso:</b> ' + preVenda.length +
         ' item(ns) será(ão) enviado(s) em <b>pré-venda</b>. Prazo de envio depende de reposição.<ul>' +
         preVenda.map(function (i) {
           var p = FG.product(i.artigo);
@@ -331,7 +356,7 @@
       avisoHTML +
       '<div style="display:flex;justify-content:flex-end;gap:10px;">' +
       '<button class="btn" id="ct-limpar">Limpar cesta</button>' +
-      '<button class="btn red" id="ct-enviar">Enviar pedido</button></div>';
+      '<button class="btn red" id="ct-enviar"' + (indispItens.length ? ' disabled style="opacity:.55;cursor:not-allowed;"' : '') + '>Enviar pedido</button></div>';
     view.innerHTML = html;
 
     Array.prototype.forEach.call(view.querySelectorAll('.ct-qty'), function (inp) {

@@ -397,15 +397,23 @@
     /* ---- carrinho ---- */
     cart: function () { return read(CART_KEY, []); },
     cartCount: function () { return FG.cart().reduce(function (n, i) { return n + i.qtd; }, 0); },
+    // Produto "Indisponível" = sem estoque E sem previsão de chegada. Não pode
+    // ser comprado (diferente de "Pré-venda", que tem previsão e vai p/ backorder).
+    compravel: function (artigo) {
+      var p = FG.product(artigo);
+      if (!p) return false;
+      return p.estoque > 0 || !!p.previsao;
+    },
     // Quantidade máxima comprável de um produto. Produtos "Em estoque"
-    // (estoque > 0) limitam-se ao estoque disponível; produtos sem estoque
-    // (Pré-venda ou Indisponível) não têm limite aqui — vão para pré-venda.
+    // (estoque > 0) limitam-se ao estoque disponível; produtos em pré-venda
+    // (sem estoque, com previsão) não têm limite aqui — vão para pré-venda.
     limiteCompra: function (artigo) {
       var p = FG.product(artigo);
       return (p && p.estoque > 0) ? p.estoque : Infinity;
     },
     cartAdd: function (artigo, qtd) {
       var p = FG.product(artigo); if (!p) return false;
+      if (!FG.compravel(artigo)) return false;   // indisponível: bloqueia
       var cart = FG.cart();
       var item = cart.find(function (i) { return i.artigo === artigo; });
       var nova = Math.min((item ? item.qtd : 0) + qtd, FG.limiteCompra(artigo));

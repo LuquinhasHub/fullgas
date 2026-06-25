@@ -287,21 +287,29 @@ router.post('/pedidos', requireAuth, async (req, res, next) => {
         // A baixa falhou: produto inexistente OU estoque insuficiente.
         const prod = await new sql.Request(tx)
           .input('sku', sql.VarChar(40), skuItem)
-          .query('SELECT ProdutoId, Nome, Preco, Estoque FROM dbo.Produto WHERE Sku = @sku');
+          .query('SELECT ProdutoId, Nome, Preco, Estoque, PrevisaoChegada FROM dbo.Produto WHERE Sku = @sku');
         if (!prod.recordset.length) {
           await tx.rollback();
           return res.status(400).json({ erro: 'Produto não encontrado: ' + skuItem });
         }
         row = prod.recordset[0];
         // Produto "Em estoque" (Estoque > 0): o cliente só pode comprar até a
-        // quantidade disponível — não vira pré-venda. Produto sem estoque
-        // (Indisponível ou Pré-venda, Estoque <= 0): aceito em pré-venda.
+        // quantidade disponível — não vira pré-venda.
         if (row.Estoque > 0) {
           await tx.rollback();
           return res.status(409).json({
             erro: 'Estoque insuficiente para ' + row.Nome + ' (' + skuItem + '): ' +
               'disponível ' + row.Estoque + ' un.',
             sku: skuItem, disponivel: row.Estoque
+          });
+        }
+        // Sem estoque e SEM previsão de chegada = "Indisponível": não pode ser
+        // comprado. Sem estoque COM previsão = "Pré-venda": aceito em backorder.
+        if (!row.PrevisaoChegada) {
+          await tx.rollback();
+          return res.status(409).json({
+            erro: 'Produto indisponível para compra: ' + row.Nome + ' (' + skuItem + ').',
+            sku: skuItem, indisponivel: true
           });
         }
         backorder = true;
