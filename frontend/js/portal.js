@@ -255,10 +255,11 @@
     function criar(status) {
       var desc = document.getElementById('nc-desc').value.trim();
       if (!desc) { FG.toast('Descreva o problema antes de salvar.'); return; }
-      FG.createClaim({
+      var c = FG.createClaim({
         criador: sess.empresa, tipo: document.getElementById('nc-tipo').value,
         niv: document.getElementById('nc-niv').value, descricao: desc, status: status
       });
+      if (!c) return;   // a API já avisou o erro
       fechar();
       claimFiltro = status === 'Esboço' ? 'Esboço' : 'Em processo';
       FG.toast('Reivindicação registrada.');

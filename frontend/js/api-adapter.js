@@ -66,7 +66,8 @@
     var veic = apiSync('/veiculos'); if (veic) CACHE.vehicles = veic;
     var fat = apiSync('/faturas'); if (fat) CACHE.invoices = fat;
     var pv = apiSync('/prevenda'); if (pv) CACHE.prevenda = pv;
-    // (demais coleções entram nas próximas rotas: reivindicações, etc.)
+    var rc = apiSync('/reivindicacoes'); if (rc) CACHE.claims = rc;
+    // (demais coleções entram nas próximas rotas: notificações, etc.)
   }
 
   // Recarrega o cache de faturas (cobrança) de forma síncrona.
@@ -86,6 +87,12 @@
     var lista = apiSync('/veiculos'); if (lista) CACHE.vehicles = lista; return lista;
   }
   FG.recarregarVeiculos = recarregarVeiculos;
+
+  // Recarrega o cache de reivindicações de forma síncrona.
+  function recarregarClaims() {
+    var lista = apiSync('/reivindicacoes'); if (lista) CACHE.claims = lista; return lista;
+  }
+  FG.recarregarClaims = recarregarClaims;
 
   /* ---------- sobrescreve a camada de dados do FG ---------- */
   // Leituras passam a ler do cache em memória.
@@ -254,6 +261,44 @@
   FG.ativarGarantia = function (niv) {
     var r = postSync('/veiculos/' + encodeURIComponent(niv) + '/garantia');
     if (r.ok) recarregarVeiculos();
+    return r;
+  };
+
+  /* ---------- reivindicações ---------- */
+  // Requisição síncrona genérica (POST/PUT) sem efeitos colaterais de recarga.
+  function reqSync(method, path, body) {
+    try {
+      var xhr = new XMLHttpRequest();
+      xhr.open(method, API_BASE + path, false);
+      xhr.setRequestHeader('Content-Type', 'application/json');
+      if (token()) xhr.setRequestHeader('Authorization', 'Bearer ' + token());
+      xhr.send(body ? JSON.stringify(body) : undefined);
+      var data = JSON.parse(xhr.responseText || '{}');
+      if (xhr.status < 200 || xhr.status >= 300)
+        return { ok: false, msg: data.erro || 'Operação não concluída.' };
+      data.ok = true;
+      return data;
+    } catch (e) {
+      return { ok: false, msg: 'Servidor indisponível.' };
+    }
+  }
+
+  // Cria reivindicação. `dados` = { criador?, tipo, niv, descricao, status }.
+  // EmpresaId/UsuarioId são derivados do token na API. Devolve o claim ou null.
+  FG.createClaim = function (dados) {
+    var r = reqSync('POST', '/reivindicacoes', {
+      tipo: dados.tipo, niv: dados.niv, descricao: dados.descricao, status: dados.status
+    });
+    if (!r.ok) { FG.toast(r.msg || 'Não foi possível registrar a reivindicação.', 'erro'); return null; }
+    recarregarClaims();
+    return r;
+  };
+
+  // Muda o status da reivindicação (admin). Recarrega o cache em caso de sucesso.
+  FG.setClaimStatus = function (id, status) {
+    var r = reqSync('PUT', '/reivindicacoes/' + encodeURIComponent(id) + '/status', { status: status });
+    if (!r.ok) { FG.toast(r.msg || 'Não foi possível atualizar o status.', 'erro'); return r; }
+    recarregarClaims();
     return r;
   };
 

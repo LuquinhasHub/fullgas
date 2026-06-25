@@ -130,7 +130,15 @@ e recarregar `CACHE.orders` ao final. Adicionar `recarregarPedidos()`.
 veículos dos seeds. Buscar por NIV `VBFGA125XSM160872` retorna o detalhe.
 Registrar venda atualiza o status no banco e na tela.
 
-## 1.3 Reivindicações (versão básica — fotos vêm na Frente 2)
+## 1.3 Reivindicações (versão básica — fotos vêm na Frente 2) ✅ CONCLUÍDO
+
+> Entregue no branch `feat/reivindicacoes`. Criadas as 4 rotas em
+> `reivindicacoes.routes.js` (lista com filtro `?status=`, detalhe, criação,
+> mudança de status admin). Cliente vê só as da própria empresa (escopo por
+> `EmpresaId` do token); admin vê todas. `Numero` único de 8 dígitos gerado com
+> verificação de colisão. O adapter passa a carregar `CACHE.claims` da API e
+> substitui `FG.createClaim`/`FG.setClaimStatus` (antes só localStorage). Fotos
+> e campos expandidos (NumeroPeca/DataDefeito/Horímetro) ficam para a Frente 2.
 
 **Rotas em `api/src/routes/reivindicacoes.routes.js`**:
 
