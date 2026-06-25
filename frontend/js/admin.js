@@ -192,8 +192,9 @@
         var art = b.getAttribute('data-art');
         if (b.getAttribute('data-ac') === 'edit') { modalProduto(FG.product(art)); return; }
         if (!confirm('Excluir o artigo ' + art + '?')) return;
-        FG.setCol('products', FG.all('products').filter(function (p) { return p.artigo !== art; }));
-        FG.toast('Artigo excluído.'); renderProdutos();
+        FG.apiExcluirProduto(art)
+          .then(function () { FG.toast('Artigo excluído.'); renderProdutos(); })
+          .catch(function (e) { FG.toast((e && e.message) || 'Falha ao excluir.', 'erro'); });
       });
     });
   }
@@ -240,10 +241,11 @@
         previsao: document.getElementById('mp-prev').value.trim() || null,
         descricao: document.getElementById('mp-desc').value.trim()
       };
-      if (novo) prods.push(dados);
-      else prods = prods.map(function (x) { return x.artigo === art ? dados : x; });
-      FG.setCol('products', prods);
-      fechar(); FG.toast('Produto salvo.'); renderProdutos();
+      function fail(e) { FG.toast((e && e.message) || 'Falha ao salvar o produto.', 'erro'); }
+      var acao = novo ? FG.apiCriarProduto(dados) : FG.apiEditarProduto(art, dados);
+      acao.then(function () {
+        fechar(); FG.toast(novo ? 'Produto criado.' : 'Produto salvo.'); renderProdutos();
+      }).catch(fail);
     });
   }
 
@@ -264,16 +266,29 @@
     return { cls: 'Pendente', txt: 'Pendente' };
   }
 
-  // Bloco de detalhe (cliente + data + peças com status) que abre sob o pedido.
+  // Linha de uma peça no detalhe da venda.
+  function linhaItemVenda(it) {
+    var st = itemStatus(it);
+    return '<tr><td>' + esc(it.artigo) + '</td><td>' + esc(it.nome) + '</td>' +
+      '<td class="r">' + it.qtd + '</td><td class="r">' + it.qtdEnviada + '</td>' +
+      '<td class="r">' + FG.fmtMoney(it.preco) + '</td>' +
+      '<td><span class="pill-status ' + st.cls + '">' + esc(st.txt) + '</span></td></tr>';
+  }
+
+  // Grupo de peças (cabeçalho + linhas) dentro do detalhe — separa "Em estoque"
+  // das peças em "Pré-venda". Retorna '' quando o grupo está vazio.
+  function grupoItens(titulo, itens) {
+    if (!itens.length) return '';
+    return '<tr class="venda-grp"><td colspan="6">' + esc(titulo) + ' (' + itens.length + ')</td></tr>' +
+      itens.map(linhaItemVenda).join('');
+  }
+
+  // Bloco de detalhe (cliente + data + peças com status, separadas entre
+  // "Em estoque" e "Pré-venda") que abre sob o pedido.
   function detalheVenda(o) {
     var pg = o.progresso || { enviada: 0, qtd: 0, pct: 0 };
-    var linhas = o.itens.map(function (it) {
-      var st = itemStatus(it);
-      return '<tr><td>' + esc(it.artigo) + '</td><td>' + esc(it.nome) + '</td>' +
-        '<td class="r">' + it.qtd + '</td><td class="r">' + it.qtdEnviada + '</td>' +
-        '<td class="r">' + FG.fmtMoney(it.preco) + '</td>' +
-        '<td><span class="pill-status ' + st.cls + '">' + esc(st.txt) + '</span></td></tr>';
-    }).join('');
+    var emEstoque = o.itens.filter(function (it) { return !it.backorder; });
+    var preVenda = o.itens.filter(function (it) { return it.backorder; });
     return '<div class="venda-det">' +
       '<div class="venda-meta">' +
       '<div><span class="muted">Cliente</span><br><b>' + esc(o.empresa) + '</b><br><span class="muted">' + esc(o.usuario) + '</span></div>' +
@@ -283,7 +298,9 @@
       '</div>' +
       '<table class="tbl"><thead><tr><th>Artigo</th><th>Peça</th><th class="r">Qtd.</th>' +
       '<th class="r">Enviada</th><th class="r">Preço un.</th><th>Status da peça</th></tr></thead><tbody>' +
-      linhas + '</tbody></table></div>';
+      grupoItens('Em estoque', emEstoque) +
+      grupoItens('Pré-venda', preVenda) +
+      '</tbody></table></div>';
   }
 
   function renderPedidos() {
@@ -359,6 +376,61 @@
   }
 
   /* =========================================================
+     PRÉ-VENDA — rastreador de peças a enviar (sem valor; cobrança é a
+     fatura do pedido). Agrupado por cliente; cada peça tem ação "Enviado"
+     quando o produto volta ao estoque.
+     ========================================================= */
+  function pvStatusPill(it) {
+    if (it.status === 'Disponivel') return '<span class="pill-status Disponivel">Disponível p/ envio</span>';
+    return '<span class="pill-status Aguardando">Aguardando reposição' +
+      (it.previsao ? ' · ' + esc(it.previsao) : '') + '</span>';
+  }
+
+  function renderPreVenda() {
+    h1.textContent = 'Pré-venda — peças a enviar'; setOn('prevenda');
+    var itens = FG.all('prevenda');
+    if (!itens.length) {
+      view.innerHTML = '<div class="adm-card"><div class="c-body muted">' +
+        'Nenhuma peça em pré-venda pendente. Elas aparecem aqui quando um pedido inclui ' +
+        'itens sem estoque, e podem ser marcadas como enviadas quando o produto for reposto.</div></div>';
+      return;
+    }
+    var grupos = {};
+    itens.forEach(function (it) { (grupos[it.empresa] = grupos[it.empresa] || []).push(it); });
+
+    view.innerHTML =
+      '<div class="adm-card"><div class="c-head">Peças a enviar — pré-venda (' + itens.length + ')</div>' +
+      '<div class="c-body">' +
+      Object.keys(grupos).map(function (emp) {
+        var linhas = grupos[emp].map(function (it) {
+          var disp = it.status === 'Disponivel';
+          var acao = disp
+            ? '<button class="btn-orange btn-mini pv-enviar" data-ped="' + esc(it.pedido) + '" data-item="' + it.itemId + '" data-qtd="' + it.qtd + '">Marcar Enviado</button>'
+            : '<span class="muted" style="font-size:11px;">sem estoque</span>';
+          return '<tr><td>' + esc(it.artigo) + '</td><td>' + esc(it.nome) + '</td>' +
+            '<td class="r">' + it.pendente + '</td>' +
+            '<td>' + (it.data ? FG.fmtDate(it.data) : '—') + '</td>' +
+            '<td><a href="#pedidos" title="Ver em Vendas">' + esc(it.cx) + '</a>' +
+            ' <span class="muted">' + esc(it.pedido) + '</span></td>' +
+            '<td>' + pvStatusPill(it) + '</td><td>' + acao + '</td></tr>';
+        }).join('');
+        return '<div class="venda-det"><div style="font-weight:600;margin:6px 0 2px;">' + esc(emp) + '</div>' +
+          '<table class="tbl"><thead><tr><th>Artigo</th><th>Peça</th><th class="r">Qtd.</th>' +
+          '<th>Data do pedido</th><th>Pedido de origem</th><th>Status</th><th>Ação</th></tr></thead><tbody>' +
+          linhas + '</tbody></table></div>';
+      }).join('') + '</div></div>';
+
+    Array.prototype.forEach.call(view.querySelectorAll('.pv-enviar'), function (b) {
+      b.addEventListener('click', function () {
+        var r = FG.setItemEnviado(b.getAttribute('data-ped'), b.getAttribute('data-item'), Number(b.getAttribute('data-qtd')));
+        if (r && r.ok === false) FG.toast(r.msg || 'Não foi possível marcar como enviado.', 'erro');
+        else FG.toast('Peça marcada como enviada.');
+        renderPreVenda();
+      });
+    });
+  }
+
+  /* =========================================================
      ROUTER
      ========================================================= */
   function route() {
@@ -368,6 +440,7 @@
       case 'usuarios': renderUsuarios(); break;
       case 'produtos': renderProdutos(); break;
       case 'pedidos': renderPedidos(); break;
+      case 'prevenda': renderPreVenda(); break;
       case 'reivindicacoes': renderClaims(); break;
       default: renderDash();
     }

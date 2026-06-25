@@ -10,6 +10,8 @@ import authRoutes from './routes/auth.routes.js';
 import produtosRoutes from './routes/produtos.routes.js';
 import pedidosRoutes from './routes/pedidos.routes.js';
 import veiculosRoutes from './routes/veiculos.routes.js';
+import faturasRoutes from './routes/faturas.routes.js';
+import preVendaRoutes from './routes/prevenda.routes.js';
 
 const app = express();
 
@@ -30,6 +32,8 @@ app.use('/api/auth', authRoutes);
 app.use('/api', produtosRoutes);
 app.use('/api', pedidosRoutes);
 app.use('/api', veiculosRoutes);
+app.use('/api', faturasRoutes);
+app.use('/api', preVendaRoutes);
 
 // 404
 app.use((req, res) => res.status(404).json({ erro: 'Rota não encontrada.' }));

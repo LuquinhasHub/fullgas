@@ -87,7 +87,7 @@ router.put('/produtos/:sku', requireAuth, requireAdmin, async (req, res, next) =
     const c = await query('SELECT CategoriaId FROM dbo.Categoria WHERE Codigo = @cat', { cat });
     if (!c.length) return res.status(400).json({ erro: 'Categoria inválida.' });
 
-    const r = await query(
+    await query(
       `UPDATE dbo.Produto
           SET Nome=@nome, CategoriaId=@catId, Descricao=@desc,
               Preco=@preco, Estoque=@est, PrevisaoChegada=@prev, AtualizadoEm=SYSUTCDATETIME()

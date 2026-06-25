@@ -574,9 +574,41 @@
      ========================================================= */
   function renderFinanceiro() {
     setCrumb(['Conta financeira', 'Faturas']); setTabOn('financeiro');
-    var inv = FG.all('invoices');
+    var inv = FG.all('invoices'); // faturas reais (cobrança)
     var faturado = 0, credito = 0;
     inv.forEach(function (i) { if (i.valor >= 0) faturado += i.valor; else credito += i.valor; });
+
+    // Pré-venda: peças já compradas (incluídas na fatura do pedido, sem cobrança
+    // à parte) que aguardam envio. Derivado dos pedidos; status pelo estoque atual.
+    var preParts = [];
+    FG.all('orders').forEach(function (o) {
+      (o.itens || []).forEach(function (it) {
+        if (!it.backorder) return;
+        var p = FG.product(it.artigo);
+        var st = it.qtdEnviada >= it.qtd ? 'Enviado' : ((p && p.estoque > 0) ? 'Disponivel' : 'Aguardando');
+        preParts.push({ it: it, o: o, st: st, prev: p && p.previsao });
+      });
+    });
+
+    var preVendaHTML = '';
+    if (preParts.length) {
+      preVendaHTML =
+        '<h3 class="sec-title">Pré-venda — peças a enviar</h3>' +
+        '<div class="backorder-aviso">Estas peças já estão incluídas na fatura do pedido (sem cobrança ' +
+        'à parte). São enviadas assim que voltam ao estoque — acompanhe o status abaixo.</div>' +
+        '<table class="table"><thead><tr><th>Artigo</th><th>Peça</th><th class="right">Qtd.</th>' +
+        '<th>Data do pedido</th><th>Pedido</th><th>Status do envio</th></tr></thead><tbody>' +
+        preParts.map(function (x) {
+          var pill = x.st === 'Enviado' ? '<span class="pill-status Enviado">Enviado</span>'
+            : x.st === 'Disponivel' ? '<span class="pill-status Disponivel">Disponível — envio em breve</span>'
+            : '<span class="pill-status Aguardando">Aguardando reposição' + (x.prev ? ' · ' + esc(x.prev) : '') + '</span>';
+          return '<tr><td>' + esc(x.it.artigo) + '</td><td>' + esc(x.it.nome) + '</td>' +
+            '<td class="right">' + x.it.qtd + '</td>' +
+            '<td>' + (x.o.data ? FG.fmtDate(x.o.data) : '—') + '</td>' +
+            '<td><a href="#pedido/' + esc(x.o.id) + '">' + esc(x.o.cx) + '</a></td>' +
+            '<td>' + pill + '</td></tr>';
+        }).join('') + '</tbody></table>';
+    }
 
     view.innerHTML =
       '<h2>Conta financeira</h2>' +
@@ -589,11 +621,13 @@
       '<table class="table"><thead><tr><th class="filt">Tipo</th><th class="filt">N° da fatura</th>' +
       '<th class="filt">Data da fatura ↓</th><th class="right filt">Quantia cobrada</th><th>Moeda</th><th></th></tr></thead><tbody>' +
       inv.map(function (i, idx) {
-        return '<tr><td>' + esc(i.tipo) + '</td><td>' + i.numero + '</td><td>' + FG.fmtDate(i.data) + '</td>' +
+        return '<tr><td>' + esc(i.tipo) +
+          (i.status && i.status !== 'Emitida' ? ' <span class="pill-status ' + esc(i.status) + '">' + esc(i.status) + '</span>' : '') +
+          '</td><td>' + i.numero + '</td><td>' + FG.fmtDate(i.data) + '</td>' +
           '<td class="right">' + i.valor.toLocaleString('pt-BR', { minimumFractionDigits: 2 }) + '</td>' +
           '<td>' + esc(i.moeda) + '</td><td><button class="pdf-ico" data-i="' + idx + '">PDF</button></td></tr>';
       }).join('') +
-      '</tbody></table>';
+      '</tbody></table>' + preVendaHTML;
 
     document.getElementById('fi-csv').addEventListener('click', function () {
       var linhas = [['Tipo', 'N°', 'Data', 'Valor', 'Moeda']];
