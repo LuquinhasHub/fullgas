@@ -191,7 +191,13 @@
         var art = b.getAttribute('data-art');
         var inp = view.querySelector('.qty-in[data-art="' + art + '"]');
         var qtd = Math.max(1, Number(inp && inp.value) || 1);
-        if (FG.cartAdd(art, qtd)) { FG.toast(qtd + '× adicionado à cesta.'); refreshCart(); }
+        var lim = FG.limiteCompra(art);
+        var jaNoCarro = (FG.cart().find(function (i) { return i.artigo === art; }) || {}).qtd || 0;
+        var ajustou = (jaNoCarro + qtd) > lim;
+        if (!FG.cartAdd(art, qtd)) return;
+        if (ajustou) FG.toast('Estoque disponível: ' + lim + ' un. Quantidade ajustada.', 'erro');
+        else FG.toast(qtd + '× adicionado à cesta.');
+        refreshCart();
       });
     });
   }
@@ -217,7 +223,7 @@
       '<div class="price-big">' + FG.fmtMoney(p.preco) + '</div>' +
       '<p><b>Stock:</b> ' + stockHTML(p) + (p.estoque > 0 ? ' <span class="muted">(' + p.estoque + ' un.)</span>' : '') + '</p>' +
       '<div class="prod-buy" style="margin:0 0 18px;justify-content:flex-start;">' +
-      '<input class="qty-in" type="number" min="1" value="1" data-art="' + p.artigo + '">' +
+      '<input class="qty-in" type="number" min="1" value="1"' + (p.estoque > 0 ? ' max="' + p.estoque + '"' : '') + ' data-art="' + p.artigo + '">' +
       '<button class="btn dark add-cart" data-art="' + p.artigo + '">🛒 Adicionar ao carrinho</button></div>' +
       (usados.length ? '<p class="muted" style="font-size:12px;">Aplicação (Parts Finder): ' +
         usados.map(function (m) { return '<a href="finder.html#/modelo/' + m.id + '/chassi">' + esc(m.nome + ' ' + m.ano) + '</a>'; }).join(' · ') + '</p>' : '') +
@@ -265,17 +271,23 @@
     });
     document.getElementById('qo-reset').addEventListener('click', renderQuickOrder);
     document.getElementById('qo-add').addEventListener('click', function () {
-      var add = 0;
+      var add = 0, ajustados = 0;
       for (var i = 0; i < LINHAS; i++) {
         var art = view.querySelector('.art[data-i="' + i + '"]').value.trim();
         if (!art) continue;
         var p = FG.product(art.toUpperCase()) || FG.product(art);
         if (!p) continue;
         var qtd = Math.max(1, Number(view.querySelector('.qo-qty[data-i="' + i + '"]').value) || 1);
+        var ja = (FG.cart().find(function (c) { return c.artigo === p.artigo; }) || {}).qtd || 0;
+        if (ja + qtd > FG.limiteCompra(p.artigo)) ajustados++;
         FG.cartAdd(p.artigo, qtd); add += qtd;
       }
-      if (add) { FG.toast(add + ' item(ns) adicionados à cesta.'); refreshCart(); location.hash = '#/carrinho'; }
-      else FG.toast('Nenhum artigo válido informado.');
+      if (add) {
+        FG.toast(add + ' item(ns) adicionados à cesta.' +
+          (ajustados ? ' ' + ajustados + ' ajustado(s) ao estoque disponível.' : ''),
+          ajustados ? 'erro' : undefined);
+        refreshCart(); location.hash = '#/carrinho';
+      } else FG.toast('Nenhum artigo válido informado.');
     });
   }
 
@@ -298,7 +310,7 @@
         '<span><b><a href="#/produto/' + p.artigo + '">' + esc(p.nome) + '</a></b><br><span class="muted">' + p.artigo + '</span>' +
         '<br>' + stockHTML(p) + '</span>' +
         '<span>' + FG.fmtMoney(p.preco) + '</span>' +
-        '<span><input class="qty-in ct-qty" data-art="' + p.artigo + '" type="number" min="0" value="' + i.qtd + '"></span>' +
+        '<span><input class="qty-in ct-qty" data-art="' + p.artigo + '" type="number" min="0"' + (p.estoque > 0 ? ' max="' + p.estoque + '"' : '') + ' value="' + i.qtd + '"></span>' +
         '<span class="right"><b>' + FG.fmtMoney(p.preco * i.qtd) + '</b></span>' +
         '<button class="del link-action ct-del" data-art="' + p.artigo + '" title="Remover">✕</button></div>';
     });
@@ -324,7 +336,11 @@
 
     Array.prototype.forEach.call(view.querySelectorAll('.ct-qty'), function (inp) {
       inp.addEventListener('change', function () {
-        FG.cartSet(inp.getAttribute('data-art'), Math.max(0, Number(inp.value) || 0));
+        var art = inp.getAttribute('data-art');
+        var pedido = Math.max(0, Number(inp.value) || 0);
+        var lim = FG.limiteCompra(art);
+        FG.cartSet(art, pedido);
+        if (pedido > lim) FG.toast('Estoque disponível: ' + lim + ' un. Quantidade ajustada.', 'erro');
         refreshCart(); renderCarrinho();
       });
     });

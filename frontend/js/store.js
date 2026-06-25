@@ -397,15 +397,24 @@
     /* ---- carrinho ---- */
     cart: function () { return read(CART_KEY, []); },
     cartCount: function () { return FG.cart().reduce(function (n, i) { return n + i.qtd; }, 0); },
+    // Quantidade máxima comprável de um produto. Produtos "Em estoque"
+    // (estoque > 0) limitam-se ao estoque disponível; produtos sem estoque
+    // (Pré-venda ou Indisponível) não têm limite aqui — vão para pré-venda.
+    limiteCompra: function (artigo) {
+      var p = FG.product(artigo);
+      return (p && p.estoque > 0) ? p.estoque : Infinity;
+    },
     cartAdd: function (artigo, qtd) {
       var p = FG.product(artigo); if (!p) return false;
       var cart = FG.cart();
       var item = cart.find(function (i) { return i.artigo === artigo; });
-      if (item) item.qtd += qtd; else cart.push({ artigo: artigo, qtd: qtd });
+      var nova = Math.min((item ? item.qtd : 0) + qtd, FG.limiteCompra(artigo));
+      if (item) item.qtd = nova; else cart.push({ artigo: artigo, qtd: nova });
       write(CART_KEY, cart); return true;
     },
     cartSet: function (artigo, qtd) {
-      var cart = FG.cart().map(function (i) { if (i.artigo === artigo) i.qtd = qtd; return i; })
+      var lim = FG.limiteCompra(artigo);
+      var cart = FG.cart().map(function (i) { if (i.artigo === artigo) i.qtd = Math.min(qtd, lim); return i; })
         .filter(function (i) { return i.qtd > 0; });
       write(CART_KEY, cart);
     },
