@@ -46,7 +46,9 @@ router.get('/prevenda', requireAuth, async (req, res, next) => {
       empresaId: r.EmpresaId,
       estoque: r.EstoqueAtual == null ? 0 : r.EstoqueAtual,
       previsao: r.PrevisaoChegada || null,
-      status: (r.EstoqueAtual || 0) > 0 ? 'Disponivel' : 'Aguardando'
+      // Só fica "Disponível p/ envio" quando o estoque cobre a quantidade
+      // pendente; estoque parcial (abaixo do pendente) continua "Aguardando".
+      status: (r.EstoqueAtual || 0) >= (r.Quantidade - r.QuantidadeEnviada) ? 'Disponivel' : 'Aguardando'
     })));
   } catch (e) { next(e); }
 });

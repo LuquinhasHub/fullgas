@@ -585,7 +585,8 @@
       (o.itens || []).forEach(function (it) {
         if (!it.backorder) return;
         var p = FG.product(it.artigo);
-        var st = it.qtdEnviada >= it.qtd ? 'Enviado' : ((p && p.estoque > 0) ? 'Disponivel' : 'Aguardando');
+        var st = it.qtdEnviada >= it.qtd ? 'Enviado'
+          : ((p && p.estoque >= (it.qtd - it.qtdEnviada)) ? 'Disponivel' : 'Aguardando');
         preParts.push({ it: it, o: o, st: st, prev: p && p.previsao });
       });
     });

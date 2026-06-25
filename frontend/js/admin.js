@@ -382,8 +382,12 @@
      ========================================================= */
   function pvStatusPill(it) {
     if (it.status === 'Disponivel') return '<span class="pill-status Disponivel">Disponível p/ envio</span>';
-    return '<span class="pill-status Aguardando">Aguardando reposição' +
-      (it.previsao ? ' · ' + esc(it.previsao) : '') + '</span>';
+    // Aguardando: estoque insuficiente para a quantidade pendente. Mostra o
+    // estoque atual quando há algo (parcial) para deixar claro o porquê.
+    var detalhe = it.estoque > 0
+      ? ' · estoque ' + it.estoque + '/' + it.pendente
+      : (it.previsao ? ' · ' + esc(it.previsao) : '');
+    return '<span class="pill-status Aguardando">Aguardando reposição' + detalhe + '</span>';
   }
 
   function renderPreVenda() {
@@ -406,7 +410,7 @@
           var disp = it.status === 'Disponivel';
           var acao = disp
             ? '<button class="btn-orange btn-mini pv-enviar" data-ped="' + esc(it.pedido) + '" data-item="' + it.itemId + '" data-qtd="' + it.qtd + '">Marcar Enviado</button>'
-            : '<span class="muted" style="font-size:11px;">sem estoque</span>';
+            : '<span class="muted" style="font-size:11px;">' + (it.estoque > 0 ? 'estoque insuficiente (' + it.estoque + '/' + it.pendente + ')' : 'sem estoque') + '</span>';
           return '<tr><td>' + esc(it.artigo) + '</td><td>' + esc(it.nome) + '</td>' +
             '<td class="r">' + it.pendente + '</td>' +
             '<td>' + (it.data ? FG.fmtDate(it.data) : '—') + '</td>' +
