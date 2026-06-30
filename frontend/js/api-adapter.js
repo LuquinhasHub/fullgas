@@ -7,12 +7,15 @@
 
    Ele substitui o "miolo" das funções FG que mexiam no
    localStorage por chamadas à API real. As telas (portal,
-   loja, finder, admin) não precisam mudar nada.
+   loja, finder, admin) continuam LENDO os dados de forma
+   síncrona: FG.all() lê de um cache em memória.
 
-   Estratégia: no login a API devolve o token; guardamos em
-   localStorage. As leituras (FG.all) usam um cache em memória
-   carregado uma vez por página, mantendo a interface síncrona
-   que as telas já esperam.
+   O cache é carregado de forma ASSÍNCRONA (fetch) — sem
+   XMLHttpRequest síncrono, que os navegadores bloqueiam em
+   requisições cross-origin (impede acesso de outro dispositivo
+   ou hospedagem externa). Cada tela espera FG.pronto (uma
+   Promise que resolve quando o cache está cheio) antes de
+   renderizar.
    ========================================================= */
 (function () {
   'use strict';
@@ -23,16 +26,17 @@
 
   function token() { return localStorage.getItem(TOKEN_KEY) || ''; }
 
-  // fetch autenticado que devolve JSON (lança em erro HTTP).
+  // fetch autenticado que devolve JSON (REJEITA em erro HTTP, com a msg da API).
   function api(path, opts) {
     opts = opts || {};
     var headers = opts.headers || {};
     headers['Content-Type'] = 'application/json';
+    headers['ngrok-skip-browser-warning'] = '1';
     if (token()) headers['Authorization'] = 'Bearer ' + token();
     return fetch(API_BASE + path, {
       method: opts.method || 'GET',
       headers: headers,
-      body: opts.body ? JSON.stringify(opts.body) : undefined
+      body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined
     }).then(function (r) {
       return r.json().catch(function () { return {}; }).then(function (data) {
         if (!r.ok) throw new Error(data.erro || ('HTTP ' + r.status));
@@ -41,15 +45,9 @@
     });
   }
 
-  // Versão síncrona via XHR — usada só no boot para encher o cache
-  // antes das telas renderizarem (mantém FG.all síncrono).
-  function apiSync(path) {
-    var xhr = new XMLHttpRequest();
-    xhr.open('GET', API_BASE + path, false); // síncrono
-    if (token()) xhr.setRequestHeader('Authorization', 'Bearer ' + token());
-    try { xhr.send(); } catch (e) { return null; }
-    if (xhr.status < 200 || xhr.status >= 300) return null;
-    try { return JSON.parse(xhr.responseText); } catch (e) { return null; }
+  // GET resiliente para o cache: resolve com os dados ou null (nunca rejeita).
+  function apiGet(path) {
+    return api(path).then(function (d) { return d; }, function () { return null; });
   }
 
   // Cache em memória que espelha o antigo "db".
@@ -57,77 +55,103 @@
                 orders: [], claims: [], invoices: [], deliveries: [],
                 notifications: [], users: [], searches: [], prevenda: [] };
 
+  // Carrega TODO o cache de uma vez (em paralelo). Assíncrono — devolve uma
+  // Promise que resolve quando o cache está cheio. Sem token, resolve vazio.
   function carregarCache() {
-    if (!token()) return;
-    var prod = apiSync('/produtos'); if (prod) CACHE.products = prod;
-    var cat = apiSync('/categorias'); if (cat) CACHE.categories = cat;
-    var ped = apiSync('/pedidos'); if (ped) CACHE.orders = ped;
-    var mod = apiSync('/veiculos/modelos'); if (mod) CACHE.models = mod;
-    var veic = apiSync('/veiculos'); if (veic) CACHE.vehicles = veic;
-    var fat = apiSync('/faturas'); if (fat) CACHE.invoices = fat;
-    var pv = apiSync('/prevenda'); if (pv) CACHE.prevenda = pv;
-    var rc = apiSync('/reivindicacoes'); if (rc) CACHE.claims = rc;
-    // (demais coleções entram nas próximas rotas: notificações, etc.)
+    if (!token()) return Promise.resolve(CACHE);
+    return Promise.all([
+      apiGet('/produtos'),
+      apiGet('/categorias'),
+      apiGet('/pedidos'),
+      apiGet('/veiculos/modelos'),
+      apiGet('/veiculos'),
+      apiGet('/faturas'),
+      apiGet('/prevenda'),
+      apiGet('/reivindicacoes')
+    ]).then(function (r) {
+      if (r[0]) CACHE.products = r[0];
+      if (r[1]) CACHE.categories = r[1];
+      if (r[2]) CACHE.orders = r[2];
+      if (r[3]) CACHE.models = r[3];
+      if (r[4]) CACHE.vehicles = r[4];
+      if (r[5]) CACHE.invoices = r[5];
+      if (r[6]) CACHE.prevenda = r[6];
+      if (r[7]) CACHE.claims = r[7];
+      return CACHE;
+      // (demais coleções entram nas próximas rotas: notificações, etc.)
+    });
   }
 
-  // Recarrega o cache de faturas (cobrança) de forma síncrona.
+  // Recargas pontuais (após mutações). Todas assíncronas — devolvem Promise.
   function recarregarFaturas() {
-    var lista = apiSync('/faturas'); if (lista) CACHE.invoices = lista; return lista;
+    return apiGet('/faturas').then(function (l) { if (l) CACHE.invoices = l; return l; });
   }
   FG.recarregarFaturas = recarregarFaturas;
 
-  // Recarrega o rastreador de pré-venda (peças a enviar) de forma síncrona.
   function recarregarPreVenda() {
-    var lista = apiSync('/prevenda'); if (lista) CACHE.prevenda = lista; return lista;
+    return apiGet('/prevenda').then(function (l) { if (l) CACHE.prevenda = l; return l; });
   }
   FG.recarregarPreVenda = recarregarPreVenda;
 
-  // Recarrega o cache de veículos de forma síncrona (após venda/garantia).
   function recarregarVeiculos() {
-    var lista = apiSync('/veiculos'); if (lista) CACHE.vehicles = lista; return lista;
+    return apiGet('/veiculos').then(function (l) { if (l) CACHE.vehicles = l; return l; });
   }
   FG.recarregarVeiculos = recarregarVeiculos;
 
-  // Recarrega o cache de reivindicações de forma síncrona.
   function recarregarClaims() {
-    var lista = apiSync('/reivindicacoes'); if (lista) CACHE.claims = lista; return lista;
+    return apiGet('/reivindicacoes').then(function (l) { if (l) CACHE.claims = l; return l; });
   }
   FG.recarregarClaims = recarregarClaims;
 
+  function recarregarPedidos() {
+    return apiGet('/pedidos').then(function (l) { if (l) CACHE.orders = l; return l; });
+  }
+  FG.recarregarPedidos = recarregarPedidos;
+
+  function recarregarProdutos() {
+    return apiGet('/produtos').then(function (l) { if (l) CACHE.products = l; return l; });
+  }
+
   /* ---------- sobrescreve a camada de dados do FG ---------- */
-  // Leituras passam a ler do cache em memória.
+  // Leituras continuam SÍNCRONAS, lendo do cache em memória.
   FG.db = function () { return CACHE; };
   FG.all = function (col) { return CACHE[col] || []; };
 
-  // Login agora chama a API; ao dar certo, guarda token + sessão e enche o cache.
+  // Requisição genérica que NÃO rejeita: resolve { ok:true, ... } no sucesso
+  // ou { ok:false, msg } no erro. Usada pelos wrappers de mutação.
+  function req(method, path, body) {
+    var opts = { method: method };
+    if (body !== undefined) opts.body = body;
+    return api(path, opts).then(function (data) {
+      data = data || {};
+      data.ok = true;
+      return data;
+    }, function (e) {
+      return { ok: false, msg: (e && e.message) || 'Operação não concluída.' };
+    });
+  }
+
+  // Login: chama a API e guarda token + sessão. Devolve Promise<{ ok, msg? }>.
+  // O cache é (re)carregado na próxima página (redirect recarrega o app).
   FG.login = function (email, senha) {
-    try {
-      var xhr = new XMLHttpRequest();
-      xhr.open('POST', API_BASE + '/auth/login', false);
-      xhr.setRequestHeader('Content-Type', 'application/json');
-      xhr.send(JSON.stringify({ email: email, senha: senha }));
-      var data = JSON.parse(xhr.responseText || '{}');
-      if (xhr.status < 200 || xhr.status >= 300) return { ok: false, msg: data.erro || 'Falha no login.' };
-      localStorage.setItem(TOKEN_KEY, data.token);
-      localStorage.setItem('fullgas_session_v1', JSON.stringify({
-        id: data.usuario.id, nome: data.usuario.nome, email: data.usuario.email,
-        papel: data.usuario.papel, empresa: data.usuario.empresa, empresaId: data.usuario.empresaId
-      }));
-      carregarCache();
-      return { ok: true };
-    } catch (e) { return { ok: false, msg: 'Servidor indisponível.' }; }
+    return api('/auth/login', { method: 'POST', body: { email: email, senha: senha } })
+      .then(function (data) {
+        localStorage.setItem(TOKEN_KEY, data.token);
+        localStorage.setItem('fullgas_session_v1', JSON.stringify({
+          id: data.usuario.id, nome: data.usuario.nome, email: data.usuario.email,
+          papel: data.usuario.papel, empresa: data.usuario.empresa, empresaId: data.usuario.empresaId
+        }));
+        return { ok: true };
+      }, function (e) {
+        return { ok: false, msg: (e && e.message) || 'Falha no login.' };
+      });
   };
 
+  // Cadastro. Devolve Promise<{ ok, msg? }>.
   FG.register = function (dados) {
-    try {
-      var xhr = new XMLHttpRequest();
-      xhr.open('POST', API_BASE + '/auth/register', false);
-      xhr.setRequestHeader('Content-Type', 'application/json');
-      xhr.send(JSON.stringify(dados));
-      var data = JSON.parse(xhr.responseText || '{}');
-      if (xhr.status < 200 || xhr.status >= 300) return { ok: false, msg: data.erro || 'Falha no cadastro.' };
-      return { ok: true };
-    } catch (e) { return { ok: false, msg: 'Servidor indisponível.' }; }
+    return api('/auth/register', { method: 'POST', body: dados })
+      .then(function () { return { ok: true }; },
+            function (e) { return { ok: false, msg: (e && e.message) || 'Falha no cadastro.' }; });
   };
 
   FG.logout = function () {
@@ -136,176 +160,110 @@
     location.href = 'index.html';
   };
 
-  // Produtos (admin) — gravações assíncronas que atualizam o cache no fim.
-  // Após gravar produto, recarrega o rastreador de pré-venda (a reposição de
-  // estoque muda o status das peças de "Aguardando" para "Disponível").
-  function aposGravarProduto(lista) { recarregarPreVenda(); return lista; }
+  // Produtos (admin) — gravações que atualizam o cache no fim. Após gravar,
+  // recarrega também o rastreador de pré-venda (repor estoque muda o status
+  // das peças de "Aguardando" para "Disponível").
+  function aposGravarProduto(lista) {
+    return recarregarPreVenda().then(function () { return lista; });
+  }
   FG.apiCriarProduto = function (p) { return api('/produtos', { method: 'POST', body: p }).then(recarregarProdutos).then(aposGravarProduto); };
   FG.apiEditarProduto = function (sku, p) { return api('/produtos/' + encodeURIComponent(sku), { method: 'PUT', body: p }).then(recarregarProdutos).then(aposGravarProduto); };
   FG.apiExcluirProduto = function (sku) { return api('/produtos/' + encodeURIComponent(sku), { method: 'DELETE' }).then(recarregarProdutos).then(aposGravarProduto); };
 
-  function recarregarProdutos() {
-    return api('/produtos').then(function (lista) { CACHE.products = lista; return lista; });
-  }
-
-  // Recarrega o cache de pedidos de forma SÍNCRONA (usado logo após criar
-  // pedido ou mudar status, para as telas já renderizarem o estado novo).
-  function recarregarPedidos() {
-    var lista = apiSync('/pedidos'); if (lista) CACHE.orders = lista; return lista;
-  }
-  FG.recarregarPedidos = recarregarPedidos;
-
-  /* ---------- pedidos: substitui o miolo do store.js ---------- */
-  // Cria o pedido a partir da cesta atual. Mantém a assinatura síncrona que o
-  // shop.js espera (usa o retorno {cx,id} na confirmação imediata).
+  /* ---------- pedidos ---------- */
+  // Cria o pedido a partir da cesta atual. Devolve Promise<data|null>; em erro
+  // avisa via toast e resolve null. Recarrega pedidos + produtos no sucesso.
   FG.createOrder = function () {
     var s = FG.session(); var cart = FG.cart();
-    if (!s || !cart.length) return null;
+    if (!s || !cart.length) return Promise.resolve(null);
     var itens = cart.map(function (i) { return { sku: i.artigo, quantidade: i.qtd }; });
-    try {
-      var xhr = new XMLHttpRequest();
-      xhr.open('POST', API_BASE + '/pedidos', false);
-      xhr.setRequestHeader('Content-Type', 'application/json');
-      if (token()) xhr.setRequestHeader('Authorization', 'Bearer ' + token());
-      xhr.send(JSON.stringify({ itens: itens }));
-      var data = JSON.parse(xhr.responseText || '{}');
-      if (xhr.status < 200 || xhr.status >= 300) {
-        FG.toast(data.erro || 'Não foi possível finalizar o pedido.');
-        return null;
-      }
+    return api('/pedidos', { method: 'POST', body: { itens: itens } }).then(function (data) {
       FG.cartClear();
-      recarregarPedidos();                       // pedido novo entra no histórico
-      var prod = apiSync('/produtos'); if (prod) CACHE.products = prod; // estoque baixou
-      return data;
-    } catch (e) {
-      FG.toast('Servidor indisponível.');
+      return Promise.all([recarregarPedidos(), recarregarProdutos()]).then(function () { return data; });
+    }, function (e) {
+      FG.toast((e && e.message) || 'Não foi possível finalizar o pedido.');
       return null;
-    }
+    });
   };
 
-  // PUT síncrono genérico que devolve { ok, ... }. Em sucesso recarrega os
-  // caches de pedidos e produtos (status/envio podem mexer no estoque).
-  function putSync(path, body) {
-    try {
-      var xhr = new XMLHttpRequest();
-      xhr.open('PUT', API_BASE + path, false);
-      xhr.setRequestHeader('Content-Type', 'application/json');
-      if (token()) xhr.setRequestHeader('Authorization', 'Bearer ' + token());
-      xhr.send(JSON.stringify(body || {}));
-      var data = JSON.parse(xhr.responseText || '{}');
-      if (xhr.status < 200 || xhr.status >= 300)
-        return { ok: false, msg: data.erro || 'Operação não concluída.' };
-      recarregarPedidos();
-      var prod = apiSync('/produtos'); if (prod) CACHE.products = prod;
-      data.ok = true;
-      return data;
-    } catch (e) {
-      return { ok: false, msg: 'Servidor indisponível.' };
-    }
+  // PUT de pedido que mexe em estoque/envio: recarrega pedidos + produtos no ok.
+  function putPedido(path, body) {
+    return req('PUT', path, body).then(function (r) {
+      if (!r.ok) return r;
+      return Promise.all([recarregarPedidos(), recarregarProdutos()]).then(function () { return r; });
+    });
   }
 
-  // Muda o status do pedido (admin). Ao enviar, a API gera entrega + fatura.
-  // Devolve { ok, ... }; em 409 (ex.: pedido terminal) vem { ok:false, msg }.
+  // Muda o status do pedido (admin). Promise<{ ok, ... }>.
   FG.setOrderStatus = function (id, status) {
-    return putSync('/pedidos/' + encodeURIComponent(id) + '/status', { status: status });
+    return putPedido('/pedidos/' + encodeURIComponent(id) + '/status', { status: status });
   };
 
   // Detalhe rico do pedido (itens com qtdEnviada/backorder/estoque, entregas,
-  // faturas e progresso). Síncrono — as telas renderizam direto.
+  // faturas e progresso). Promise<detalhe|null>.
   FG.pedidoDetalhe = function (numero) {
-    return apiSync('/pedidos/' + encodeURIComponent(numero));
+    return apiGet('/pedidos/' + encodeURIComponent(numero));
   };
 
   // Envio segmentado por escopo: 'normal' | 'backorder' | 'tudo' (admin).
-  // Gera Entrega + Fatura cobrindo só os itens daquele escopo.
   FG.enviarPedidoEscopo = function (numero, escopo) {
-    return putSync('/pedidos/' + encodeURIComponent(numero) + '/status', { escopo: escopo });
+    return putPedido('/pedidos/' + encodeURIComponent(numero) + '/status', { escopo: escopo });
   };
 
-  // Ajuste manual da quantidade enviada de um item do pedido (admin). Também é
-  // a ação "Enviado" do rastreador de pré-venda — recarrega o rastreador no fim.
+  // Ação "Enviado" de um item / do rastreador de pré-venda (admin). Recarrega
+  // pedidos, produtos e o rastreador no fim.
   FG.setItemEnviado = function (numero, itemId, qtd) {
-    var r = putSync('/pedidos/' + encodeURIComponent(numero) + '/itens/' + itemId + '/enviado', { qtd: qtd });
-    if (r && r.ok) recarregarPreVenda();
-    return r;
+    return putPedido('/pedidos/' + encodeURIComponent(numero) + '/itens/' + itemId + '/enviado', { qtd: qtd })
+      .then(function (r) {
+        if (!r.ok) return r;
+        return recarregarPreVenda().then(function () { return r; });
+      });
   };
 
   /* ---------- veículos: substitui as ações inline do portal.js ---------- */
-  // POST síncrono genérico; em sucesso devolve { ok, ... } com o corpo da API.
-  function postSync(path, body) {
-    try {
-      var xhr = new XMLHttpRequest();
-      xhr.open('POST', API_BASE + path, false);
-      xhr.setRequestHeader('Content-Type', 'application/json');
-      if (token()) xhr.setRequestHeader('Authorization', 'Bearer ' + token());
-      xhr.send(JSON.stringify(body || {}));
-      var data = JSON.parse(xhr.responseText || '{}');
-      if (xhr.status < 200 || xhr.status >= 300)
-        return { ok: false, msg: data.erro || 'Operação não concluída.' };
-      data.ok = true;
-      return data;
-    } catch (e) {
-      return { ok: false, msg: 'Servidor indisponível.' };
-    }
-  }
-
   // Registra venda do veículo (Status=Vendido + garantia). Recarrega o cache.
   // `dados` = { cliente, cpf, email, telefone, endereco }.
   FG.registrarVenda = function (niv, dados) {
-    var r = postSync('/veiculos/' + encodeURIComponent(niv) + '/venda', dados || {});
-    if (r.ok) recarregarVeiculos();
-    return r;
+    return req('POST', '/veiculos/' + encodeURIComponent(niv) + '/venda', dados || {}).then(function (r) {
+      if (!r.ok) return r;
+      return recarregarVeiculos().then(function () { return r; });
+    });
   };
 
   // Ativa a garantia do veículo. Recarrega o cache em caso de sucesso.
   FG.ativarGarantia = function (niv) {
-    var r = postSync('/veiculos/' + encodeURIComponent(niv) + '/garantia');
-    if (r.ok) recarregarVeiculos();
-    return r;
+    return req('POST', '/veiculos/' + encodeURIComponent(niv) + '/garantia').then(function (r) {
+      if (!r.ok) return r;
+      return recarregarVeiculos().then(function () { return r; });
+    });
   };
 
   /* ---------- reivindicações ---------- */
-  // Requisição síncrona genérica (POST/PUT) sem efeitos colaterais de recarga.
-  function reqSync(method, path, body) {
-    try {
-      var xhr = new XMLHttpRequest();
-      xhr.open(method, API_BASE + path, false);
-      xhr.setRequestHeader('Content-Type', 'application/json');
-      if (token()) xhr.setRequestHeader('Authorization', 'Bearer ' + token());
-      xhr.send(body ? JSON.stringify(body) : undefined);
-      var data = JSON.parse(xhr.responseText || '{}');
-      if (xhr.status < 200 || xhr.status >= 300)
-        return { ok: false, msg: data.erro || 'Operação não concluída.' };
-      data.ok = true;
-      return data;
-    } catch (e) {
-      return { ok: false, msg: 'Servidor indisponível.' };
-    }
-  }
-
   // Cria reivindicação. `dados` = { criador?, tipo, niv, descricao, status }.
-  // EmpresaId/UsuarioId são derivados do token na API. Devolve o claim ou null.
+  // EmpresaId/UsuarioId são derivados do token na API. Promise<claim|null>.
   FG.createClaim = function (dados) {
-    var r = reqSync('POST', '/reivindicacoes', {
+    return req('POST', '/reivindicacoes', {
       tipo: dados.tipo, niv: dados.niv, descricao: dados.descricao, status: dados.status
+    }).then(function (r) {
+      if (!r.ok) { FG.toast(r.msg || 'Não foi possível registrar a reivindicação.', 'erro'); return null; }
+      return recarregarClaims().then(function () { return r; });
     });
-    if (!r.ok) { FG.toast(r.msg || 'Não foi possível registrar a reivindicação.', 'erro'); return null; }
-    recarregarClaims();
-    return r;
   };
 
-  // Muda o status da reivindicação (admin). Recarrega o cache em caso de sucesso.
+  // Muda o status da reivindicação (admin). Promise<{ ok, ... }>.
   FG.setClaimStatus = function (id, status) {
-    var r = reqSync('PUT', '/reivindicacoes/' + encodeURIComponent(id) + '/status', { status: status });
-    if (!r.ok) { FG.toast(r.msg || 'Não foi possível atualizar o status.', 'erro'); return r; }
-    recarregarClaims();
-    return r;
+    return req('PUT', '/reivindicacoes/' + encodeURIComponent(id) + '/status', { status: status }).then(function (r) {
+      if (!r.ok) { FG.toast(r.msg || 'Não foi possível atualizar o status.', 'erro'); return r; }
+      return recarregarClaims().then(function () { return r; });
+    });
   };
 
   // Expõe helpers para depuração no console.
   FG._api = api;
   FG._cache = CACHE;
 
-  // Carrega o cache assim que a página abre (se já houver token).
-  carregarCache();
+  // Dispara o carregamento do cache assim que a página abre (se houver token).
+  // FG.pronto resolve quando o cache está cheio — cada tela espera por ele
+  // antes de montar o HTML, para nunca renderizar com dados vazios.
+  FG.pronto = carregarCache();
 })();

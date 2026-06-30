@@ -7,6 +7,10 @@
   var sess = FG.guard();
   if (!sess) return;
 
+  // Espera o cache (carregado de forma assíncrona via fetch) antes de montar a
+  // tela — nada de renderizar com dados vazios.
+  FG.pronto.then(function () {
+
   var view = document.getElementById('view');
   var crumb = document.getElementById('crumb');
   var esc = FG.esc;
@@ -252,10 +256,10 @@
     back.querySelector('.x').addEventListener('click', fechar);
     back.addEventListener('click', function (e) { if (e.target === back) fechar(); });
 
-    function criar(status) {
+    async function criar(status) {
       var desc = document.getElementById('nc-desc').value.trim();
       if (!desc) { FG.toast('Descreva o problema antes de salvar.'); return; }
-      var c = FG.createClaim({
+      var c = await FG.createClaim({
         criador: sess.empresa, tipo: document.getElementById('nc-tipo').value,
         niv: document.getElementById('nc-niv').value, descricao: desc, status: status
       });
@@ -391,7 +395,7 @@
 
   function renderPedidoDetalhe(numero) {
     setCrumb(['Pedidos', numero]); setTabOn('pedidos');
-    var d = FG.pedidoDetalhe(numero);
+    FG.pedidoDetalhe(numero).then(function (d) {
     if (!d || !d.id) {
       view.innerHTML = '<div class="empty-box">Pedido não encontrado.<br>' +
         '<a class="btn red" href="#pedidos">Voltar para Pedidos</a></div>';
@@ -416,7 +420,7 @@
     if (preVenda.length)
       html += '<h3 class="sec-title">Itens em pré-venda</h3>' +
         '<div class="backorder-aviso">Estes itens serão enviados quando o estoque for reposto. ' +
-        'Eles farão parte de uma entrega/fatura separada.</div>' + tabelaItens(preVenda);
+        'Eles farão parte de uma entrega separada.</div>' + tabelaItens(preVenda);
 
     if (d.entregas.length)
       html += '<h3 class="sec-title">Entregas e faturas</h3>' +
@@ -432,6 +436,7 @@
         }).join('') + '</tbody></table>';
 
     view.innerHTML = html;
+    });
   }
 
   /* =========================================================
@@ -473,10 +478,10 @@
       cpf.value = out;
     });
 
-    document.getElementById('vd-ok').addEventListener('click', function () {
+    document.getElementById('vd-ok').addEventListener('click', async function () {
       var nome = document.getElementById('vd-nome').value.trim();
       if (!nome) { FG.toast('Informe o nome do cliente.'); return; }
-      var r = FG.registrarVenda(v.niv, {
+      var r = await FG.registrarVenda(v.niv, {
         cliente: nome,
         cpf: document.getElementById('vd-cpf').value.trim(),
         telefone: document.getElementById('vd-tel').value.trim(),
@@ -532,8 +537,8 @@
       var bv = document.getElementById('av-venda');
       if (bv) bv.addEventListener('click', function () { modalVenda(v, buscar); });
       var bg = document.getElementById('av-gar');
-      if (bg) bg.addEventListener('click', function () {
-        var r = FG.ativarGarantia(v.niv);
+      if (bg) bg.addEventListener('click', async function () {
+        var r = await FG.ativarGarantia(v.niv);
         if (!r.ok) { FG.toast(r.msg || 'Não foi possível ativar a garantia.'); return; }
         FG.toast('Garantia ativada.');
         buscar();
@@ -724,4 +729,6 @@
 
   window.addEventListener('hashchange', route);
   route();
+
+  }); // fim FG.pronto.then — tela montada só após o cache chegar
 })();

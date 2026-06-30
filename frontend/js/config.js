@@ -19,8 +19,8 @@
   var ehLocal = host === 'localhost' || host === '127.0.0.1' || host === '';
 
   // >>> AJUSTE AQUI a URL pública da sua API depois do deploy <<<
-  var API_PRODUCAO = 'https://fullgas-api.onrender.com/api';
-  var API_LOCAL = 'http://localhost:3000/api';
+  var API_PRODUCAO = 'https://agency-amulet-roundness.ngrok-free.dev/api';
+  var API_LOCAL = 'http://192.168.1.131:3000/api';
 
   window.FULLGAS_API_BASE = ehLocal ? API_LOCAL : API_PRODUCAO;
 

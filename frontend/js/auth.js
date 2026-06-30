@@ -31,11 +31,11 @@
   tabCad.addEventListener('click', function () { switchTab('cad'); });
 
   /* ---------- login ---------- */
-  function doLogin() {
+  async function doLogin() {
     var email = document.getElementById('lg-email').value.trim();
     var senha = document.getElementById('lg-senha').value;
     if (!email || !senha) { showMsg('Informe e-mail e senha.'); return; }
-    var r = FG.login(email, senha);
+    var r = await FG.login(email, senha);
     if (!r.ok) { showMsg(r.msg); return; }
     location.href = 'portal.html';
   }
@@ -43,7 +43,7 @@
   formLogin.addEventListener('keydown', function (e) { if (e.key === 'Enter') doLogin(); });
 
   /* ---------- cadastro ---------- */
-  function doRegister() {
+  async function doRegister() {
     var dados = {
       nome: document.getElementById('cd-nome').value.trim(),
       empresa: document.getElementById('cd-empresa').value.trim(),
@@ -56,7 +56,7 @@
     if (dados.senha.length < 6) { showMsg('A senha precisa de ao menos 6 caracteres.'); return; }
     if (!/^\S+@\S+\.\S+$/.test(dados.email)) { showMsg('E-mail inválido.'); return; }
 
-    var r = FG.register(dados);
+    var r = await FG.register(dados);
     if (!r.ok) { showMsg(r.msg); return; }
     switchTab('login');
     showMsg('Cadastro enviado! Assim que um administrador aprovar, você poderá entrar.', 'ok');
