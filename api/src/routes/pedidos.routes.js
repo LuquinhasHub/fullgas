@@ -507,6 +507,28 @@ router.put('/pedidos/:numero/status', requireAuth, requireAdmin, async (req, res
         return res.status(409).json({ erro: 'Nenhuma peça de pré-venda disponível para envio (sem estoque).' });
       }
 
+      // Composição do pedido: quantas peças em estoque (não-backorder) e quantas
+      // peças (de qualquer tipo) ainda faltam enviar. Decide status e valida o
+      // envio de pedidos que são só de pré-venda.
+      const comp = await new sql.Request(tx)
+        .input('pid', sql.Int, ped.PedidoId)
+        .query(`SELECT
+                  SUM(CASE WHEN EmBackorder = 0 THEN 1 ELSE 0 END) AS totNormais,
+                  SUM(CASE WHEN EmBackorder = 0 AND Quantidade > QuantidadeEnviada THEN 1 ELSE 0 END) AS pendNormais,
+                  SUM(CASE WHEN Quantidade > QuantidadeEnviada THEN 1 ELSE 0 END) AS pendTotal
+                FROM dbo.PedidoItem WHERE PedidoId = @pid`);
+      const { totNormais, pendNormais, pendTotal } = comp.recordset[0];
+
+      // Pedido SÓ de pré-venda (sem peças em estoque): não pode ir a 'Enviado'
+      // por aqui. Suas peças só saem via escopo 'backorder', e somente quando
+      // houver estoque. Sem nada enviado e ainda pendente => recusa.
+      if (!enviados && totNormais === 0 && pendTotal > 0) {
+        await tx.rollback();
+        return res.status(409).json({
+          erro: 'Pedido só com itens em pré-venda: aguarde o estoque para enviar essas peças.'
+        });
+      }
+
       // Remessa (Entrega) do que foi enviado, ligada à fatura ÚNICA do pedido —
       // sem gerar fatura nova (a cobrança é sempre a fatura original do pedido).
       let numeroEntrega = null;
@@ -516,14 +538,11 @@ router.put('/pedidos/:numero/status', requireAuth, requireAdmin, async (req, res
         numeroEntrega = d.numeroEntrega;
       }
 
-      // Status do pedido considera APENAS as peças em estoque (não-backorder);
-      // as de pré-venda seguem no rastreador de envio.
-      const rest = await new sql.Request(tx)
-        .input('pid', sql.Int, ped.PedidoId)
-        .query(`SELECT COUNT(*) AS pend FROM dbo.PedidoItem
-                 WHERE PedidoId = @pid AND EmBackorder = 0 AND Quantidade > QuantidadeEnviada`);
-      const faltamNormais = rest.recordset[0].pend > 0;
-      const novoStatus = faltamNormais ? 'Processando' : 'Enviado';
+      // Pedido com peças em estoque: status considera só elas (a pré-venda segue
+      // no rastreador, à parte). Pedido só de pré-venda: só vira 'Enviado' quando
+      // TODAS as peças saírem (o que exige estoque).
+      const faltam = totNormais > 0 ? pendNormais > 0 : pendTotal > 0;
+      const novoStatus = faltam ? 'Processando' : 'Enviado';
       await new sql.Request(tx)
         .input('pid', sql.Int, ped.PedidoId)
         .input('st', sql.VarChar(14), novoStatus)
@@ -531,7 +550,7 @@ router.put('/pedidos/:numero/status', requireAuth, requireAdmin, async (req, res
 
       await tx.commit();
       return res.json({
-        ok: true, status: novoStatus, parcial: faltamNormais, entrega: numeroEntrega
+        ok: true, status: novoStatus, parcial: faltam, entrega: numeroEntrega
       });
     }
 
