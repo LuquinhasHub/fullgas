@@ -7,6 +7,10 @@
   var sess = FG.guard();
   if (!sess) return;
 
+  // Espera o cache (carregado de forma assíncrona via fetch) antes de montar a
+  // tela — nada de renderizar com dados vazios.
+  FG.pronto.then(function () {
+
   var fdView = document.getElementById('fd-view');
   var esc = FG.esc;
   var USAGE_KEY = 'fullgas_finder_usage_v1';
@@ -278,4 +282,6 @@
 
   window.addEventListener('hashchange', route);
   route();
+
+  }); // fim FG.pronto.then — tela montada só após o cache chegar
 })();

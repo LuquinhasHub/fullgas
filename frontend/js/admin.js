@@ -7,6 +7,10 @@
   var sess = FG.guard('admin');
   if (!sess) return;
 
+  // Espera o cache (carregado de forma assíncrona via fetch) antes de montar a
+  // tela — nada de renderizar com dados vazios.
+  FG.pronto.then(function () {
+
   var view = document.getElementById('adm-view');
   var h1 = document.getElementById('adm-h1');
   var esc = FG.esc;
@@ -334,8 +338,8 @@
       });
     });
     Array.prototype.forEach.call(view.querySelectorAll('select.inline-status'), function (sel) {
-      sel.addEventListener('change', function () {
-        var res = FG.setOrderStatus(sel.getAttribute('data-id'), sel.value);
+      sel.addEventListener('change', async function () {
+        var res = await FG.setOrderStatus(sel.getAttribute('data-id'), sel.value);
         if (res && res.ok === false) {
           FG.toast(res.msg || 'Não foi possível mudar o status.', 'erro');
         } else {
@@ -367,9 +371,9 @@
       }).join('') + '</tbody></table></div></div>';
 
     Array.prototype.forEach.call(view.querySelectorAll('select.inline-status'), function (sel) {
-      sel.addEventListener('change', function () {
-        FG.setClaimStatus(sel.getAttribute('data-id'), sel.value);
-        FG.toast('Status da reivindicação atualizado.');
+      sel.addEventListener('change', async function () {
+        var r = await FG.setClaimStatus(sel.getAttribute('data-id'), sel.value);
+        if (!r || r.ok !== false) FG.toast('Status da reivindicação atualizado.');
         renderClaims();
       });
     });
@@ -425,8 +429,8 @@
       }).join('') + '</div></div>';
 
     Array.prototype.forEach.call(view.querySelectorAll('.pv-enviar'), function (b) {
-      b.addEventListener('click', function () {
-        var r = FG.setItemEnviado(b.getAttribute('data-ped'), b.getAttribute('data-item'), Number(b.getAttribute('data-qtd')));
+      b.addEventListener('click', async function () {
+        var r = await FG.setItemEnviado(b.getAttribute('data-ped'), b.getAttribute('data-item'), Number(b.getAttribute('data-qtd')));
         if (r && r.ok === false) FG.toast(r.msg || 'Não foi possível marcar como enviado.', 'erro');
         else FG.toast('Peça marcada como enviada.');
         renderPreVenda();
@@ -454,4 +458,6 @@
 
   window.addEventListener('hashchange', route);
   route();
+
+  }); // fim FG.pronto.then — tela montada só após o cache chegar
 })();

@@ -16,7 +16,23 @@ import reivindicacoesRoutes from './routes/reivindicacoes.routes.js';
 
 const app = express();
 
-app.use(cors({ origin: process.env.CORS_ORIGIN || '*' }));
+// Origens permitidas via CORS_ORIGIN (lista separada por vírgula). Sem a var
+// definida — ou com '*' — libera qualquer origem (modo dev/LAN). Origem não
+// permitida NÃO derruba a resposta: apenas não recebe os headers de CORS (o
+// navegador bloqueia), em vez de virar 500.
+const allowedOrigins = (process.env.CORS_ORIGIN || '')
+  .split(',').map(o => o.trim()).filter(Boolean);
+const liberarTudo = allowedOrigins.length === 0 || allowedOrigins.includes('*');
+app.use(cors({
+  origin: function (origin, callback) {
+    if (liberarTudo || !origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(null, false);
+    }
+  },
+  credentials: true
+}));
 app.use(express.json());
 
 // Log simples de requisições.
@@ -51,7 +67,11 @@ const PORT = Number(process.env.PORT || 3000);
 // Tenta conectar no banco antes de abrir a porta (falha cedo se o DB estiver fora).
 getPool()
   .then(() => {
-    app.listen(PORT, () => console.log(`✓ API ouvindo em http://localhost:${PORT}`));
+    // 0.0.0.0 = escuta em todas as interfaces: localhost, 127.0.0.1 e o IP da
+    // rede local (acesso de outro dispositivo). Não fixe um IP aqui.
+    app.listen(PORT, '0.0.0.0', () =>
+      console.log(`✓ API ouvindo na porta ${PORT} (localhost e rede local)`)
+    );
   })
   .catch(() => {
     console.error('A API não subiu porque não conectou no banco. Confira o arquivo .env.');

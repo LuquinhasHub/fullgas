@@ -7,6 +7,10 @@
   var sess = FG.guard();
   if (!sess) return;
 
+  // Espera o cache (carregado de forma assíncrona via fetch) antes de montar a
+  // tela — nada de renderizar com dados vazios.
+  FG.pronto.then(function () {
+
   var view = document.getElementById('view');
   var esc = FG.esc;
 
@@ -373,8 +377,8 @@
       b.addEventListener('click', function () { FG.cartRemove(b.getAttribute('data-art')); refreshCart(); renderCarrinho(); });
     });
     document.getElementById('ct-limpar').addEventListener('click', function () { FG.cartClear(); refreshCart(); renderCarrinho(); });
-    document.getElementById('ct-enviar').addEventListener('click', function () {
-      var o = FG.createOrder();
+    document.getElementById('ct-enviar').addEventListener('click', async function () {
+      var o = await FG.createOrder();
       refreshCart();
       if (!o) return;
       var backHTML = (o.itensEmBackorder && o.itensEmBackorder.length) ?
@@ -477,4 +481,6 @@
 
   window.addEventListener('hashchange', route);
   route();
+
+  }); // fim FG.pronto.then — tela montada só após o cache chegar
 })();

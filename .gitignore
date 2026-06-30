@@ -7,6 +7,8 @@
 *.env
 !.env.example
 api/.env
+# Config do ngrok (contém authtoken) — NUNCA versionar
+ngrok.yml
 
 # Dependências (são reinstaladas com npm install)
 node_modules/
