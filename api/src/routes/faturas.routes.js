@@ -16,7 +16,7 @@ router.get('/faturas', requireAuth, async (req, res, next) => {
     const eid = req.user.papel === 'admin' ? null : req.user.empresaId;
     const faturas = await query(
       `SELECT f.NumeroFatura, f.Tipo, f.DataEmissao, f.Valor, f.Moeda, f.Status,
-              f.EmpresaId, e.RazaoSocial AS Empresa
+              f.EmpresaId, f.ReferenciaReivindicacao, e.RazaoSocial AS Empresa
          FROM dbo.Fatura f
          LEFT JOIN dbo.Empresa e ON e.EmpresaId = f.EmpresaId
         WHERE f.Tipo IN ('Fatura', 'Nota de crédito')
@@ -32,6 +32,7 @@ router.get('/faturas', requireAuth, async (req, res, next) => {
       valor: Number(f.Valor),
       moeda: f.Moeda,
       status: f.Status,
+      referencia: f.ReferenciaReivindicacao || null,
       empresa: f.Empresa || '',
       empresaId: f.EmpresaId
     })));
