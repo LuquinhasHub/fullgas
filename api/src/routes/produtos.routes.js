@@ -2,13 +2,60 @@
 // Rotas de catálogo: categorias e produtos (SKUs)
 // ============================================================
 import { Router } from 'express';
+import multer from 'multer';
+import path from 'node:path';
+import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { query } from '../db.js';
 import { requireAuth, requireAdmin } from '../auth.js';
+import { apagarUpload } from './finder.routes.js';
 
 const router = Router();
 
+// ---- Upload da foto do produto (miniatura no finder/admin) ----------------
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const PROD_DIR = path.join(__dirname, '..', '..', 'uploads', 'produtos');
+fs.mkdirSync(PROD_DIR, { recursive: true });
+const PROD_URL_BASE = '/uploads/produtos/';
+const IMG_EXT = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.svg'];
+
+const uploadProd = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, PROD_DIR),
+    filename: (_req, file, cb) => {
+      const ext = path.extname(file.originalname || '').toLowerCase().slice(0, 10);
+      cb(null, Date.now() + '-' + Math.random().toString(36).slice(2, 10) + ext);
+    }
+  }),
+  limits: { fileSize: 15 * 1024 * 1024, files: 1 },
+  fileFilter: (_req, file, cb) => {
+    const mime = file.mimetype || '';
+    const ext = path.extname(file.originalname || '').toLowerCase();
+    if (mime.startsWith('image/') || IMG_EXT.includes(ext)) return cb(null, true);
+    cb(new Error('Envie apenas imagens.'));
+  }
+});
+function uploadImagemProduto(req, res, next) {
+  uploadProd.single('imagem')(req, res, (err) => {
+    if (err) {
+      const msg = err.code === 'LIMIT_FILE_SIZE'
+        ? 'Imagem muito grande (máximo 15 MB).'
+        : (err.message || 'Falha no upload.');
+      return res.status(400).json({ erro: msg });
+    }
+    if (!req.file) return res.status(400).json({ erro: 'Envie o arquivo no campo "imagem".' });
+    next();
+  });
+}
+
+function urlAbs(req, rel) {
+  if (!rel) return rel || null;
+  if (/^https?:\/\//i.test(rel)) return rel;
+  return req.protocol + '://' + req.get('host') + rel;
+}
+
 // Mapeia uma linha do banco para o formato que o front (store.js) já espera.
-function toProduto(r) {
+function toProduto(req, r) {
   return {
     artigo: r.Sku,
     nome: r.Nome,
@@ -16,13 +63,14 @@ function toProduto(r) {
     preco: Number(r.Preco),
     estoque: r.Estoque,
     descricao: r.Descricao || '',
-    previsao: r.PrevisaoChegada || null
+    previsao: r.PrevisaoChegada || null,
+    imagem: urlAbs(req, r.ImagemUrl)
   };
 }
 
 const SELECT_PROD =
   `SELECT p.ProdutoId, p.Sku, p.Nome, p.Descricao, p.Preco, p.Estoque,
-          p.PrevisaoChegada, c.Codigo AS CategoriaCodigo
+          p.PrevisaoChegada, p.ImagemUrl, c.Codigo AS CategoriaCodigo
      FROM dbo.Produto p
      JOIN dbo.Categoria c ON c.CategoriaId = p.CategoriaId`;
 
@@ -46,7 +94,7 @@ router.get('/produtos', requireAuth, async (req, res, next) => {
     } else {
       rows = await query(SELECT_PROD + ' ORDER BY p.Nome');
     }
-    res.json(rows.map(toProduto));
+    res.json(rows.map(r => toProduto(req, r)));
   } catch (e) { next(e); }
 });
 
@@ -55,7 +103,7 @@ router.get('/produtos/:sku', requireAuth, async (req, res, next) => {
   try {
     const rows = await query(SELECT_PROD + ' WHERE p.Sku = @sku', { sku: req.params.sku });
     if (!rows.length) return res.status(404).json({ erro: 'Produto não encontrado.' });
-    res.json(toProduto(rows[0]));
+    res.json(toProduto(req, rows[0]));
   } catch (e) { next(e); }
 });
 
@@ -104,7 +152,43 @@ router.put('/produtos/:sku', requireAuth, requireAdmin, async (req, res, next) =
 // DELETE /api/produtos/:sku  (admin)
 router.delete('/produtos/:sku', requireAuth, requireAdmin, async (req, res, next) => {
   try {
-    await query('DELETE FROM dbo.Produto WHERE Sku=@sku', { sku: req.params.sku });
+    const rows = await query('DELETE FROM dbo.Produto OUTPUT deleted.ImagemUrl WHERE Sku=@sku', { sku: req.params.sku });
+    if (rows.length) apagarUpload(rows[0].ImagemUrl);
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
+// POST /api/produtos/:sku/imagem  (admin) — sobe/troca a foto da peça
+// (miniatura mostrada no Parts Finder e no painel). Campo multipart: "imagem".
+router.post('/produtos/:sku/imagem', requireAuth, requireAdmin, uploadImagemProduto, async (req, res, next) => {
+  try {
+    const rel = PROD_URL_BASE + req.file.filename;
+    const rows = await query(
+      `UPDATE dbo.Produto SET ImagemUrl = @img, AtualizadoEm = SYSUTCDATETIME()
+       OUTPUT deleted.ImagemUrl AS Anterior
+       WHERE Sku = @sku`,
+      { img: rel, sku: req.params.sku }
+    );
+    if (!rows.length) {
+      apagarUpload(rel);
+      return res.status(404).json({ erro: 'Produto não encontrado.' });
+    }
+    apagarUpload(rows[0].Anterior);
+    res.status(201).json({ ok: true, imagem: urlAbs(req, rel) });
+  } catch (e) { next(e); }
+});
+
+// DELETE /api/produtos/:sku/imagem  (admin) — remove a foto da peça.
+router.delete('/produtos/:sku/imagem', requireAuth, requireAdmin, async (req, res, next) => {
+  try {
+    const rows = await query(
+      `UPDATE dbo.Produto SET ImagemUrl = NULL, AtualizadoEm = SYSUTCDATETIME()
+       OUTPUT deleted.ImagemUrl AS Anterior
+       WHERE Sku = @sku`,
+      { sku: req.params.sku }
+    );
+    if (!rows.length) return res.status(404).json({ erro: 'Produto não encontrado.' });
+    apagarUpload(rows[0].Anterior);
     res.json({ ok: true });
   } catch (e) { next(e); }
 });
