@@ -3,6 +3,8 @@
 // ============================================================
 import express from 'express';
 import cors from 'cors';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import 'dotenv/config';
 
 import { getPool } from './db.js';
@@ -34,6 +36,11 @@ app.use(cors({
   credentials: true
 }));
 app.use(express.json());
+
+// Arquivos enviados (fotos de reivindicação, etc.) servidos estaticamente.
+// O banco guarda a URL relativa (/uploads/...); aqui ela vira acessível.
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
 
 // Log simples de requisições.
 app.use((req, _res, next) => {

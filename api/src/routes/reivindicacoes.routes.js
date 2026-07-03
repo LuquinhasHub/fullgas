@@ -1,35 +1,194 @@
 // ============================================================
-// Rotas de reivindicações (garantia) — versão básica.
-// Cliente vê/abre apenas as da própria empresa; admin vê todas e muda status.
-// Anexos (fotos) e campos expandidos vêm na Frente 2.
+// Rotas de reivindicações (garantia) — versão expandida (Frente 2).
+// Cliente vê/abre apenas as da própria empresa; admin vê todas, muda status e
+// pode DEVOLVER ao revendedor (com o que falta). Rascunhos ("Esboço") NÃO ficam
+// no banco — vivem no navegador do cliente; o POST só cria reivindicações
+// enviadas ("Em processo"), com todos os campos obrigatórios.
+// Campos: data do ocorrido, duração (horas/km), peças (com quantidade) e fotos.
 // ============================================================
 import { Router } from 'express';
+import multer from 'multer';
+import path from 'node:path';
+import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { query, getPool, sql } from '../db.js';
 import { requireAuth, requireAdmin } from '../auth.js';
 
 const router = Router();
 
-// Status válidos (espelham o CHECK constraint da tabela Reivindicacao).
-const STATUS_VALIDOS = ['Em processo', 'Esboço', 'Aprovada', 'Recusada'];
-// Na criação o cliente só pode abrir como "Em processo" ou salvar "Esboço".
-const STATUS_CRIACAO = ['Em processo', 'Esboço'];
-const TIPOS_VALIDOS = ['IT', 'Manufacturer', 'Implícito'];
+// Status válidos (espelham o CHECK constraint da tabela — sem "Esboço").
+const STATUS_VALIDOS = ['Em processo', 'Aprovada', 'Recusada'];
+// Estados terminais: não voltam a ser editados pelo cliente.
+const STATUS_TERMINAIS = ['Aprovada', 'Recusada'];
+const TIPOS_VALIDOS = ['Manufacturer', 'Implícito'];
 
-function toIso(d) {
-  return d instanceof Date ? d.toISOString() : (d || null);
+// ---- Upload de fotos (multer → disco) -----------------------------------
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const UPLOAD_DIR = path.join(__dirname, '..', '..', 'uploads', 'reivindicacoes');
+fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+const URL_BASE = '/uploads/reivindicacoes/';
+// Extensões aceitas — fallback quando o navegador não informa o mimetype
+// (envia 'application/octet-stream' ou vazio), o que é comum com vídeos.
+const EXT_OK = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.heic', '.heif',
+  '.mp4', '.webm', '.mov', '.avi', '.mkv', '.m4v', '.3gp', '.ogv', '.ogg', '.mpg', '.mpeg'];
+
+const storage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, UPLOAD_DIR),
+  filename: (_req, file, cb) => {
+    const ext = path.extname(file.originalname || '').toLowerCase().slice(0, 10);
+    cb(null, Date.now() + '-' + Math.random().toString(36).slice(2, 10) + ext);
+  }
+});
+const upload = multer({
+  storage,
+  limits: { fileSize: 200 * 1024 * 1024, files: 10 }, // 200 MB por arquivo, até 10
+  fileFilter: (_req, file, cb) => {
+    const mime = file.mimetype || '';
+    const ext = path.extname(file.originalname || '').toLowerCase();
+    // Aceita imagens/vídeos por mimetype OU por extensão (cobre mimetype vazio).
+    if (mime.startsWith('image/') || mime.startsWith('video/') || EXT_OK.includes(ext)) return cb(null, true);
+    cb(new Error('Envie apenas imagens ou vídeos.'));
+  }
+});
+// Wrapper que transforma erros do multer em 400 com mensagem clara.
+function uploadFotos(req, res, next) {
+  upload.array('fotos', 10)(req, res, (err) => {
+    if (err) {
+      const msg = err.code === 'LIMIT_FILE_SIZE' ? 'Arquivo muito grande (máximo 200 MB por arquivo).'
+        : err.code === 'LIMIT_FILE_COUNT' ? 'Máximo de 10 arquivos por envio.'
+          : (err.message || 'Falha no upload.');
+      return res.status(400).json({ erro: msg });
+    }
+    next();
+  });
+}
+function limparArquivos(files) {
+  for (const f of files || []) { try { fs.unlinkSync(f.path); } catch { /* ignora */ } }
+}
+
+function toIso(d) { return d instanceof Date ? d.toISOString() : (d || null); }
+function toIsoDate(d) { return d instanceof Date ? d.toISOString().slice(0, 10) : (d || null); }
+function intOuNull(v) {
+  if (v === undefined || v === null || v === '') return null;
+  const n = Number(v);
+  return Number.isInteger(n) && n >= 0 ? n : NaN;
+}
+function urlAbs(req, rel) {
+  if (!rel) return rel;
+  if (/^https?:\/\//i.test(rel)) return rel;
+  return req.protocol + '://' + req.get('host') + rel;
+}
+
+// Normaliza/valida o array de peças. Cada item: { sku, quantidade }. Mescla
+// SKUs repetidos somando a quantidade.
+function lerPecas(body) {
+  const bruto = Array.isArray(body?.pecas) ? body.pecas
+    : (body?.numeroPeca ? [{ sku: body.numeroPeca, quantidade: 1 }] : []);
+  const mapa = new Map();
+  for (const it of bruto) {
+    const sku = String(it?.sku || '').trim();
+    const q = Number(it?.quantidade);
+    if (!sku) return { erro: 'Peça inválida (sem código).' };
+    if (!Number.isInteger(q) || q < 1) return { erro: 'Quantidade inválida para a peça ' + sku + '.' };
+    mapa.set(sku, (mapa.get(sku) || 0) + q);
+  }
+  return { pecas: Array.from(mapa, ([sku, quantidade]) => ({ sku, quantidade })) };
+}
+
+// Valida o corpo de criação/edição. Todos os campos são obrigatórios (rascunho
+// incompleto não chega aqui — fica no navegador). Devolve { dados } ou { erro }.
+// opts.comTipo=false (edição) NÃO valida/retorna o tipo — o tipo é imutável
+// após o 1º envio e permanece o original no banco.
+function parseReiv(body, opts) {
+  const comTipo = !opts || opts.comTipo !== false;
+  const tipo = String(body?.tipo || '').trim();
+  const niv = String(body?.niv || '').trim();
+  const descricao = String(body?.descricao || '').trim();
+  const dataDefeitoTxt = String(body?.dataDefeito || '').trim();
+
+  if (comTipo && !TIPOS_VALIDOS.includes(tipo)) return { erro: 'Tipo de reivindicação inválido.' };
+  const { pecas, erro } = lerPecas(body);
+  if (erro) return { erro };
+  if (!niv) return { erro: 'Informe o NIV do veículo.' };
+  if (!pecas.length) return { erro: 'Informe ao menos uma peça defeituosa.' };
+  if (!dataDefeitoTxt) return { erro: 'Informe a data do ocorrido.' };
+  if (!descricao) return { erro: 'Descreva o problema.' };
+
+  const horimetro = intOuNull(body?.horimetro);
+  const quilometragem = intOuNull(body?.quilometragem);
+  if (Number.isNaN(horimetro)) return { erro: 'Horas de operação inválidas.' };
+  if (Number.isNaN(quilometragem)) return { erro: 'Quilometragem inválida.' };
+
+  const d = new Date(dataDefeitoTxt + 'T00:00:00Z');
+  if (Number.isNaN(d.getTime())) return { erro: 'Data do ocorrido inválida.' };
+  if (d.getTime() > Date.now()) return { erro: 'A data do ocorrido não pode ser futura.' };
+
+  const dados = { niv, descricao, pecas, dataDefeito: dataDefeitoTxt, horimetro, quilometragem };
+  if (comTipo) dados.tipo = tipo;
+  return { dados };
+}
+
+// Resolve o veículo (NIV) e valida cada peça no catálogo (dentro de uma tx).
+async function resolverVeicPecas(tx, niv, pecas) {
+  const veic = await new sql.Request(tx).input('niv', sql.VarChar(30), niv)
+    .query('SELECT VeiculoId FROM dbo.Veiculo WHERE Niv = @niv');
+  if (!veic.recordset.length) return { erro: 'Veículo não encontrado: ' + niv };
+  const pecasResolvidas = [];
+  for (const p of pecas) {
+    const prod = await new sql.Request(tx).input('sku', sql.VarChar(40), p.sku)
+      .query('SELECT Nome FROM dbo.Produto WHERE Sku = @sku');
+    if (!prod.recordset.length) return { erro: 'Peça não encontrada no catálogo: ' + p.sku };
+    pecasResolvidas.push({ sku: p.sku, nome: prod.recordset[0].Nome, quantidade: p.quantidade });
+  }
+  return { veiculoId: veic.recordset[0].VeiculoId, pecasResolvidas };
+}
+async function inserirPecas(tx, reivId, pecasResolvidas) {
+  for (const p of pecasResolvidas) {
+    await new sql.Request(tx)
+      .input('rid', sql.Int, reivId).input('sku', sql.VarChar(40), p.sku)
+      .input('nome', sql.NVarChar(200), p.nome).input('qtd', sql.Int, p.quantidade)
+      .query(`INSERT INTO dbo.ReivindicacaoPeca (ReivindicacaoId, Sku, NomeProduto, Quantidade)
+              VALUES (@rid, @sku, @nome, @qtd)`);
+  }
 }
 
 // SELECT base com os JOINs que alimentam o formato esperado pelo front.
 const SELECT_REIV =
-  `SELECT r.Numero, r.Tipo, r.Status, r.Pais, r.PreAutorizacao, r.Devolvido,
-          r.Descricao, r.DataAbertura, r.EmpresaId,
+  `SELECT r.ReivindicacaoId, r.Numero, r.Tipo, r.Status, r.Pais, r.PreAutorizacao,
+          r.Devolvido, r.Reenviada, r.FaltaInformacao, r.Descricao, r.DataAbertura,
+          r.AtualizadoEm, r.ValorGarantia, r.EmpresaId,
+          r.NumeroPeca, r.DataDefeito, r.Horimetro, r.Quilometragem,
           e.RazaoSocial AS Empresa, v.Niv AS Niv
      FROM dbo.Reivindicacao r
      LEFT JOIN dbo.Empresa e ON e.EmpresaId = r.EmpresaId
      LEFT JOIN dbo.Veiculo v ON v.VeiculoId = r.VeiculoId`;
 
-// Mapeia a linha do banco para o formato que o store.js/portal.js esperam.
-function montar(r) {
+// Carrega registros-filho (anexos/peças) agrupados por ReivindicacaoId.
+async function filhosPorReiv(ids, cols, tabela) {
+  const map = new Map();
+  if (!ids.length) return map;
+  const params = {};
+  const marks = ids.map((id, i) => { params['a' + i] = id; return '@a' + i; });
+  const rows = await query(
+    `SELECT ${cols} FROM dbo.${tabela}
+      WHERE ReivindicacaoId IN (${marks.join(',')})
+      ORDER BY ${tabela === 'ReivindicacaoAnexo' ? 'AnexoId' : 'ReivindicacaoPecaId'}`,
+    params
+  );
+  for (const a of rows) {
+    if (!map.has(a.ReivindicacaoId)) map.set(a.ReivindicacaoId, []);
+    map.get(a.ReivindicacaoId).push(a);
+  }
+  return map;
+}
+const anexosPorReiv = (ids) =>
+  filhosPorReiv(ids, 'AnexoId, ReivindicacaoId, NomeArquivo, TipoConteudo, TamanhoBytes, Url, CriadoEm', 'ReivindicacaoAnexo');
+const pecasPorReiv = (ids) =>
+  filhosPorReiv(ids, 'ReivindicacaoPecaId, ReivindicacaoId, Sku, NomeProduto, Quantidade', 'ReivindicacaoPeca');
+
+function montar(r, extras, req) {
+  const anexoRows = (extras && extras.anexos) || [];
+  const pecaRows = (extras && extras.pecas) || [];
   return {
     id: r.Numero,
     data: toIso(r.DataAbertura),
@@ -40,13 +199,31 @@ function montar(r) {
     status: r.Status,
     preAuth: r.PreAutorizacao ? 'Sim' : 'Não',
     sentBack: !!r.Devolvido,
+    reenviada: !!r.Reenviada,
+    atualizadoEm: toIso(r.AtualizadoEm),
+    valorGarantia: r.ValorGarantia == null ? null : Number(r.ValorGarantia),
+    faltaInformacao: r.FaltaInformacao || '',
     descricao: r.Descricao || '',
-    empresaId: r.EmpresaId
+    empresaId: r.EmpresaId,
+    numeroPeca: r.NumeroPeca || '',
+    dataDefeito: toIsoDate(r.DataDefeito),
+    horimetro: r.Horimetro == null ? null : r.Horimetro,
+    quilometragem: r.Quilometragem == null ? null : r.Quilometragem,
+    pecas: pecaRows.map((p) => ({ sku: p.Sku, nome: p.NomeProduto || '', quantidade: p.Quantidade })),
+    anexos: anexoRows.map((a) => ({
+      id: a.AnexoId, nome: a.NomeArquivo, tipo: a.TipoConteudo, tamanho: a.TamanhoBytes,
+      url: urlAbs(req, a.Url), criadoEm: toIso(a.CriadoEm)
+    }))
   };
 }
 
+async function montarLista(rows, req) {
+  const ids = rows.map((r) => r.ReivindicacaoId);
+  const [anexos, pecas] = await Promise.all([anexosPorReiv(ids), pecasPorReiv(ids)]);
+  return rows.map((r) => montar(r, { anexos: anexos.get(r.ReivindicacaoId), pecas: pecas.get(r.ReivindicacaoId) }, req));
+}
+
 // GET /api/reivindicacoes — cliente vê as da própria empresa; admin vê todas.
-// Filtro opcional ?status=Em processo|Esboço|Aprovada|Recusada.
 router.get('/reivindicacoes', requireAuth, async (req, res, next) => {
   try {
     const eid = req.user.papel === 'admin' ? null : req.user.empresaId;
@@ -58,7 +235,7 @@ router.get('/reivindicacoes', requireAuth, async (req, res, next) => {
           ORDER BY r.DataAbertura DESC, r.ReivindicacaoId DESC`,
       { eid, status }
     );
-    res.json(rows.map(montar));
+    res.json(await montarLista(rows, req));
   } catch (e) { next(e); }
 });
 
@@ -71,97 +248,234 @@ router.get('/reivindicacoes/:numero', requireAuth, async (req, res, next) => {
       { num: req.params.numero, eid }
     );
     if (!rows.length) return res.status(404).json({ erro: 'Reivindicação não encontrada.' });
-    res.json(montar(rows[0]));
+    res.json((await montarLista(rows, req))[0]);
   } catch (e) { next(e); }
 });
 
-// POST /api/reivindicacoes — cria a partir de { tipo, niv, descricao, status }.
-// EmpresaId/UsuarioId vêm do token (não confia no corpo). Numero único de 8 díg.
+// POST /api/reivindicacoes — cria (sempre "Em processo", tudo obrigatório).
 router.post('/reivindicacoes', requireAuth, async (req, res, next) => {
-  const tipo = String(req.body?.tipo || '').trim();
-  const niv = String(req.body?.niv || '').trim();
-  const descricao = String(req.body?.descricao || '').trim();
-  let status = String(req.body?.status || 'Em processo').trim();
-
-  if (!TIPOS_VALIDOS.includes(tipo))
-    return res.status(400).json({ erro: 'Tipo de reivindicação inválido.' });
-  if (!descricao)
-    return res.status(400).json({ erro: 'Descreva o problema antes de salvar.' });
-  if (!STATUS_CRIACAO.includes(status)) status = 'Em processo';
+  const { dados, erro } = parseReiv(req.body);
+  if (erro) return res.status(400).json({ erro });
 
   const pool = await getPool();
   const tx = new sql.Transaction(pool);
   try {
     await tx.begin();
 
-    // Resolve o veículo pelo NIV (se informado).
-    let veiculoId = null;
-    if (niv) {
-      const veic = await new sql.Request(tx)
-        .input('niv', sql.VarChar(30), niv)
-        .query('SELECT VeiculoId FROM dbo.Veiculo WHERE Niv = @niv');
-      if (!veic.recordset.length) {
-        await tx.rollback();
-        return res.status(400).json({ erro: 'Veículo não encontrado: ' + niv });
-      }
-      veiculoId = veic.recordset[0].VeiculoId;
-    }
+    const rv = await resolverVeicPecas(tx, dados.niv, dados.pecas);
+    if (rv.erro) { await tx.rollback(); return res.status(400).json({ erro: rv.erro }); }
 
-    // Numero único de 8 dígitos — tenta algumas vezes em caso de colisão.
+    // Numero único de 8 dígitos.
     let numero = null;
     for (let i = 0; i < 8 && !numero; i++) {
       const cand = String(Math.floor(10000000 + Math.random() * 90000000));
-      const ja = await new sql.Request(tx)
-        .input('n', sql.VarChar(20), cand)
+      const ja = await new sql.Request(tx).input('n', sql.VarChar(20), cand)
         .query('SELECT 1 FROM dbo.Reivindicacao WHERE Numero = @n');
       if (!ja.recordset.length) numero = cand;
     }
-    if (!numero) {
-      await tx.rollback();
-      return res.status(503).json({ erro: 'Não foi possível gerar o número. Tente novamente.' });
-    }
+    if (!numero) { await tx.rollback(); return res.status(503).json({ erro: 'Não foi possível gerar o número. Tente novamente.' }); }
 
     const ins = await new sql.Request(tx)
       .input('num', sql.VarChar(20), numero)
       .input('eid', sql.Int, req.user.empresaId)
       .input('uid', sql.Int, req.user.id)
-      .input('vid', sql.Int, veiculoId)
-      .input('tipo', sql.VarChar(16), tipo)
-      .input('status', sql.VarChar(14), status)
-      .input('desc', sql.NVarChar(1000), descricao)
+      .input('vid', sql.Int, rv.veiculoId)
+      .input('tipo', sql.VarChar(16), dados.tipo)
+      .input('desc', sql.NVarChar(1000), dados.descricao)
+      .input('peca', sql.VarChar(40), rv.pecasResolvidas[0]?.sku || null)
+      .input('ddef', sql.Date, dados.dataDefeito)
+      .input('hor', sql.Int, dados.horimetro)
+      .input('km', sql.Int, dados.quilometragem)
       .query(`INSERT INTO dbo.Reivindicacao
-                (Numero, EmpresaId, UsuarioId, VeiculoId, Tipo, Status, Descricao)
+                (Numero, EmpresaId, UsuarioId, VeiculoId, Tipo, Status, Descricao,
+                 NumeroPeca, DataDefeito, Horimetro, Quilometragem)
               OUTPUT inserted.ReivindicacaoId
-              VALUES (@num, @eid, @uid, @vid, @tipo, @status, @desc)`);
+              VALUES (@num, @eid, @uid, @vid, @tipo, 'Em processo', @desc,
+                      @peca, @ddef, @hor, @km)`);
+    const reivId = ins.recordset[0].ReivindicacaoId;
+    await inserirPecas(tx, reivId, rv.pecasResolvidas);
 
     await tx.commit();
-
-    const rows = await query(SELECT_REIV + ' WHERE r.ReivindicacaoId = @id',
-      { id: ins.recordset[0].ReivindicacaoId });
-    res.status(201).json(montar(rows[0]));
+    const rows = await query(SELECT_REIV + ' WHERE r.ReivindicacaoId = @id', { id: reivId });
+    res.status(201).json((await montarLista(rows, req))[0]);
   } catch (e) {
     try { await tx.rollback(); } catch { /* já desfeita */ }
     next(e);
   }
 });
 
+// PUT /api/reivindicacoes/:numero — edita/reenvia (cliente da própria empresa ou
+// admin). Usado quando a reivindicação foi DEVOLVIDA: o revendedor completa e
+// reenvia, o que limpa o estado "devolvido". Bloqueado se já estiver terminal.
+router.put('/reivindicacoes/:numero', requireAuth, async (req, res, next) => {
+  // Tipo é imutável após o 1º envio — não é validado nem alterado aqui.
+  const { dados, erro } = parseReiv(req.body, { comTipo: false });
+  if (erro) return res.status(400).json({ erro });
+
+  const pool = await getPool();
+  const tx = new sql.Transaction(pool);
+  try {
+    await tx.begin();
+
+    const eid = req.user.papel === 'admin' ? null : req.user.empresaId;
+    const cur = await new sql.Request(tx)
+      .input('num', sql.VarChar(20), req.params.numero)
+      .input('eid', sql.Int, eid)
+      .query('SELECT ReivindicacaoId, Status, Devolvido FROM dbo.Reivindicacao WHERE Numero = @num AND (@eid IS NULL OR EmpresaId = @eid)');
+    if (!cur.recordset.length) { await tx.rollback(); return res.status(404).json({ erro: 'Reivindicação não encontrada.' }); }
+    if (STATUS_TERMINAIS.includes(cur.recordset[0].Status)) {
+      await tx.rollback();
+      return res.status(409).json({ erro: 'Reivindicação já ' + cur.recordset[0].Status.toLowerCase() + ' — não pode ser editada.' });
+    }
+    const reivId = cur.recordset[0].ReivindicacaoId;
+    // Reenvio em resposta a uma devolução → sinaliza ao admin que foi atualizada.
+    const reenviada = cur.recordset[0].Devolvido ? 1 : 0;
+
+    const rv = await resolverVeicPecas(tx, dados.niv, dados.pecas);
+    if (rv.erro) { await tx.rollback(); return res.status(400).json({ erro: rv.erro }); }
+
+    await new sql.Request(tx)
+      .input('id', sql.Int, reivId)
+      .input('vid', sql.Int, rv.veiculoId)
+      .input('desc', sql.NVarChar(1000), dados.descricao)
+      .input('peca', sql.VarChar(40), rv.pecasResolvidas[0]?.sku || null)
+      .input('ddef', sql.Date, dados.dataDefeito)
+      .input('hor', sql.Int, dados.horimetro)
+      .input('km', sql.Int, dados.quilometragem)
+      .input('reenv', sql.Bit, reenviada)
+      .query(`UPDATE dbo.Reivindicacao
+                 SET VeiculoId=@vid, Descricao=@desc, NumeroPeca=@peca,
+                     DataDefeito=@ddef, Horimetro=@hor, Quilometragem=@km,
+                     Status='Em processo', Devolvido=0, FaltaInformacao=NULL,
+                     Reenviada=@reenv, AtualizadoEm=SYSUTCDATETIME()
+               WHERE ReivindicacaoId=@id`);
+
+    // Substitui as peças.
+    await new sql.Request(tx).input('id', sql.Int, reivId)
+      .query('DELETE FROM dbo.ReivindicacaoPeca WHERE ReivindicacaoId = @id');
+    await inserirPecas(tx, reivId, rv.pecasResolvidas);
+
+    await tx.commit();
+    const rows = await query(SELECT_REIV + ' WHERE r.ReivindicacaoId = @id', { id: reivId });
+    res.json((await montarLista(rows, req))[0]);
+  } catch (e) {
+    try { await tx.rollback(); } catch { /* já desfeita */ }
+    next(e);
+  }
+});
+
+// POST /api/reivindicacoes/:numero/anexos — sobe fotos (campo multipart "fotos").
+router.post('/reivindicacoes/:numero/anexos', requireAuth, uploadFotos, async (req, res, next) => {
+  const files = req.files || [];
+  try {
+    if (!files.length) return res.status(400).json({ erro: 'Nenhuma foto enviada.' });
+    const eid = req.user.papel === 'admin' ? null : req.user.empresaId;
+    const r = await query(
+      'SELECT ReivindicacaoId FROM dbo.Reivindicacao WHERE Numero = @num AND (@eid IS NULL OR EmpresaId = @eid)',
+      { num: req.params.numero, eid }
+    );
+    if (!r.length) { limparArquivos(files); return res.status(404).json({ erro: 'Reivindicação não encontrada.' }); }
+    const reivId = r[0].ReivindicacaoId;
+
+    for (const f of files) {
+      await query(
+        `INSERT INTO dbo.ReivindicacaoAnexo
+           (ReivindicacaoId, NomeArquivo, TipoConteudo, TamanhoBytes, Url, EnviadoPor)
+         VALUES (@rid, @nome, @tipo, @tam, @url, @uid)`,
+        { rid: reivId, nome: f.originalname || f.filename, tipo: f.mimetype || null,
+          tam: f.size || null, url: URL_BASE + f.filename, uid: req.user.id }
+      );
+    }
+    const anexos = await anexosPorReiv([reivId]);
+    res.status(201).json({
+      ok: true,
+      anexos: (anexos.get(reivId) || []).map((a) => ({
+        id: a.AnexoId, nome: a.NomeArquivo, tipo: a.TipoConteudo,
+        tamanho: a.TamanhoBytes, url: urlAbs(req, a.Url), criadoEm: toIso(a.CriadoEm)
+      }))
+    });
+  } catch (e) { limparArquivos(files); next(e); }
+});
+
 // PUT /api/reivindicacoes/:numero/status (admin) — muda o status.
+// Terminais (Aprovada/Recusada) não voltam a mudar. Ao APROVAR, gera uma
+// "Nota de crédito" (valor negativo = Σ preço × qtd das peças) para a empresa,
+// descontando da conta do cliente.
 router.put('/reivindicacoes/:numero/status', requireAuth, requireAdmin, async (req, res, next) => {
   const status = String(req.body?.status || '').trim();
   if (!STATUS_VALIDOS.includes(status))
     return res.status(400).json({ erro: 'Status inválido.' });
+
+  const pool = await getPool();
+  const tx = new sql.Transaction(pool);
   try {
-    const existe = await query('SELECT 1 AS ok FROM dbo.Reivindicacao WHERE Numero = @num',
-      { num: req.params.numero });
-    if (!existe.length) return res.status(404).json({ erro: 'Reivindicação não encontrada.' });
+    await tx.begin();
+    const cur = await new sql.Request(tx).input('num', sql.VarChar(20), req.params.numero)
+      .query('SELECT ReivindicacaoId, EmpresaId, Status FROM dbo.Reivindicacao WHERE Numero = @num');
+    if (!cur.recordset.length) { await tx.rollback(); return res.status(404).json({ erro: 'Reivindicação não encontrada.' }); }
+    const reiv = cur.recordset[0];
+    if (STATUS_TERMINAIS.includes(reiv.Status)) {
+      await tx.rollback();
+      return res.status(409).json({ erro: 'Reivindicação ' + reiv.Status.toLowerCase() + ' — o status não pode mais ser alterado.' });
+    }
+
+    let valorGarantia = null;
+    if (status === 'Aprovada') {
+      const val = await new sql.Request(tx).input('rid', sql.Int, reiv.ReivindicacaoId)
+        .query(`SELECT ISNULL(SUM(rp.Quantidade * pr.Preco), 0) AS Total
+                  FROM dbo.ReivindicacaoPeca rp
+                  JOIN dbo.Produto pr ON pr.Sku = rp.Sku
+                 WHERE rp.ReivindicacaoId = @rid`);
+      valorGarantia = Number(val.recordset[0].Total) || 0;
+      if (valorGarantia > 0) {
+        // Nota de crédito com valor NEGATIVO — a financeira soma como crédito.
+        // Referencia o número da reivindicação de origem.
+        await new sql.Request(tx)
+          .input('eid', sql.Int, reiv.EmpresaId)
+          .input('val', sql.Decimal(12, 2), -valorGarantia)
+          .input('ref', sql.VarChar(20), req.params.numero)
+          .query(`INSERT INTO dbo.Fatura (NumeroFatura, Tipo, EmpresaId, Valor, ReferenciaReivindicacao)
+                  VALUES (CAST(NEXT VALUE FOR dbo.Seq_NumeroFatura AS VARCHAR(24)), 'Nota de crédito', @eid, @val, @ref)`);
+      }
+    }
+
+    await new sql.Request(tx)
+      .input('num', sql.VarChar(20), req.params.numero)
+      .input('status', sql.VarChar(14), status)
+      .input('val', sql.Decimal(12, 2), valorGarantia)
+      .query(`UPDATE dbo.Reivindicacao
+                 SET Status = @status, Reenviada = 0, ValorGarantia = @val,
+                     AtualizadoEm = SYSUTCDATETIME()
+               WHERE Numero = @num`);
+
+    await tx.commit();
+    const rows = await query(SELECT_REIV + ' WHERE r.Numero = @num', { num: req.params.numero });
+    res.json((await montarLista(rows, req))[0]);
+  } catch (e) {
+    try { await tx.rollback(); } catch { /* já desfeita */ }
+    next(e);
+  }
+});
+
+// PUT /api/reivindicacoes/:numero/devolver (admin) — devolve ao revendedor,
+// marcando Devolvido=1 e gravando o que falta (obrigatório).
+router.put('/reivindicacoes/:numero/devolver', requireAuth, requireAdmin, async (req, res, next) => {
+  const falta = String(req.body?.faltaInformacao || '').trim();
+  if (!falta) return res.status(400).json({ erro: 'Descreva o que falta antes de devolver.' });
+  try {
+    const cur = await query('SELECT Status FROM dbo.Reivindicacao WHERE Numero = @num', { num: req.params.numero });
+    if (!cur.length) return res.status(404).json({ erro: 'Reivindicação não encontrada.' });
+    if (STATUS_TERMINAIS.includes(cur[0].Status))
+      return res.status(409).json({ erro: 'Reivindicação ' + cur[0].Status.toLowerCase() + ' — não pode ser devolvida.' });
     await query(
       `UPDATE dbo.Reivindicacao
-          SET Status = @status, AtualizadoEm = SYSUTCDATETIME()
+          SET Devolvido = 1, FaltaInformacao = @falta, Status = 'Em processo',
+              Reenviada = 0, AtualizadoEm = SYSUTCDATETIME()
         WHERE Numero = @num`,
-      { status, num: req.params.numero }
+      { falta, num: req.params.numero }
     );
     const rows = await query(SELECT_REIV + ' WHERE r.Numero = @num', { num: req.params.numero });
-    res.json(montar(rows[0]));
+    res.json((await montarLista(rows, req))[0]);
   } catch (e) { next(e); }
 });
 

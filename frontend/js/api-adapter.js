@@ -239,21 +239,67 @@
   };
 
   /* ---------- reivindicações ---------- */
-  // Cria reivindicação. `dados` = { criador?, tipo, niv, descricao, status }.
-  // EmpresaId/UsuarioId são derivados do token na API. Promise<claim|null>.
+  // Cria reivindicação. `dados` = { tipo, niv, descricao, status, pecas?,
+  // dataDefeito?, horimetro?, quilometragem? }, onde pecas = [{ sku, quantidade }].
+  // EmpresaId/UsuarioId vêm do token. As fotos sobem depois via
+  // FG.uploadClaimFotos. Promise<claim|null>.
   FG.createClaim = function (dados) {
     return req('POST', '/reivindicacoes', {
-      tipo: dados.tipo, niv: dados.niv, descricao: dados.descricao, status: dados.status
+      tipo: dados.tipo, niv: dados.niv, descricao: dados.descricao, status: dados.status,
+      pecas: dados.pecas, dataDefeito: dados.dataDefeito,
+      horimetro: dados.horimetro, quilometragem: dados.quilometragem
     }).then(function (r) {
       if (!r.ok) { FG.toast(r.msg || 'Não foi possível registrar a reivindicação.', 'erro'); return null; }
       return recarregarClaims().then(function () { return r; });
     });
   };
 
+  // Sobe fotos para uma reivindicação (multipart). `files` = FileList/array de
+  // File. Promise<{ ok, anexos?, msg? }>. NÃO define Content-Type (o browser
+  // monta o boundary do multipart). Recarrega o cache de claims no sucesso.
+  FG.uploadClaimFotos = function (numero, files) {
+    if (!files || !files.length) return Promise.resolve({ ok: true, anexos: [] });
+    var fd = new FormData();
+    for (var i = 0; i < files.length; i++) fd.append('fotos', files[i]);
+    var headers = { 'ngrok-skip-browser-warning': '1' };
+    if (token()) headers['Authorization'] = 'Bearer ' + token();
+    return fetch(API_BASE + '/reivindicacoes/' + encodeURIComponent(numero) + '/anexos', {
+      method: 'POST', headers: headers, body: fd
+    }).then(function (resp) {
+      return resp.json().catch(function () { return {}; }).then(function (data) {
+        if (!resp.ok) return { ok: false, msg: data.erro || ('HTTP ' + resp.status) };
+        data.ok = true;
+        return recarregarClaims().then(function () { return data; });
+      });
+    }, function () { return { ok: false, msg: 'Falha no envio das fotos.' }; });
+  };
+
   // Muda o status da reivindicação (admin). Promise<{ ok, ... }>.
   FG.setClaimStatus = function (id, status) {
     return req('PUT', '/reivindicacoes/' + encodeURIComponent(id) + '/status', { status: status }).then(function (r) {
       if (!r.ok) { FG.toast(r.msg || 'Não foi possível atualizar o status.', 'erro'); return r; }
+      return recarregarClaims().then(function () { return r; });
+    });
+  };
+
+  // Edita/reenvia uma reivindicação (cliente da própria empresa, ex.: após ser
+  // devolvida). `dados` no mesmo formato de createClaim. Promise<claim|null>.
+  FG.updateClaim = function (numero, dados) {
+    return req('PUT', '/reivindicacoes/' + encodeURIComponent(numero), {
+      tipo: dados.tipo, niv: dados.niv, descricao: dados.descricao,
+      pecas: dados.pecas, dataDefeito: dados.dataDefeito,
+      horimetro: dados.horimetro, quilometragem: dados.quilometragem
+    }).then(function (r) {
+      if (!r.ok) { FG.toast(r.msg || 'Não foi possível salvar as alterações.', 'erro'); return null; }
+      return recarregarClaims().then(function () { return r; });
+    });
+  };
+
+  // Devolve a reivindicação ao revendedor (admin), com o que falta (obrigatório).
+  FG.devolverClaim = function (numero, faltaInformacao) {
+    return req('PUT', '/reivindicacoes/' + encodeURIComponent(numero) + '/devolver',
+      { faltaInformacao: faltaInformacao }).then(function (r) {
+      if (!r.ok) { FG.toast(r.msg || 'Não foi possível devolver.', 'erro'); return r; }
       return recarregarClaims().then(function () { return r; });
     });
   };

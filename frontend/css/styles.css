@@ -297,11 +297,18 @@ main.portal { padding: 0 22px 60px; }
 .toolbar .grow { flex: 1; }
 .toolbar .mini-search input { padding: 6px 9px; border: 1px solid var(--line); }
 
-.row-claim { display: grid; grid-template-columns: 1.1fr 1fr 1.2fr 1fr .8fr 1.4fr .9fr 30px; gap: 8px; padding: 14px 10px; border-bottom: 1px solid #e3e3e3; align-items: start; }
+.row-claim { display: grid; grid-template-columns: .9fr 1fr 1fr 1.6fr .9fr 1.3fr 40px; gap: 8px; padding: 14px 10px; border-bottom: 1px solid #e3e3e3; align-items: start; }
 .row-claim:nth-child(even) { background: #f7f7f7; }
-.row-claim .chev { color: var(--red); font-size: 18px; font-weight: 700; justify-self: end; }
-.claim-head { display: grid; grid-template-columns: 1.1fr 1fr 1.2fr 1fr .8fr 1.4fr .9fr 30px; gap: 8px; background: #ececec; border: 1px solid var(--line); padding: 9px 10px; font-size: 12px; font-weight: 600; }
-@media (max-width: 1000px) { .row-claim, .claim-head { grid-template-columns: 1fr 1fr 1fr; } .claim-head { display: none; } }
+.cl-num { font-weight: 700; color: var(--red); }
+.row-claim .cl-num { font-size: 15px; }
+.row-claim[data-cid] { cursor: pointer; transition: background .12s; }
+.row-claim[data-cid]:hover { background: #fdecec; }
+.row-claim .chev { color: var(--red); font-size: 30px; font-weight: 700; line-height: 1; justify-self: end; align-self: center; transition: transform .12s; }
+.row-claim[data-cid]:hover .chev { transform: translateX(3px); }
+.claim-head { display: grid; grid-template-columns: .9fr 1fr 1fr 1.6fr .9fr 1.3fr 40px; gap: 8px; background: #ececec; border: 1px solid var(--line); padding: 9px 10px; font-size: 12px; font-weight: 600; }
+.claim-filters { display: grid; grid-template-columns: .9fr 1fr 1fr 1.6fr .9fr 1.3fr 40px; gap: 8px; background: #fafafa; border: 1px solid var(--line); border-top: 0; padding: 6px 10px; }
+.claim-filters .cl-filter { width: 100%; min-width: 0; font-size: 11px; padding: 3px 5px; border: 1px solid var(--line); border-radius: 4px; background: #fff; }
+@media (max-width: 1000px) { .row-claim, .claim-head { grid-template-columns: 1fr 1fr 1fr; } .claim-head, .claim-filters { display: none; } }
 
 /* notificações */
 .notif { border: 1px solid var(--line); border-left: 4px solid #bbb; padding: 13px 16px; margin-bottom: 10px; display: flex; gap: 14px; align-items: flex-start; background: #fff; }
@@ -489,3 +496,89 @@ main.finder { padding: 8px 28px 70px; }
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; transition: none !important; }
 }
+
+/* Fotos de reivindicação: preview no formulário e miniaturas no admin */
+.fotos-prev { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.foto-thumb {
+  width: 54px; height: 54px; object-fit: cover; border-radius: 6px;
+  border: 1px solid #d0d5dd; background: #f2f4f7; cursor: pointer;
+}
+
+/* Galeria de mídia (fotos e vídeos) com overlay de play nos vídeos */
+.media-gallery { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 6px; }
+.media-item {
+  position: relative; width: 96px; height: 96px; border-radius: 8px; overflow: hidden;
+  border: 1px solid #d0d5dd; background: #0b0b0b; display: block; cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .12); transition: transform .12s, box-shadow .12s;
+}
+.media-item:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(0, 0, 0, .2); }
+.media-item img, .media-item video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.media-item .play {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  color: #fff; font-size: 24px; background: rgba(0, 0, 0, .30);
+  text-shadow: 0 1px 4px rgba(0, 0, 0, .6); pointer-events: none;
+}
+.media-item.is-video::before {
+  content: 'vídeo'; position: absolute; top: 4px; left: 4px; z-index: 1;
+  font-size: 9px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  color: #fff; background: rgba(0, 0, 0, .55); padding: 1px 5px; border-radius: 4px;
+}
+/* Variante compacta (coluna de fotos do admin) */
+.media-gallery.sm .media-item { width: 60px; height: 60px; }
+.media-gallery.sm .media-item .play { font-size: 15px; }
+.media-gallery.sm .media-item.is-video::before { font-size: 7px; padding: 0 3px; }
+
+/* Reivindicação: adicionar peças (código + quantidade) e lista de peças */
+.peca-add { display: flex; gap: 8px; align-items: center; }
+.peca-add #nc-peca { flex: 1; }
+.peca-add #nc-peca-qtd { width: 72px; }
+.pecas-list { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.peca-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  background: #f2f4f7; border: 1px solid #e2e6ea; border-radius: 6px;
+  padding: 6px 10px; font-size: 13px;
+}
+.peca-row .peca-del {
+  border: 0; background: transparent; color: #c0392b; font-size: 18px;
+  line-height: 1; cursor: pointer; padding: 0 4px;
+}
+
+/* Reivindicação devolvida ao revendedor */
+.devolvida-aviso {
+  margin-top: 6px; padding: 6px 8px; background: #fff4e5;
+  border: 1px solid #ffd8a8; border-radius: 6px; color: #8a5a00; font-size: 12px;
+}
+/* Amarelo: nós devolvemos ao revendedor (aguardando ele). */
+.pill-status.Devolvida { background: #fff4e5; color: #8a5a00; }
+/* Verde: o revendedor devolveu para nós (precisa de revisão). */
+.pill-status.Reenviada { background: #e6f4ea; color: #1e7e34; }
+.tr-reenviada > td { background: #eefaf0; }
+.reenviada-aviso { margin: 0 0 12px; padding: 8px 10px; background: #e6f4ea; border: 1px solid #b7e0c2; border-radius: 6px; color: #1e7e34; font-size: 13px; font-weight: 600; }
+.adm-claim-row { cursor: pointer; transition: background .12s; }
+.adm-claim-row:hover > td { background: #fdecec; }
+.rasc-acoes { display: flex; gap: 8px; align-items: center; }
+
+/* Botão "Nova reivindicação" — compacto, alinhado com os botões de navegação */
+.btn-nova-reiv {
+  display: inline-flex; align-items: center; gap: 8px; margin-bottom: 18px;
+  padding: 8px 14px; border: 1px solid var(--red); border-radius: 8px;
+  background: #fff5f5; color: var(--red); font-size: 13px; font-weight: 600;
+  cursor: pointer; transition: background .12s, color .12s;
+}
+.btn-nova-reiv:hover { background: var(--red); color: #fff; }
+.btn-nova-reiv .plus {
+  font-size: 16px; font-weight: 700; width: 20px; height: 20px; flex: 0 0 20px;
+  display: flex; align-items: center; justify-content: center; border-radius: 50%;
+  background: var(--red); color: #fff;
+}
+.btn-nova-reiv:hover .plus { background: #fff; color: var(--red); }
+
+/* Grade do modal de detalhe da reivindicação */
+.det-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 16px; margin-bottom: 12px; }
+.det-credito {
+  margin: 4px 0 12px; padding: 8px 10px; background: #e6f4ea; border: 1px solid #b7e0c2;
+  border-radius: 6px; color: #1e7e34; font-size: 13px; font-weight: 600;
+}
+/* Seleção de reivindicações para exportar */
+.cl-selall { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--ink); cursor: pointer; }
+.cl-check { cursor: pointer; }
