@@ -155,6 +155,29 @@
      ========================================================= */
   var claimFiltro = 'Em processo';
 
+  // Rascunhos ("Esboço") vivem no navegador do cliente (localStorage), NÃO no
+  // banco. Só viram reivindicação de verdade ao "Enviar".
+  var RASC_KEY = 'fullgas_reiv_rascunhos_v1';
+  function lerRascunhos() {
+    try { return JSON.parse(localStorage.getItem(RASC_KEY) || '[]'); } catch (e) { return []; }
+  }
+  function salvarRascunhos(l) { localStorage.setItem(RASC_KEY, JSON.stringify(l)); }
+  function gravarRascunho(d) {
+    var l = lerRascunhos();
+    if (d.localId) {
+      var i = l.findIndex(function (x) { return x.localId === d.localId; });
+      if (i >= 0) l[i] = d; else l.push(d);
+    } else {
+      d.localId = 'r' + Date.now() + Math.random().toString(36).slice(2, 7);
+      l.push(d);
+    }
+    salvarRascunhos(l);
+    return d;
+  }
+  function excluirRascunho(localId) {
+    salvarRascunhos(lerRascunhos().filter(function (x) { return x.localId !== localId; }));
+  }
+
   function claimsDoFiltro() {
     var all = FG.all('claims');
     if (claimFiltro === 'Arquivo') return all.filter(function (c) { return c.status === 'Aprovada' || c.status === 'Recusada'; });
@@ -163,27 +186,38 @@
 
   function renderClaims() {
     setCrumb(['Reivindicações']); setTabOn('reivindicacoes');
-    var lista = claimsDoFiltro();
+    var lista = claimFiltro === 'Esboço' ? [] : claimsDoFiltro();
+    function distintos(key) { var s = {}; lista.forEach(function (c) { if (c[key]) s[c[key]] = 1; }); return Object.keys(s).sort(); }
+    function selFiltro(col, labels, values) {
+      return '<select class="cl-filter" data-col="' + col + '"><option value="">Todos</option>' +
+        labels.map(function (lab, i) { var v = values ? values[i] : lab; return '<option value="' + esc(v) + '">' + esc(lab) + '</option>'; }).join('') + '</select>';
+    }
+    var fPaises = distintos('pais'), fTipos = distintos('tipo'), fStatus = distintos('status');
 
     var html =
-      '<div class="toolbar" style="margin-bottom:18px;">' +
-      '<button class="tool red" id="cl-rma">Criar reiv. RMA</button>' +
-      '<button class="tool red" id="cl-var">Criar reiv. varejo</button>' +
-      '<button class="tool red" id="cl-rem">Criar remoção de armazém</button>' +
-      '</div>' +
+      '<button class="btn-nova-reiv" id="cl-nova"><span class="plus">＋</span><b>Nova reivindicação</b></button>' +
       '<div class="side-layout">' +
       '<aside class="side-nav"><h2>Reivindicações</h2>' +
       btnNav('Em processo') + btnNav('Esboço') + btnNav('Arquivo') +
       '</aside>' +
       '<section>' +
       '<div class="toolbar">' +
-      '<button class="tool" id="cl-reset">✖ Redefinir grade</button>' +
-      '<button class="tool" id="cl-csv">📄 Export. p/ Excel</button>' +
+      '<button class="tool" id="cl-csv">📄 Exportar p/ Excel</button>' +
+      '<label class="cl-selall"><input type="checkbox" id="cl-all"> Selecionar todas</label>' +
       '<span class="grow"></span>' +
-      '<span class="mini-search"><input id="cl-q" type="text" placeholder="Filtrar..."></span>' +
+      '<button class="tool" id="cl-limpar">✖ Limpar filtros</button>' +
       '</div>' +
-      '<div class="claim-head"><span>Data da reivindicação</span><span>Creator Country</span>' +
-      '<span>Criador da reivindicação</span><span>Tipo</span><span>Sent Back</span><span>Status</span><span>Pre-Authorization</span><span></span></div>' +
+      '<div class="claim-head"><span>N° da reivindicação</span><span>Data da reivindicação</span>' +
+      '<span>Creator Country</span><span>Criador da reivindicação</span><span>Tipo</span><span>Status</span><span></span></div>' +
+      '<div class="claim-filters">' +
+      '<input class="cl-filter" data-col="numero" placeholder="Filtrar...">' +
+      '<input class="cl-filter" data-col="data" placeholder="Filtrar...">' +
+      selFiltro('pais', fPaises) +
+      '<input class="cl-filter" data-col="criador" placeholder="Filtrar...">' +
+      selFiltro('tipo', fTipos) +
+      selFiltro('status', fStatus) +
+      '<span></span>' +
+      '</div>' +
       '<div id="cl-rows"></div>' +
       '</section></div>';
 
@@ -197,56 +231,152 @@
       b.addEventListener('click', function () { claimFiltro = b.getAttribute('data-f'); renderClaims(); });
     });
 
-    function rows(filtroTexto) {
-      var box = document.getElementById('cl-rows');
-      var q = (filtroTexto || '').toLowerCase();
-      var l = lista.filter(function (c) {
-        return !q || (c.id + c.criador + c.niv + c.tipo).toLowerCase().indexOf(q) >= 0;
+    // Aba "Esboço": lista os rascunhos do navegador (não vão ao banco).
+    function renderRascunhos(box, q) {
+      var l = lerRascunhos().filter(function (d) {
+        return !q || ((d.niv || '') + (d.descricao || '') + (d.tipo || '')).toLowerCase().indexOf(q) >= 0;
       });
+      if (!l.length) { box.innerHTML = '<p class="muted" style="padding:20px 10px;">Nenhum rascunho salvo. Use "Salvar como esboço" ao criar uma reivindicação.</p>'; return; }
+      box.innerHTML = l.map(function (d) {
+        var pecasTxt = (d.pecas || []).map(function (p) { return esc(p.sku) + ' ×' + p.quantidade; }).join(', ');
+        return '<div class="row-claim rascunho">' +
+          '<div><span class="cell-label">Rascunho</span><span class="cell-value">' + esc(d.tipo || '—') + '</span><br>' +
+          '<span class="cell-label">Descrição</span><span class="cell-value">' + esc(d.descricao || '(sem descrição)') + '</span>' +
+          (pecasTxt ? '<br><span class="cell-label">Peças</span><span class="cell-value">' + pecasTxt + '</span>' : '') + '</div>' +
+          '<div><span class="cell-label">NIV</span><span class="cell-value">' + esc(d.niv || '—') + '</span></div>' +
+          '<div><span class="cell-label">Data ocorrido</span><span class="cell-value">' + (d.dataDefeito ? FG.fmtDate(d.dataDefeito) : '—') + '</span></div>' +
+          '<div class="rasc-acoes"><button class="btn red rasc-edit" data-id="' + esc(d.localId) + '">Editar</button> ' +
+          '<button class="btn rasc-del" data-id="' + esc(d.localId) + '">Excluir</button></div></div>';
+      }).join('');
+      Array.prototype.forEach.call(box.querySelectorAll('.rasc-edit'), function (b) {
+        b.addEventListener('click', function () {
+          var d = lerRascunhos().find(function (x) { return x.localId === b.getAttribute('data-id'); });
+          if (d) modalClaim(d.tipo || 'IT', { modo: 'rascunho', rasc: d });
+        });
+      });
+      Array.prototype.forEach.call(box.querySelectorAll('.rasc-del'), function (b) {
+        b.addEventListener('click', function () { excluirRascunho(b.getAttribute('data-id')); renderClaims(); });
+      });
+    }
+
+    // Filtro por coluna (lê os controles do cabeçalho).
+    function passaFiltros(c) {
+      function g(col) { var el = view.querySelector('.cl-filter[data-col="' + col + '"]'); return el ? el.value.trim().toLowerCase() : ''; }
+      var fNum = g('numero'), fData = g('data'), fPais = g('pais'), fCriador = g('criador'),
+        fTipo = g('tipo'), fSt = g('status');
+      if (fNum && String(c.id || '').toLowerCase().indexOf(fNum) < 0) return false;
+      if (fData && FG.fmtDate(c.data).toLowerCase().indexOf(fData) < 0) return false;
+      if (fPais && (c.pais || '').toLowerCase() !== fPais) return false;
+      if (fCriador && (c.criador || '').toLowerCase().indexOf(fCriador) < 0) return false;
+      if (fTipo && (c.tipo || '').toLowerCase() !== fTipo) return false;
+      if (fSt && (c.status || '').toLowerCase() !== fSt) return false;
+      return true;
+    }
+
+    function rows() {
+      var box = document.getElementById('cl-rows');
+      if (claimFiltro === 'Esboço') { renderRascunhos(box, ''); return; }
+      var l = lista.filter(passaFiltros);
       if (!l.length) { box.innerHTML = '<p class="muted" style="padding:20px 10px;">Nenhuma reivindicação neste filtro.</p>'; return; }
       box.innerHTML = l.map(function (c) {
-        return '<div class="row-claim">' +
-          '<div><span class="cell-label">Data</span><span class="cell-value">' + FG.fmtDate(c.data) + '</span><br>' +
-          '<span class="cell-label">N° da reivindicação</span><span class="cell-value">' + c.id + '</span></div>' +
+        var devolvida = c.sentBack
+          ? '<div class="devolvida-aviso">↩ Devolvida — falta: ' + esc(c.faltaInformacao || 'informações') + '</div>'
+          : '';
+        return '<div class="row-claim" data-cid="' + esc(c.id) + '">' +
+          '<div><label class="cl-check"><input type="checkbox" class="cl-sel" data-cid="' + esc(c.id) + '"></label> ' +
+          '<span class="cell-label">N° da reivindicação</span><span class="cell-value cl-num">' + c.id + '</span></div>' +
+          '<div><span class="cell-label">Data</span><span class="cell-value">' + FG.fmtDate(c.data) + '</span></div>' +
           '<div><span class="cell-label">Creator Country</span><span class="cell-value">' + esc(c.pais) + '</span></div>' +
-          '<div><span class="cell-label">Criado por</span><span class="cell-value">' + esc(c.criador) + '</span><br>' +
-          '<span class="cell-label">Descrição</span><span class="cell-value">' + esc(c.descricao) + '</span></div>' +
+          '<div><span class="cell-label">Criado por</span><span class="cell-value">' + esc(c.criador) + '</span>' +
+          (c.pecas && c.pecas.length ? '<br><span class="cell-label">Peças</span><span class="cell-value">' + c.pecas.map(function (p) { return esc(p.sku) + ' ×' + p.quantidade; }).join(', ') + '</span>' : '') +
+          (c.anexos && c.anexos.length ? ' <span class="muted">📎 ' + c.anexos.length + '</span>' : '') +
+          devolvida +
+          (c.sentBack ? '<div style="margin-top:6px;"><button class="btn red cl-editar" data-id="' + esc(c.id) + '">Editar e reenviar</button></div>' : '') +
+          '</div>' +
           '<div><span class="cell-label">Tipo</span><span class="cell-value">' + esc(c.tipo) + '</span></div>' +
-          '<div><span class="cell-label">Sent Back</span><span class="cell-value">' + c.sentBack + '</span></div>' +
           '<div>' + statusBadge(c.status) + '<br><span class="cell-label">NIV</span><a href="#acoes/' + c.niv + '">' + c.niv + '</a></div>' +
-          '<div><span class="cell-label">Pre-Auth.</span><span class="cell-value">' + esc(c.preAuth) + '</span></div>' +
           '<span class="chev">&rsaquo;</span></div>';
       }).join('');
+      Array.prototype.forEach.call(box.querySelectorAll('.cl-editar'), function (b) {
+        b.addEventListener('click', function () {
+          var c = FG.all('claims').find(function (x) { return x.id === b.getAttribute('data-id'); });
+          if (c) modalClaim(c.tipo, { modo: 'editar', claim: c });
+        });
+      });
+      // Clique na linha (ou na seta) abre o detalhe — ignora botões/links/checkbox.
+      Array.prototype.forEach.call(box.querySelectorAll('.row-claim[data-cid]'), function (row) {
+        row.addEventListener('click', function (e) {
+          if (e.target.closest('button') || e.target.closest('a') || e.target.closest('label') || e.target.closest('input')) return;
+          var c = FG.all('claims').find(function (x) { return x.id === row.getAttribute('data-cid'); });
+          if (c) modalClaimDetalhe(c);
+        });
+      });
     }
-    rows('');
+    rows();
 
-    document.getElementById('cl-q').addEventListener('input', function (e) { rows(e.target.value); });
-    document.getElementById('cl-reset').addEventListener('click', function () { document.getElementById('cl-q').value = ''; rows(''); });
+    // Filtros por coluna: re-renderizam ao digitar/selecionar.
+    Array.prototype.forEach.call(view.querySelectorAll('.cl-filter'), function (el) {
+      el.addEventListener('input', rows);
+      el.addEventListener('change', rows);
+    });
+    document.getElementById('cl-limpar').addEventListener('click', function () {
+      Array.prototype.forEach.call(view.querySelectorAll('.cl-filter'), function (el) { el.value = ''; });
+      rows();
+    });
+    // Exporta as selecionadas (checkbox); sem seleção, exporta as visíveis (filtradas).
     document.getElementById('cl-csv').addEventListener('click', function () {
-      var linhas = [['N°', 'Data', 'Criador', 'País', 'Tipo', 'NIV', 'Status', 'Pré-autorização', 'Descrição']];
-      lista.forEach(function (c) { linhas.push([c.id, FG.fmtDate(c.data), c.criador, c.pais, c.tipo, c.niv, c.status, c.preAuth, c.descricao]); });
+      var selIds = Array.prototype.map.call(view.querySelectorAll('.cl-sel:checked'), function (x) { return x.getAttribute('data-cid'); });
+      var alvo = selIds.length ? lista.filter(function (c) { return selIds.indexOf(c.id) >= 0; }) : lista.filter(passaFiltros);
+      if (!alvo.length) { FG.toast('Nada para exportar.'); return; }
+      var linhas = [['N°', 'Data', 'Criador', 'País', 'Tipo', 'NIV', 'Status', 'Descrição']];
+      alvo.forEach(function (c) { linhas.push([c.id, FG.fmtDate(c.data), c.criador, c.pais, c.tipo, c.niv, c.status, c.descricao]); });
       FG.exportCSV('reivindicacoes', linhas);
     });
-    document.getElementById('cl-rma').addEventListener('click', function () { modalClaim('IT'); });
-    document.getElementById('cl-var').addEventListener('click', function () { modalClaim('Implícito'); });
-    document.getElementById('cl-rem').addEventListener('click', function () { modalClaim('Manufacturer'); });
+    var chkAll = document.getElementById('cl-all');
+    if (chkAll) chkAll.addEventListener('change', function () {
+      Array.prototype.forEach.call(view.querySelectorAll('.cl-sel'), function (x) { x.checked = chkAll.checked; });
+    });
+    document.getElementById('cl-nova').addEventListener('click', function () { modalClaim('Manufacturer'); });
   }
 
-  function modalClaim(tipoPadrao) {
+  function modalClaim(tipoPadrao, ctx) {
     var vehs = FG.all('vehicles');
+    var pre = ctx && (ctx.rasc || ctx.claim);
+    var modo = (ctx && ctx.modo) || 'novo';
+    var titulo = ctx && ctx.claim ? 'Editar reivindicação ' + ctx.claim.id
+      : (ctx && ctx.rasc ? 'Editar rascunho' : 'Nova reivindicação');
     var back = document.createElement('div');
     back.className = 'modal-back';
     back.innerHTML =
-      '<div class="modal"><header><h3>Nova reivindicação</h3><button class="x">×</button></header>' +
+      '<div class="modal"><header><h3>' + esc(titulo) + '</h3><button class="x">×</button></header>' +
       '<div class="modal-body">' +
       '<div class="field"><label>Tipo</label><select id="nc-tipo">' +
-      ['IT', 'Manufacturer', 'Implícito'].map(function (t) {
+      ['Manufacturer', 'Implícito'].map(function (t) {
         return '<option' + (t === tipoPadrao ? ' selected' : '') + '>' + t + '</option>';
       }).join('') + '</select></div>' +
-      '<div class="field"><label>NIV do veículo</label><select id="nc-niv">' +
+      '<div class="field"><label>NIV do veículo *</label><select id="nc-niv">' +
       vehs.map(function (v) { return '<option value="' + v.niv + '">' + v.niv + ' — ' + esc(modelName(v.modeloId)) + '</option>'; }).join('') +
       '</select></div>' +
-      '<div class="field"><label>Descrição do problema</label><textarea id="nc-desc" rows="4" placeholder="Descreva o defeito constatado..."></textarea></div>' +
+      '<div class="field"><label>Peça(s) defeituosa(s) *</label>' +
+      '<div class="peca-add">' +
+      '<input id="nc-peca" list="nc-peca-list" autocomplete="off" placeholder="Código ou nome da peça">' +
+      '<input id="nc-peca-qtd" type="number" min="1" step="1" value="1" title="Quantidade">' +
+      '<button type="button" class="btn" id="nc-peca-add">Adicionar</button>' +
+      '</div>' +
+      '<datalist id="nc-peca-list">' +
+      FG.all('products').map(function (p) { return '<option value="' + esc(p.artigo + ' — ' + p.nome) + '"></option>'; }).join('') +
+      '</datalist>' +
+      '<div id="nc-peca-info" class="muted" style="font-size:11px;margin-top:4px;"></div>' +
+      '<div id="nc-pecas-list" class="pecas-list"></div></div>' +
+      '<div class="form-grid">' +
+      '<div class="field"><label>Data do ocorrido *</label><input id="nc-data" type="date"></div>' +
+      '<div class="field"><label>Horas de operação</label><input id="nc-horas" type="number" min="0" step="1" placeholder="ex.: 120"></div>' +
+      '<div class="field"><label>Quilometragem (km)</label><input id="nc-km" type="number" min="0" step="1" placeholder="ex.: 3500"></div>' +
+      '</div>' +
+      '<div class="field"><label>Descrição do problema *</label><textarea id="nc-desc" rows="4" placeholder="Descreva o defeito constatado..."></textarea></div>' +
+      '<div class="field"><label>Fotos e vídeos da peça defeituosa</label>' +
+      '<input id="nc-fotos" type="file" accept="image/*,video/*" multiple>' +
+      '<div id="nc-fotos-prev" class="media-gallery"></div></div>' +
       '</div>' +
       '<div class="modal-foot"><button class="btn" id="nc-rasc">Salvar como esboço</button>' +
       '<button class="btn red" id="nc-env">Enviar reivindicação</button></div></div>';
@@ -256,21 +386,226 @@
     back.querySelector('.x').addEventListener('click', fechar);
     back.addEventListener('click', function (e) { if (e.target === back) fechar(); });
 
-    async function criar(status) {
-      var desc = document.getElementById('nc-desc').value.trim();
-      if (!desc) { FG.toast('Descreva o problema antes de salvar.'); return; }
-      var c = await FG.createClaim({
-        criador: sess.empresa, tipo: document.getElementById('nc-tipo').value,
-        niv: document.getElementById('nc-niv').value, descricao: desc, status: status
+    // Consultor de peças: resolve o que foi digitado para um SKU do catálogo.
+    // Retorna '' (vazio), o SKU (válido) ou null (digitado mas não encontrado).
+    function resolverPeca() {
+      var v = document.getElementById('nc-peca').value.trim();
+      if (!v) return '';
+      var sku = v.split(' — ')[0].trim().toLowerCase();
+      var p = FG.all('products').find(function (x) {
+        return x.artigo.toLowerCase() === sku || (x.artigo + ' — ' + x.nome) === v;
       });
-      if (!c) return;   // a API já avisou o erro
-      fechar();
-      claimFiltro = status === 'Esboço' ? 'Esboço' : 'Em processo';
-      FG.toast('Reivindicação registrada.');
-      renderClaims();
+      return p ? p.artigo : null;
     }
-    document.getElementById('nc-env').addEventListener('click', function () { criar('Em processo'); });
-    document.getElementById('nc-rasc').addEventListener('click', function () { criar('Esboço'); });
+    // Feedback ao vivo: mostra a peça cadastrada conforme o cliente digita.
+    var pecaInfo = document.getElementById('nc-peca-info');
+    document.getElementById('nc-peca').addEventListener('input', function () {
+      var v = this.value.trim();
+      if (!v) { pecaInfo.textContent = ''; pecaInfo.style.color = ''; return; }
+      var sku = resolverPeca();
+      if (sku) {
+        var p = FG.product(sku);
+        pecaInfo.style.color = 'var(--green)';
+        pecaInfo.textContent = '✔ ' + p.artigo + ' — ' + p.nome + ' · ' + FG.fmtMoney(p.preco);
+      } else {
+        pecaInfo.style.color = '';
+        pecaInfo.textContent = 'Selecione uma peça da lista (código cadastrado).';
+      }
+    });
+
+    // --- Peças defeituosas: lista dinâmica (código + quantidade) ---
+    var pecas = [];
+    var pecasBox = document.getElementById('nc-pecas-list');
+    function renderPecas() {
+      if (!pecas.length) {
+        pecasBox.innerHTML = '<span class="muted" style="font-size:12px;">Nenhuma peça adicionada.</span>';
+        return;
+      }
+      pecasBox.innerHTML = pecas.map(function (p) {
+        return '<div class="peca-row"><span>' + esc(p.sku) + ' — ' + esc(p.nome) +
+          ' <b>×' + p.quantidade + '</b></span>' +
+          '<button type="button" class="peca-del" data-sku="' + esc(p.sku) + '" title="Remover">×</button></div>';
+      }).join('');
+      Array.prototype.forEach.call(pecasBox.querySelectorAll('.peca-del'), function (b) {
+        b.addEventListener('click', function () {
+          var sku = b.getAttribute('data-sku');
+          pecas = pecas.filter(function (x) { return x.sku !== sku; });
+          renderPecas();
+        });
+      });
+    }
+    // Prefill quando editando um rascunho ou uma reivindicação devolvida.
+    if (pre) {
+      var selTipo = document.getElementById('nc-tipo');
+      if (pre.tipo) {
+        // Garante que o tipo original apareça (inclusive legados, ex.: IT).
+        if (!Array.prototype.some.call(selTipo.options, function (o) { return o.value === pre.tipo; })) {
+          var op = document.createElement('option'); op.value = pre.tipo; op.textContent = pre.tipo; selTipo.appendChild(op);
+        }
+        selTipo.value = pre.tipo;
+      }
+      // Tipo é imutável a partir do 1º envio — trava ao editar reivindicação.
+      if (modo === 'editar') selTipo.disabled = true;
+      if (pre.niv) document.getElementById('nc-niv').value = pre.niv;
+      document.getElementById('nc-data').value = pre.dataDefeito || '';
+      document.getElementById('nc-horas').value = (pre.horimetro != null ? pre.horimetro : '');
+      document.getElementById('nc-km').value = (pre.quilometragem != null ? pre.quilometragem : '');
+      document.getElementById('nc-desc').value = pre.descricao || '';
+      pecas = (pre.pecas || []).map(function (p) {
+        var prod = FG.product(p.sku);
+        return { sku: p.sku, nome: p.nome || (prod ? prod.nome : ''), quantidade: p.quantidade };
+      });
+    }
+    renderPecas();
+    document.getElementById('nc-peca-add').addEventListener('click', function () {
+      var sku = resolverPeca();
+      if (!sku) { FG.toast('Selecione uma peça válida da lista.', 'erro'); return; }
+      var q = Math.max(1, parseInt(document.getElementById('nc-peca-qtd').value, 10) || 1);
+      var p = FG.product(sku);
+      var ex = pecas.find(function (x) { return x.sku === sku; });
+      if (ex) ex.quantidade = q; else pecas.push({ sku: sku, nome: p.nome, quantidade: q });
+      document.getElementById('nc-peca').value = '';
+      document.getElementById('nc-peca-qtd').value = '1';
+      pecaInfo.textContent = '';
+      renderPecas();
+    });
+
+    // Preview das fotos escolhidas.
+    var inpFotos = document.getElementById('nc-fotos');
+    var prev = document.getElementById('nc-fotos-prev');
+    inpFotos.addEventListener('change', function () {
+      prev.innerHTML = '';
+      Array.prototype.forEach.call(inpFotos.files, function (f) {
+        var url = URL.createObjectURL(f);
+        var video = f.type.indexOf('video/') === 0 || /\.(mp4|webm|mov|avi|mkv|m4v|3gp|ogv|mpe?g)$/i.test(f.name || '');
+        var item = document.createElement('div');
+        item.className = 'media-item' + (video ? ' is-video' : '');
+        var media = document.createElement(video ? 'video' : 'img');
+        if (video) { media.muted = true; media.preload = 'metadata'; }
+        media.src = url;
+        media.onload = media.onloadeddata = function () { URL.revokeObjectURL(url); };
+        item.appendChild(media);
+        if (video) { var pl = document.createElement('span'); pl.className = 'play'; pl.textContent = '▶'; item.appendChild(pl); }
+        prev.appendChild(item);
+      });
+    });
+
+    // Coleta os campos do formulário no formato da API.
+    function coletar() {
+      return {
+        tipo: document.getElementById('nc-tipo').value,
+        niv: document.getElementById('nc-niv').value,
+        descricao: document.getElementById('nc-desc').value.trim(),
+        dataDefeito: document.getElementById('nc-data').value || null,
+        horimetro: document.getElementById('nc-horas').value || null,
+        quilometragem: document.getElementById('nc-km').value || null,
+        pecas: pecas.map(function (p) { return { sku: p.sku, quantidade: p.quantidade }; })
+      };
+    }
+    // Validação obrigatória ao ENVIAR (NIV, peças, data e descrição).
+    function validarEnvio(d) {
+      if (!d.niv) { FG.toast('Selecione o NIV do veículo.', 'erro'); return false; }
+      if (!pecas.length) { FG.toast('Adicione ao menos uma peça defeituosa.', 'erro'); return false; }
+      if (!d.dataDefeito) { FG.toast('Informe a data do ocorrido.', 'erro'); return false; }
+      if (!d.descricao) { FG.toast('Descreva o problema.', 'erro'); return false; }
+      return true;
+    }
+
+    // ENVIAR: cria (novo/rascunho) ou atualiza+reenvia (editar). Sobe as fotos.
+    document.getElementById('nc-env').addEventListener('click', async function () {
+      var d = coletar();
+      if (!validarEnvio(d)) return;
+      var c;
+      if (modo === 'editar') {
+        c = await FG.updateClaim(ctx.claim.id, d);
+      } else {
+        d.status = 'Em processo';
+        d.criador = sess.empresa;
+        c = await FG.createClaim(d);
+      }
+      if (!c) return;   // a API já avisou o erro
+      if (inpFotos.files && inpFotos.files.length) {
+        var up = await FG.uploadClaimFotos(c.id, inpFotos.files);
+        if (!up.ok) FG.toast(up.msg || 'Salvo, mas falhou o envio das fotos.', 'erro');
+      }
+      if (modo === 'rascunho' && ctx.rasc) excluirRascunho(ctx.rasc.localId);
+      fechar();
+      claimFiltro = 'Em processo';
+      FG.toast(modo === 'editar' ? 'Reivindicação atualizada e reenviada.' : 'Reivindicação registrada.');
+      renderClaims();
+    });
+
+    // SALVAR COMO ESBOÇO: grava no navegador (não vai ao banco). Some ao editar
+    // uma reivindicação já enviada.
+    var rascBtn = document.getElementById('nc-rasc');
+    if (modo === 'editar') { rascBtn.style.display = 'none'; }
+    else rascBtn.addEventListener('click', function () {
+      var d = coletar();
+      if (!d.descricao && !pecas.length && !d.niv) { FG.toast('Nada para salvar no rascunho.'); return; }
+      gravarRascunho({
+        localId: (ctx && ctx.rasc && ctx.rasc.localId) || null,
+        tipo: d.tipo, niv: d.niv, descricao: d.descricao,
+        dataDefeito: d.dataDefeito, horimetro: d.horimetro, quilometragem: d.quilometragem,
+        pecas: pecas.map(function (p) { return { sku: p.sku, nome: p.nome, quantidade: p.quantidade }; }),
+        criadoEm: new Date().toISOString()
+      });
+      fechar();
+      claimFiltro = 'Esboço';
+      FG.toast('Rascunho salvo.');
+      renderClaims();
+    });
+  }
+
+  // Modal de VISUALIZAÇÃO (somente leitura) de uma reivindicação.
+  function modalClaimDetalhe(c) {
+    var back = document.createElement('div');
+    back.className = 'modal-back';
+    var uso = [];
+    if (c.horimetro != null) uso.push(c.horimetro + ' h');
+    if (c.quilometragem != null) uso.push(c.quilometragem + ' km');
+    var pecas = (c.pecas || []).map(function (p) {
+      return '<div class="peca-row"><span>' + esc(p.sku) + ' — ' + esc(p.nome) + ' <b>×' + p.quantidade + '</b></span></div>';
+    }).join('') || '<span class="muted">—</span>';
+    function anexoThumb(a) {
+      var video = (a.tipo && a.tipo.indexOf('video/') === 0) || /\.(mp4|webm|mov|avi|mkv|m4v|3gp|ogv|mpe?g)$/i.test(a.url || a.nome || '');
+      var inner = video
+        ? '<video src="' + esc(a.url) + '" muted preload="metadata"></video><span class="play">▶</span>'
+        : '<img src="' + esc(a.url) + '" alt="' + esc(a.nome || 'foto') + '">';
+      return '<a class="media-item' + (video ? ' is-video' : '') + '" href="' + esc(a.url) + '" target="_blank" rel="noopener">' + inner + '</a>';
+    }
+    var fotos = (c.anexos && c.anexos.length)
+      ? '<div class="media-gallery">' + c.anexos.map(anexoThumb).join('') + '</div>'
+      : '<span class="muted">Sem fotos ou vídeos</span>';
+    function linha(rot, val) { return '<div><span class="cell-label">' + rot + '</span><span class="cell-value">' + val + '</span></div>'; }
+    back.innerHTML =
+      '<div class="modal"><header><h3>Reivindicação ' + esc(c.id) + '</h3><button class="x">×</button></header>' +
+      '<div class="modal-body">' +
+      (c.sentBack ? '<div class="devolvida-aviso">↩ Devolvida — falta: ' + esc(c.faltaInformacao || 'informações') + '</div>' : '') +
+      (c.status === 'Aprovada' && c.valorGarantia ? '<div class="det-credito">✔ Garantia aprovada — crédito de ' + FG.fmtMoney(c.valorGarantia) + ' descontado da sua fatura.</div>' : '') +
+      '<div class="det-grid">' +
+      linha('N° da reivindicação', '<b class="cl-num">' + esc(c.id) + '</b>') +
+      linha('Status', esc(c.status)) +
+      linha('Tipo', esc(c.tipo)) +
+      linha('NIV', esc(c.niv || '—')) +
+      linha('Criador', esc(c.criador || '—')) +
+      linha('Data da reivindicação', FG.fmtDateTime(c.data)) +
+      linha('Data do ocorrido', c.dataDefeito ? FG.fmtDate(c.dataDefeito) : '—') +
+      linha('Uso', uso.length ? uso.join(' / ') : '—') +
+      '</div>' +
+      '<div class="field"><label>Peça(s) defeituosa(s)</label><div class="pecas-list">' + pecas + '</div></div>' +
+      '<div class="field"><label>Descrição</label><div class="cell-value">' + esc(c.descricao || '—') + '</div></div>' +
+      '<div class="field"><label>Fotos e vídeos</label>' + fotos + '</div>' +
+      '</div>' +
+      '<div class="modal-foot">' +
+      (c.sentBack ? '<button class="btn red" id="det-editar">Editar e reenviar</button>' : '') +
+      '<button class="btn-line" id="det-fechar">Fechar</button></div></div>';
+    document.body.appendChild(back);
+    function fechar() { back.remove(); }
+    back.querySelector('.x').addEventListener('click', fechar);
+    document.getElementById('det-fechar').addEventListener('click', fechar);
+    back.addEventListener('click', function (e) { if (e.target === back) fechar(); });
+    var ed = document.getElementById('det-editar');
+    if (ed) ed.addEventListener('click', function () { fechar(); modalClaim(c.tipo, { modo: 'editar', claim: c }); });
   }
 
   /* =========================================================
@@ -630,6 +965,7 @@
       inv.map(function (i, idx) {
         return '<tr><td>' + esc(i.tipo) +
           (i.status && i.status !== 'Emitida' ? ' <span class="pill-status ' + esc(i.status) + '">' + esc(i.status) + '</span>' : '') +
+          (i.referencia ? '<br><span class="muted" style="font-size:11px;">ref. reivindicação ' + esc(i.referencia) + '</span>' : '') +
           '</td><td>' + i.numero + '</td><td>' + FG.fmtDate(i.data) + '</td>' +
           '<td class="right">' + i.valor.toLocaleString('pt-BR', { minimumFractionDigits: 2 }) + '</td>' +
           '<td>' + esc(i.moeda) + '</td><td><button class="pdf-ico" data-i="' + idx + '">PDF</button></td></tr>';
@@ -654,6 +990,7 @@
       '<h1 style="color:#d20a11;font-style:italic;">FULLGAS</h1>' +
       '<h2>' + esc(i.tipo) + ' n° ' + i.numero + '</h2>' +
       '<p><b>Data:</b> ' + FG.fmtDate(i.data) + '<br><b>Cliente:</b> ' + esc(sess.empresa) + '<br>' +
+      (i.referencia ? '<b>Ref. reivindicação:</b> ' + esc(i.referencia) + '<br>' : '') +
       '<b>Moeda:</b> ' + esc(i.moeda) + '</p>' +
       '<table style="width:100%;border-collapse:collapse;margin-top:14px;">' +
       '<tr><th style="text-align:left;border-bottom:2px solid #d20a11;padding:8px 4px;">Descrição</th>' +

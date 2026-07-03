@@ -353,29 +353,142 @@
   /* =========================================================
      REIVINDICAÇÕES
      ========================================================= */
-  var CL_STATUS = ['Em processo', 'Esboço', 'Aprovada', 'Recusada'];
+  // "Esboço" não existe no admin — é só do cliente (rascunho no navegador).
+  var CL_STATUS = ['Em processo', 'Aprovada', 'Recusada'];
 
   function renderClaims() {
     h1.textContent = 'Gestão de reivindicações'; setOn('reivindicacoes');
     var claims = FG.all('claims');
+    // Tabela enxuta (só identificação). Detalhes + ações no modal ao clicar.
     view.innerHTML =
       '<div class="adm-card"><div class="c-head">Reivindicações (' + claims.length + ')</div><div class="c-body">' +
-      '<table class="tbl"><thead><tr><th>N°</th><th>Data</th><th>Criador</th><th>Tipo</th>' +
-      '<th>NIV</th><th>Descrição</th><th>Status</th></tr></thead><tbody>' +
-      claims.map(function (c) {
-        return '<tr><td>' + c.id + '</td><td>' + FG.fmtDate(c.data) + '</td><td>' + esc(c.criador) + '</td>' +
-          '<td>' + esc(c.tipo) + '</td><td>' + c.niv + '</td><td>' + esc(c.descricao) + '</td>' +
-          '<td>' + pill(c.status) + '<br><select class="inline-status" data-id="' + c.id + '" style="margin-top:6px;">' +
-          CL_STATUS.map(function (s) { return '<option' + (s === c.status ? ' selected' : '') + '>' + s + '</option>'; }).join('') +
-          '</select></td></tr>';
-      }).join('') + '</tbody></table></div></div>';
+      '<p class="muted" style="font-size:12px;margin:0 0 8px;">Clique numa reivindicação para ver os detalhes e agir.</p>' +
+      '<table class="tbl"><thead><tr><th>N° da reivindicação</th><th>Data</th><th>Criador</th><th>Tipo</th><th>Status</th></tr></thead><tbody>' +
+      (claims.length ? claims.map(function (c) {
+        return '<tr class="adm-claim-row' + (c.reenviada ? ' tr-reenviada' : '') + '" data-id="' + esc(c.id) + '">' +
+          '<td><b class="cl-num">' + c.id + '</b></td>' +
+          '<td>' + FG.fmtDate(c.data) + '</td>' +
+          '<td>' + esc(c.criador) + '</td>' +
+          '<td>' + esc(c.tipo) + '</td>' +
+          '<td>' + pill(c.status) +
+          (c.reenviada ? ' <span class="pill-status Reenviada">↩ Devolvida pelo revendedor</span>' : '') +
+          (c.sentBack ? ' <span class="pill-status Devolvida">↩ Devolvida</span>' : '') +
+          '</td></tr>';
+      }).join('') : '<tr><td colspan="5" class="muted">Nenhuma reivindicação.</td></tr>') +
+      '</tbody></table></div></div>';
 
-    Array.prototype.forEach.call(view.querySelectorAll('select.inline-status'), function (sel) {
-      sel.addEventListener('change', async function () {
-        var r = await FG.setClaimStatus(sel.getAttribute('data-id'), sel.value);
-        if (!r || r.ok !== false) FG.toast('Status da reivindicação atualizado.');
+    Array.prototype.forEach.call(view.querySelectorAll('.adm-claim-row'), function (row) {
+      row.addEventListener('click', function () {
+        var c = FG.all('claims').find(function (x) { return x.id === row.getAttribute('data-id'); });
+        if (c) modalClaimAdmin(c);
+      });
+    });
+  }
+
+  // Modal de detalhe da reivindicação (admin): todas as infos + ações.
+  function modalClaimAdmin(c) {
+    var CL = ['Em processo', 'Aprovada', 'Recusada'];
+    var term = c.status === 'Aprovada' || c.status === 'Recusada';
+    var uso = [];
+    if (c.horimetro != null) uso.push(c.horimetro + ' h');
+    if (c.quilometragem != null) uso.push(c.quilometragem + ' km');
+    var pecas = (c.pecas || []).map(function (p) {
+      return '<div class="peca-row"><span>' + esc(p.sku) + ' — ' + esc(p.nome) + ' <b>×' + p.quantidade + '</b></span></div>';
+    }).join('') || '<span class="muted">—</span>';
+    function anexoThumb(a) {
+      var video = (a.tipo && a.tipo.indexOf('video/') === 0) || /\.(mp4|webm|mov|avi|mkv|m4v|3gp|ogv|mpe?g)$/i.test(a.url || a.nome || '');
+      var inner = video
+        ? '<video src="' + esc(a.url) + '" muted preload="metadata"></video><span class="play">▶</span>'
+        : '<img src="' + esc(a.url) + '" alt="' + esc(a.nome || 'foto') + '">';
+      return '<a class="media-item' + (video ? ' is-video' : '') + '" href="' + esc(a.url) + '" target="_blank" rel="noopener">' + inner + '</a>';
+    }
+    var fotos = (c.anexos && c.anexos.length)
+      ? '<div class="media-gallery">' + c.anexos.map(anexoThumb).join('') + '</div>'
+      : '<span class="muted">Sem fotos ou vídeos</span>';
+    function linha(rot, val) { return '<div><span class="cell-label">' + rot + '</span><span class="cell-value">' + val + '</span></div>'; }
+
+    var acoes = term
+      ? '<div class="muted">Status final (' + esc(c.status) + ') — não pode mais mudar.</div>'
+      : '<label style="font-size:12px;margin-right:4px;">Definir status:</label>' +
+        '<select id="ad-status">' + CL.map(function (s) { return '<option' + (s === c.status ? ' selected' : '') + '>' + s + '</option>'; }).join('') + '</select> ' +
+        '<button class="btn-orange btn-mini" id="ad-aplicar">Aplicar</button> ' +
+        '<button class="btn-line btn-mini" id="ad-devolver">Devolver ao revendedor</button>';
+
+    var back = document.createElement('div');
+    back.className = 'modal-back';
+    back.innerHTML =
+      '<div class="modal"><header><h3>Reivindicação ' + esc(c.id) + '</h3><button class="x">×</button></header>' +
+      '<div class="modal-body">' +
+      (c.reenviada ? '<div class="reenviada-aviso">↩ Devolvida pelo revendedor — revisar' + (c.atualizadoEm ? ' (em ' + FG.fmtDateTime(c.atualizadoEm) + ')' : '') + '</div>' : '') +
+      (c.sentBack ? '<div class="devolvida-aviso">↩ Devolvida ao revendedor — aguardando. Falta: ' + esc(c.faltaInformacao || '—') + '</div>' : '') +
+      (c.status === 'Aprovada' && c.valorGarantia ? '<div class="det-credito">✔ Aprovada — crédito de ' + FG.fmtMoney(c.valorGarantia) + ' descontado da fatura.</div>' : '') +
+      '<div class="det-grid">' +
+      linha('N° da reivindicação', '<b class="cl-num">' + esc(c.id) + '</b>') +
+      linha('Status', esc(c.status)) +
+      linha('Tipo', esc(c.tipo)) +
+      linha('NIV', esc(c.niv || '—')) +
+      linha('Criador', esc(c.criador || '—')) +
+      linha('Data da reivindicação', FG.fmtDateTime(c.data)) +
+      linha('Data do ocorrido', c.dataDefeito ? FG.fmtDate(c.dataDefeito) : '—') +
+      linha('Uso', uso.length ? uso.join(' / ') : '—') +
+      '</div>' +
+      '<div class="field"><label>Peça(s) defeituosa(s)</label><div class="pecas-list">' + pecas + '</div></div>' +
+      '<div class="field"><label>Descrição</label><div class="cell-value">' + esc(c.descricao || '—') + '</div></div>' +
+      '<div class="field"><label>Fotos e vídeos</label>' + fotos + '</div>' +
+      '</div>' +
+      '<div class="modal-foot" style="flex-wrap:wrap;gap:8px;">' +
+      '<div style="margin-right:auto;">' + acoes + '</div>' +
+      '<button class="btn-line" id="ad-fechar">Fechar</button></div></div>';
+    document.body.appendChild(back);
+
+    function fechar() { back.remove(); }
+    back.querySelector('.x').addEventListener('click', fechar);
+    document.getElementById('ad-fechar').addEventListener('click', fechar);
+    back.addEventListener('click', function (e) { if (e.target === back) fechar(); });
+
+    if (!term) {
+      document.getElementById('ad-aplicar').addEventListener('click', async function () {
+        var novo = document.getElementById('ad-status').value;
+        if (novo === c.status) { FG.toast('Selecione um status diferente.'); return; }
+        if ((novo === 'Aprovada' || novo === 'Recusada') &&
+          !confirm('Definir como "' + novo + '"? Esse status é FINAL e não poderá ser alterado' +
+            (novo === 'Aprovada' ? ' (gera crédito na fatura do cliente)' : '') + '.')) return;
+        var r = await FG.setClaimStatus(c.id, novo);
+        if (r && r.ok === false) return;
+        fechar();
+        FG.toast('Status atualizado.');
         renderClaims();
       });
+      document.getElementById('ad-devolver').addEventListener('click', function () { fechar(); modalDevolver(c.id); });
+    }
+  }
+
+  // Modal para devolver ao revendedor com o que falta (obrigatório).
+  function modalDevolver(numero) {
+    var back = document.createElement('div');
+    back.className = 'modal-back';
+    back.innerHTML =
+      '<div class="modal"><header><h3>Devolver ao revendedor</h3><button class="x">×</button></header>' +
+      '<div class="modal-body">' +
+      '<p class="muted" style="margin-top:0;">Descreva o que falta para o revendedor completar e reenviar a reivindicação ' + esc(numero) + '.</p>' +
+      '<div class="field"><label>Falta de informação *</label>' +
+      '<textarea id="dv-falta" rows="4" placeholder="Ex.: fotos da peça pelo lado interno, horímetro atual, nota fiscal..."></textarea></div>' +
+      '</div>' +
+      '<div class="modal-foot"><button class="btn-line" id="dv-canc">Cancelar</button>' +
+      '<button class="btn-orange" id="dv-ok">Devolver</button></div></div>';
+    document.body.appendChild(back);
+    function fechar() { back.remove(); }
+    back.querySelector('.x').addEventListener('click', fechar);
+    document.getElementById('dv-canc').addEventListener('click', fechar);
+    back.addEventListener('click', function (e) { if (e.target === back) fechar(); });
+    document.getElementById('dv-ok').addEventListener('click', async function () {
+      var falta = document.getElementById('dv-falta').value.trim();
+      if (!falta) { FG.toast('Descreva o que falta antes de devolver.', 'erro'); return; }
+      var r = await FG.devolverClaim(numero, falta);
+      if (r && r.ok === false) return;
+      fechar();
+      FG.toast('Reivindicação devolvida ao revendedor.');
+      renderClaims();
     });
   }
 
