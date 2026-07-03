@@ -1,15 +1,36 @@
 # Handoff — estado do trabalho (Fullgas B2B)
 
 > Documento de passagem de contexto entre sessões/máquinas. Atualizado em
-> **2026-06-25**. Leia junto com `docs/04-roadmap.md` (plano oficial) e
+> **2026-07-03**. Leia junto com `docs/04-roadmap.md` (plano oficial) e
 > `docs/03-arquitetura-e-expansao.md`.
 
 ## Onde estamos
 
-- Branch ativa: **`main`**. Tudo abaixo já está no `main` e **com push** para
-  `origin/main`.
-- Frente 1 do roadmap: **1.1, 1.2 e 1.3 concluídas**. Próximo passo natural:
-  **Frente 1.4 — Parts Finder** (`api/src/routes/finder.routes.js`), depois 1.5.
+- Branch ativa: **`main`**.
+- Frente 1 do roadmap: **1.1, 1.2, 1.3 e 1.4 concluídas**. Próximo passo
+  natural: **Frente 1.5** (faturas/entregas/notificações/usuários/dashboard).
+
+### Frente 1.4 — Parts Finder 100% administrável (2026-07-03)
+
+- **Migração 014** (`014_partsfinder_admin.sql`): `ModeloMoto` ganhou
+  `Arvore`/`ImagemUrl`/`DocTecnicaUrl`; `Produto.ImagemUrl`;
+  `SecaoModelo.ImagemUrl`; `PecaSecao` ganhou `NumeroImagem`,
+  `QuantidadePadrao`, `Ordem`, `Ativo`; nova tabela `SecaoHotspot`
+  (áreas clicáveis do diagrama, em pixels da imagem natural).
+- **API** `api/src/routes/finder.routes.js`: leitura (modelos c/ árvore,
+  modelo+seções por lado, seção c/ peças+hotspots+vizinhos, busca VIN/motor
+  com log) e CRUD admin completo de modelos, seções, peças e hotspots
+  (individual e em lote) + upload de imagens (modelo, diagrama). Produtos
+  ganharam foto (`POST/DELETE /api/produtos/:sku/imagem`, campo `imagem` no
+  GET). Referência completa: `docs/07-partsfinder.md`.
+- **Cliente** (`finder.js` reescrito): árvore da API, busca por VIN/nº motor,
+  diagrama com zoom 0.1–1.6, hotspots bidirecionais (área ⇔ linha da peça),
+  quantidade padrão pré-marcada, cesta, Show Image e doc técnica.
+- **Admin** (`admin.html#finder`): 3 níveis (modelos → seções → peças +
+  editor visual de hotspots com clique-para-criar e arrastar). Foto da peça
+  no modal de produto do Catálogo.
+- Uploads em `api/uploads/finder/` e `api/uploads/produtos/` (troca/remoção
+  apaga o arquivo antigo do disco).
 
 ## O que foi feito nesta leva (resumo por tema)
 

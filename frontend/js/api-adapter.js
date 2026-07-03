@@ -304,6 +304,84 @@
     });
   };
 
+  /* ---------- Parts Finder ---------- */
+  // Upload multipart genérico (campo "imagem"). NÃO define Content-Type (o
+  // browser monta o boundary). Devolve Promise<{ ok, imagem?, msg? }>.
+  function uploadImagem(path, file, method) {
+    var fd = new FormData();
+    fd.append('imagem', file);
+    var headers = { 'ngrok-skip-browser-warning': '1' };
+    if (token()) headers['Authorization'] = 'Bearer ' + token();
+    return fetch(API_BASE + path, { method: method || 'POST', headers: headers, body: fd })
+      .then(function (resp) {
+        return resp.json().catch(function () { return {}; }).then(function (data) {
+          if (!resp.ok) return { ok: false, msg: data.erro || ('HTTP ' + resp.status) };
+          data.ok = true;
+          return data;
+        });
+      }, function () { return { ok: false, msg: 'Falha no envio da imagem.' }; });
+  }
+
+  // ---- leituras (REJEITAM em erro — as telas tratam com .catch) ----
+  // Lista de modelos do finder (com árvore). admin + todos=true inclui inativos.
+  FG.finderModelos = function (todos) {
+    return api('/finder/modelos' + (todos ? '?todos=1' : ''));
+  };
+  // Modelo + seções agrupadas por lado ({ chassi: [...], engine: [...] }).
+  FG.finderModelo = function (codigo) {
+    return api('/finder/modelos/' + encodeURIComponent(codigo));
+  };
+  // Seção com peças + hotspots + vizinhos (anterior/próxima do mesmo lado).
+  FG.finderSecao = function (secaoId) {
+    return api('/finder/secoes/' + secaoId);
+  };
+  // Busca por VIN ou número de motor → { modelo, veiculo }. Loga no LogBusca.
+  FG.finderBusca = function (filtro) {
+    var qs = filtro.vin ? 'vin=' + encodeURIComponent(filtro.vin)
+      : 'motor=' + encodeURIComponent(filtro.motor);
+    return api('/finder/busca?' + qs);
+  };
+
+  // ---- mutações admin (resolvem { ok, ... } — nunca rejeitam) ----
+  FG.finderCriarModelo = function (d) { return req('POST', '/finder/modelos', d); };
+  FG.finderEditarModelo = function (codigo, d) { return req('PUT', '/finder/modelos/' + encodeURIComponent(codigo), d); };
+  FG.finderExcluirModelo = function (codigo) { return req('DELETE', '/finder/modelos/' + encodeURIComponent(codigo)); };
+  FG.finderUploadImagemModelo = function (codigo, file) { return uploadImagem('/finder/modelos/' + encodeURIComponent(codigo) + '/imagem', file); };
+  FG.finderRemoverImagemModelo = function (codigo) { return req('DELETE', '/finder/modelos/' + encodeURIComponent(codigo) + '/imagem'); };
+
+  FG.finderCriarSecao = function (codigo, d) { return req('POST', '/finder/modelos/' + encodeURIComponent(codigo) + '/secoes', d); };
+  FG.finderEditarSecao = function (secaoId, d) { return req('PUT', '/finder/secoes/' + secaoId, d); };
+  FG.finderExcluirSecao = function (secaoId) { return req('DELETE', '/finder/secoes/' + secaoId); };
+  FG.finderOrdemSecoes = function (codigo, lado, ids) {
+    return req('PUT', '/finder/modelos/' + encodeURIComponent(codigo) + '/secoes/ordem', { lado: lado, ids: ids });
+  };
+  FG.finderUploadImagemSecao = function (secaoId, file) { return uploadImagem('/finder/secoes/' + secaoId + '/imagem', file); };
+  FG.finderRemoverImagemSecao = function (secaoId) { return req('DELETE', '/finder/secoes/' + secaoId + '/imagem'); };
+
+  FG.finderAddPeca = function (secaoId, d) { return req('POST', '/finder/secoes/' + secaoId + '/pecas', d); };
+  FG.finderEditarPeca = function (pecaId, d) { return req('PUT', '/finder/pecas/' + pecaId, d); };
+  FG.finderExcluirPeca = function (pecaId) { return req('DELETE', '/finder/pecas/' + pecaId); };
+  FG.finderOrdemPecas = function (secaoId, ids) { return req('PUT', '/finder/secoes/' + secaoId + '/pecas/ordem', { ids: ids }); };
+
+  FG.finderSalvarHotspots = function (secaoId, lista) { return req('PUT', '/finder/secoes/' + secaoId + '/hotspots', { hotspots: lista }); };
+  FG.finderAddHotspot = function (secaoId, d) { return req('POST', '/finder/secoes/' + secaoId + '/hotspots', d); };
+  FG.finderEditarHotspot = function (hotspotId, d) { return req('PUT', '/finder/hotspots/' + hotspotId, d); };
+  FG.finderExcluirHotspot = function (hotspotId) { return req('DELETE', '/finder/hotspots/' + hotspotId); };
+
+  // Foto do produto (miniatura da peça no finder). Recarrega o cache no ok.
+  FG.uploadImagemProduto = function (sku, file) {
+    return uploadImagem('/produtos/' + encodeURIComponent(sku) + '/imagem', file).then(function (r) {
+      if (!r.ok) return r;
+      return recarregarProdutos().then(function () { return r; });
+    });
+  };
+  FG.removerImagemProduto = function (sku) {
+    return req('DELETE', '/produtos/' + encodeURIComponent(sku) + '/imagem').then(function (r) {
+      if (!r.ok) return r;
+      return recarregarProdutos().then(function () { return r; });
+    });
+  };
+
   // Expõe helpers para depuração no console.
   FG._api = api;
   FG._cache = CACHE;
