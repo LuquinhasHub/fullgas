@@ -27,6 +27,10 @@ Thumbs.db
 .idea/
 *.swp
 
+# Claude Code — config local da máquina (permissões); launch.json é versionado
+.claude/*
+!.claude/launch.json
+
 # Uploads locais de teste (fotos de reivindicação, etc.)
 uploads/
 api/uploads/

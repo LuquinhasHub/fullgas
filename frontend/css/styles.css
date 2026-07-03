@@ -483,15 +483,54 @@ main.finder { padding: 8px 28px 70px; }
 .part-row .pr-min { grid-column: 5 / 8; text-align: right; color: #555; font-size: 11px; }
 .part-row input.cm { border: 1px solid #ddd; padding: 5px 7px; font-size: 11px; width: 100%; }
 .part-row input.qn { width: 100%; border: 1px solid #ddd; padding: 5px 4px; text-align: center; }
-.diagram-box { border: 1px solid #ccc; min-height: 460px; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 10px; padding: 20px; }
+.diagram-box { border: 1px solid #ccc; min-height: 460px; display: flex; flex-direction: column; gap: 0; padding: 0; }
 .diagram-box .cap { font-size: 11px; color: var(--gray); }
 .fnd-actions { display: flex; gap: 12px; margin: 14px 0 22px; }
+
+/* breadcrumb da seção (modelo › seção) + Print à direita */
+.finder-crumb { color: var(--red); font-weight: 600; margin: 6px 0 10px; display: flex; align-items: center; gap: 6px; }
+.finder-crumb a { color: var(--red); }
+.finder-crumb .chev { font-weight: 800; }
+.finder-crumb .crumb-print { margin-left: auto; color: var(--red); background: none; border: none; cursor: pointer; font-size: 13px; }
+.finder-crumb .crumb-print:hover { text-decoration: underline; }
+
+/* barra sobre a lista de peças (nome da seção + adicionar à cesta) */
+.part-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+
+/* miniaturas das seções: usa o diagrama enviado pelo admin quando existir */
+.thumb img { max-width: 100%; max-height: 96px; object-fit: contain; }
+
+/* ---- diagrama com zoom + hotspots (tela da seção) ---- */
+.diag-tools { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 1px solid #e3e3e3; }
+.diag-tools .grow { flex: 1; }
+.diag-tools .dg-btn { background: #fff; border: 1px solid #ccc; width: 28px; height: 24px; cursor: pointer; font-size: 12px; line-height: 1; }
+.diag-tools .dg-btn:hover:not(:disabled) { border-color: var(--red); color: var(--red); }
+.diag-tools .dg-btn:disabled { opacity: .4; cursor: default; }
+.diag-tools input[type="range"] { width: 130px; accent-color: var(--red); }
+.diag-tools .dg-marks { font-size: 10px; color: #555; letter-spacing: .02em; }
+.diag-viewport { overflow: auto; max-height: 560px; min-height: 420px; background: #fff; flex: 1; }
+.diag-canvas { position: relative; width: 100%; }
+.diag-canvas img { display: block; width: 100%; height: auto; user-select: none; }
+.diag-vazio { display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 10px; padding: 20px; min-height: 420px; }
+
+/* hotspot: área clicável invisível que "acende" no hover/seleção */
+.hotspot { position: absolute; background: transparent; border: 1px solid transparent; cursor: pointer; padding: 0; border-radius: 3px; }
+.hotspot:hover, .hotspot.hover { border-color: var(--red); background: rgba(210, 10, 17, .10); }
+.hotspot.on { border-color: var(--red); background: rgba(210, 10, 17, .18); box-shadow: 0 0 0 1px rgba(210, 10, 17, .35); }
+
+/* modal com a foto do modelo (Show Image) */
+.modal.modal-img { max-width: 720px; }
+.modal.modal-img .modal-body img { width: 100%; height: auto; display: block; }
 
 /* impressão de fatura */
 @media print {
   body * { visibility: hidden; }
   #print-area, #print-area * { visibility: visible; }
   #print-area { position: absolute; inset: 0; padding: 30px; }
+  /* finder: imprime a tela da seção (lista de peças + diagrama) */
+  main.finder, main.finder * { visibility: visible; }
+  main.finder .search-panel, main.finder .fnd-actions, main.finder .diag-tools { display: none; }
+  main.finder .diag-viewport { max-height: none; overflow: visible; }
 }
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; transition: none !important; }

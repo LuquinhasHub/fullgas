@@ -88,8 +88,66 @@ select.inline-status { border: 1px solid #ccc; padding: 5px 8px; font-size: 12px
 body.admin .modal { border-top-color: var(--adm-orange); }
 body.admin .field input:focus, body.admin .field select:focus, body.admin .field textarea:focus { outline-color: var(--adm-orange); }
 
+/* =========================================================
+   Parts Finder (aba admin): modelos, seções, peças e hotspots
+   ========================================================= */
+.fnd-crumbs { font-size: 13px; margin-bottom: 14px; color: #666; }
+.fnd-crumbs a { color: var(--adm-blue); text-decoration: none; }
+.fnd-crumbs a:hover { text-decoration: underline; }
+.fnd-crumbs b { color: var(--adm-ink); }
+
+.fnd-tabs { display: flex; gap: 4px; }
+.fnd-tabs button { border: 1px solid #ccc; background: #f1f1f1; padding: 9px 18px; font-size: 13px; cursor: pointer; }
+.fnd-tabs button.on { background: #fff; font-weight: 600; border-bottom: 2px solid var(--adm-orange); }
+
+.fnd-2col { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }
+.fnd-arvore { font-size: 11px; color: #666; max-width: 260px; }
+
+.fnd-thumb { width: 48px; height: 48px; object-fit: contain; border: 1px solid #e0e0e0; background: #fff; display: inline-block; }
+span.fnd-thumb.vazio { display: inline-flex; align-items: center; justify-content: center; font-size: 9px; color: #999; text-align: center; }
+.fnd-foto-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+.fnd-add-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+.fnd-add-row input[type="text"] { flex: 0 1 380px; border: 1px solid #ccc; padding: 8px 10px; font-size: 13px; }
+.fnd-add-row .grow { flex: 1; }
+
+.fnd-itens td { vertical-align: middle; }
+.fnd-in { border: 1px solid #ccc; padding: 6px 8px; font-size: 13px; width: 90px; background: #fff; }
+.fnd-itens .fi-num { width: 110px; }
+.fnd-hab { font-size: 12px; white-space: nowrap; display: inline-flex; align-items: center; gap: 5px; }
+
+/* editor visual de áreas clicáveis (hotspots) */
+.ha-wrap { border: 1px solid #ccc; background: #fff; overflow: auto; max-height: 640px; margin-bottom: 14px; }
+.ha-canvas { position: relative; width: 100%; }
+.ha-canvas img { display: block; width: 100%; height: auto; user-select: none; }
+.ha-box {
+  position: absolute; border: 2px solid #f5c400; background: rgba(245, 196, 0, .18);
+  cursor: move; display: flex; align-items: flex-start; justify-content: flex-end;
+  box-sizing: border-box; border-radius: 2px;
+}
+.ha-box span {
+  font-size: 10px; font-weight: 700; color: #7a6200; background: rgba(255, 255, 255, .85);
+  padding: 0 3px; line-height: 1.3; pointer-events: none;
+}
+.ha-box.sel, .ha-box:hover { border-color: var(--adm-orange); background: rgba(235, 82, 2, .16); }
+
+.ha-list-head, .ha-row {
+  display: grid; grid-template-columns: 28px 170px 1fr 110px 34px;
+  gap: 10px; align-items: center; padding: 4px 2px;
+}
+.ha-list-head { font-size: 11px; color: #888; border-bottom: 1px solid var(--adm-line); padding-bottom: 6px; }
+.ha-row { border-bottom: 1px solid #f0f0f0; font-size: 13px; }
+.ha-row:hover { background: #fffbea; }
+.ha-row input { border: 1px solid #ccc; padding: 5px 7px; font-size: 12px; background: #fff; }
+.ha-row .ha-size { display: inline-flex; align-items: center; gap: 5px; }
+.ha-row .hw, .ha-row .hh { width: 62px; }
+.ha-row .hl { width: 100%; }
+.ha-row .ha-x { background: #4a4542; color: #fff; border: none; width: 26px; height: 24px; cursor: pointer; font-size: 11px; font-weight: 700; }
+.ha-row .ha-x:hover { background: #b91c1c; }
+
 @media (max-width: 760px) {
   .adm-side { width: 64px; }
   .adm-side a.item { font-size: 8px; }
   .adm-body { padding: 16px 12px 60px; }
+  .fnd-2col { grid-template-columns: 1fr; }
 }

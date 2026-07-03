@@ -174,11 +174,14 @@
       '<div class="adm-bar"><span class="grow"></span>' +
       '<button class="btn-orange" id="pr-novo">Adicionar produto</button></div>' +
       '<div class="adm-card"><div class="c-head">Produtos (' + prods.length + ')</div><div class="c-body">' +
-      '<table class="tbl"><thead><tr><th>Artigo</th><th>Nome</th><th>Categoria</th>' +
+      '<table class="tbl"><thead><tr><th>Foto</th><th>Artigo</th><th>Nome</th><th>Categoria</th>' +
       '<th class="r">Preço</th><th class="r">Estoque</th><th>Ações</th></tr></thead><tbody>' +
       prods.map(function (p) {
         var c = FG.category(p.cat);
-        return '<tr><td>' + p.artigo + '</td><td>' + esc(p.nome) + '</td><td>' + esc(c ? c.nome : p.cat) + '</td>' +
+        return '<tr><td>' + (p.imagem
+            ? '<img class="fnd-thumb" src="' + esc(p.imagem) + '" alt="">'
+            : '<span class="fnd-thumb vazio">sem foto</span>') + '</td>' +
+          '<td>' + p.artigo + '</td><td>' + esc(p.nome) + '</td><td>' + esc(c ? c.nome : p.cat) + '</td>' +
           '<td class="r">' + FG.fmtMoney(p.preco) + '</td>' +
           '<td class="r">' + (p.estoque > 0
             ? p.estoque
@@ -220,6 +223,12 @@
       '<div class="field"><label>Estoque</label><input id="mp-est" type="number" min="0" value="' + (p ? p.estoque : 0) + '"></div>' +
       '<div class="field"><label>Previsão de chegada (se sem estoque)</label><input id="mp-prev" type="text" placeholder="dd/mm/aa" value="' + (p && p.previsao ? p.previsao : '') + '"></div>' +
       '<div class="field"><label>Descrição</label><textarea id="mp-desc" rows="3">' + (p ? esc(p.descricao) : '') + '</textarea></div>' +
+      '<div class="field"><label>Foto da peça (miniatura no Parts Finder)</label>' +
+      '<div class="fnd-foto-row">' +
+      (p && p.imagem ? '<img class="fnd-thumb" src="' + esc(p.imagem) + '" alt="">' : '<span class="fnd-thumb vazio">sem foto</span>') +
+      '<input id="mp-foto" type="file" accept="image/*">' +
+      (p && p.imagem ? '<button class="btn-line btn-mini" id="mp-foto-del" type="button">Remover foto</button>' : '') +
+      '</div></div>' +
       '</div>' +
       '<div class="modal-foot"><button class="btn-line" id="mp-canc">Cancelar</button>' +
       '<button class="btn-orange" id="mp-ok">Salvar</button></div></div>';
@@ -229,6 +238,14 @@
     back.querySelector('.x').addEventListener('click', fechar);
     document.getElementById('mp-canc').addEventListener('click', fechar);
     back.addEventListener('click', function (e) { if (e.target === back) fechar(); });
+
+    var mpFotoDel = document.getElementById('mp-foto-del');
+    if (mpFotoDel) mpFotoDel.addEventListener('click', function () {
+      FG.removerImagemProduto(p.artigo).then(function (r) {
+        if (r && r.ok === false) { FG.toast(r.msg || 'Falha ao remover a foto.', 'erro'); return; }
+        FG.toast('Foto removida.'); fechar(); renderProdutos();
+      });
+    });
 
     document.getElementById('mp-ok').addEventListener('click', function () {
       var art = document.getElementById('mp-art').value.trim().toUpperCase();
@@ -248,7 +265,13 @@
       function fail(e) { FG.toast((e && e.message) || 'Falha ao salvar o produto.', 'erro'); }
       var acao = novo ? FG.apiCriarProduto(dados) : FG.apiEditarProduto(art, dados);
       acao.then(function () {
-        fechar(); FG.toast(novo ? 'Produto criado.' : 'Produto salvo.'); renderProdutos();
+        var arquivo = document.getElementById('mp-foto').files[0];
+        var fotoOk = arquivo ? FG.uploadImagemProduto(art, arquivo) : Promise.resolve({ ok: true });
+        return fotoOk.then(function (rf) {
+          if (rf && rf.ok === false) FG.toast('Produto salvo, mas a foto falhou: ' + (rf.msg || ''), 'erro');
+          else FG.toast(novo ? 'Produto criado.' : 'Produto salvo.');
+          fechar(); renderProdutos();
+        });
       }).catch(fail);
     });
   }
@@ -552,17 +575,556 @@
   }
 
   /* =========================================================
+     PARTS FINDER — modelos, seções, peças e hotspots
+     ---------------------------------------------------------
+     Três níveis: #finder (modelos) → #finder/modelo/<código>
+     (seções por lado) → #finder/secao/<id> (peças da lista +
+     editor visual de áreas clicáveis sobre o diagrama).
+     ========================================================= */
+  var FND_LADOS = [['chassi', 'Frame (chassi)'], ['engine', 'Engine (motor)']];
+
+  function fndErro(r, msg) {
+    if (r && r.ok === false) { FG.toast(r.msg || msg || 'Operação não concluída.', 'erro'); return true; }
+    return false;
+  }
+  function fndCrumb(itens) {
+    return '<div class="fnd-crumbs">' + itens.map(function (it, i) {
+      var ultimo = i === itens.length - 1;
+      return ultimo ? '<b>' + esc(it[0]) + '</b>'
+        : '<a href="' + it[1] + '">' + esc(it[0]) + '</a> <span>›</span> ';
+    }).join('') + '</div>';
+  }
+  function thumbCell(url, alt) {
+    return url
+      ? '<img class="fnd-thumb" src="' + esc(url) + '" alt="' + esc(alt || '') + '">'
+      : '<span class="fnd-thumb vazio">sem foto</span>';
+  }
+
+  /* ---------- nível 1: modelos ---------- */
+  function renderFinderModelos() {
+    h1.textContent = 'Parts Finder — modelos'; setOn('finder');
+    view.innerHTML = '<div class="adm-card"><div class="c-body muted">Carregando…</div></div>';
+    FG.finderModelos(true).then(function (modelos) {
+      view.innerHTML =
+        '<div class="adm-bar"><span class="muted" style="font-size:13px;">Tudo que aparece no finder do cliente é editado aqui: ' +
+        'modelos e árvore de seleção, seções (diagramas), peças de cada seção e áreas clicáveis da imagem.</span>' +
+        '<span class="grow"></span><button class="btn-orange" id="fm-novo">Novo modelo</button></div>' +
+        '<div class="adm-card"><div class="c-head">Modelos (' + modelos.length + ')</div><div class="c-body">' +
+        '<table class="tbl"><thead><tr><th>Foto</th><th>Código</th><th>Modelo</th><th>Etiqueta (label)</th>' +
+        '<th>Árvore de seleção</th><th>Situação</th><th>Ações</th></tr></thead><tbody>' +
+        (modelos.length ? modelos.map(function (m) {
+          return '<tr><td>' + thumbCell(m.imagem, m.nome) + '</td>' +
+            '<td><span class="muted">' + esc(m.id) + '</span></td>' +
+            '<td><b>' + esc(m.nome) + '</b> ' + m.ano + '</td>' +
+            '<td>' + esc(m.label) + '</td>' +
+            '<td class="fnd-arvore">' + esc((m.arvore || []).join(' > ')) + '</td>' +
+            '<td>' + (m.ativo
+              ? '<span class="pill-status aprovado">Ativo</span>'
+              : '<span class="pill-status bloqueado">Inativo</span>') + '</td>' +
+            '<td class="nowrap">' +
+            '<a class="btn-line btn-mini" href="#finder/modelo/' + encodeURIComponent(m.id) + '">Seções</a> ' +
+            '<button class="btn-line btn-mini" data-ac="edit" data-id="' + esc(m.id) + '">Editar</button> ' +
+            '<button class="btn-line btn-mini" data-ac="del" data-id="' + esc(m.id) + '">Excluir</button></td></tr>';
+        }).join('') : '<tr><td colspan="7" class="muted">Nenhum modelo. Crie o primeiro.</td></tr>') +
+        '</tbody></table></div></div>';
+
+      document.getElementById('fm-novo').addEventListener('click', function () { modalModelo(null); });
+      Array.prototype.forEach.call(view.querySelectorAll('[data-ac]'), function (b) {
+        b.addEventListener('click', function () {
+          var m = modelos.find(function (x) { return x.id === b.getAttribute('data-id'); });
+          if (!m) return;
+          if (b.getAttribute('data-ac') === 'edit') { modalModelo(m); return; }
+          if (!confirm('Excluir o modelo ' + m.label + '?\nSeções, peças e áreas do diagrama serão apagadas juntas.')) return;
+          FG.finderExcluirModelo(m.id).then(function (r) {
+            if (fndErro(r, 'Falha ao excluir.')) return;
+            FG.toast('Modelo excluído.'); renderFinderModelos();
+          });
+        });
+      });
+    }, function (e) {
+      view.innerHTML = '<div class="adm-card"><div class="c-body">Erro ao carregar: ' + esc(e.message || '') + '</div></div>';
+    });
+  }
+
+  function modalModelo(m) {
+    var novo = !m;
+    var back = document.createElement('div');
+    back.className = 'modal-back';
+    back.innerHTML =
+      '<div class="modal"><header><h3>' + (novo ? 'Novo modelo' : 'Editar ' + esc(m.label)) + '</h3><button class="x">×</button></header>' +
+      '<div class="modal-body">' +
+      '<div class="field"><label>Código (slug — não muda depois) *</label>' +
+      '<input id="fm-cod" type="text" placeholder="fg125-2025"' + (novo ? '' : ' disabled') + ' value="' + (m ? esc(m.id) : '') + '"></div>' +
+      '<div class="fnd-2col">' +
+      '<div class="field"><label>Nome *</label><input id="fm-nome" type="text" placeholder="FG 125" value="' + (m ? esc(m.nome) : '') + '"></div>' +
+      '<div class="field"><label>Ano *</label><input id="fm-ano" type="number" min="1990" max="2100" value="' + (m ? m.ano : new Date().getFullYear()) + '"></div>' +
+      '</div>' +
+      '<div class="field"><label>Etiqueta (label mostrado no finder)</label>' +
+      '<input id="fm-label" type="text" placeholder="FG 125 2025 &lt;2025&gt;&lt;BR&gt;&lt;F0103Y1&gt;" value="' + (m ? esc(m.label) : '') + '"></div>' +
+      '<div class="field"><label>Árvore de seleção (níveis separados por &gt;)</label>' +
+      '<input id="fm-arv" type="text" placeholder="Fullgas > Offroad > Enduro > E1 > 2 tempos > FG 125 > FG 125 2025" value="' + (m ? esc((m.arvore || []).join(' > ')) : '') + '"></div>' +
+      '<div class="fnd-2col">' +
+      '<div class="field"><label>Cilindrada</label><input id="fm-cil" type="text" placeholder="125" value="' + (m && m.cilindrada ? esc(m.cilindrada) : '') + '"></div>' +
+      '<div class="field"><label>Tipo de motor</label><input id="fm-tm" type="text" placeholder="2 tempos" value="' + (m && m.tipoMotor ? esc(m.tipoMotor) : '') + '"></div>' +
+      '</div>' +
+      '<div class="fnd-2col">' +
+      '<div class="field"><label>Categoria</label><input id="fm-cat" type="text" placeholder="Enduro" value="' + (m && m.categoria ? esc(m.categoria) : '') + '"></div>' +
+      '<div class="field"><label>Situação</label><select id="fm-ativo">' +
+      '<option value="1"' + (!m || m.ativo ? ' selected' : '') + '>Ativo (aparece no finder)</option>' +
+      '<option value="0"' + (m && !m.ativo ? ' selected' : '') + '>Inativo (oculto)</option></select></div>' +
+      '</div>' +
+      '<div class="field"><label>Documentação técnica (link http)</label>' +
+      '<input id="fm-doc" type="url" placeholder="https://..." value="' + (m && m.docTecnica ? esc(m.docTecnica) : '') + '"></div>' +
+      '<div class="field"><label>Foto do modelo (botão "Show Image" do finder)</label>' +
+      '<div class="fnd-foto-row">' + thumbCell(m && m.imagem, 'foto') +
+      '<input id="fm-foto" type="file" accept="image/*">' +
+      (m && m.imagem ? '<button class="btn-line btn-mini" id="fm-foto-del" type="button">Remover foto</button>' : '') +
+      '</div></div>' +
+      '</div>' +
+      '<div class="modal-foot"><button class="btn-line" id="fm-canc">Cancelar</button>' +
+      '<button class="btn-orange" id="fm-ok">Salvar</button></div></div>';
+    document.body.appendChild(back);
+
+    function fechar() { back.remove(); }
+    back.querySelector('.x').addEventListener('click', fechar);
+    document.getElementById('fm-canc').addEventListener('click', fechar);
+    back.addEventListener('click', function (e) { if (e.target === back) fechar(); });
+
+    var btnDel = document.getElementById('fm-foto-del');
+    if (btnDel) btnDel.addEventListener('click', function () {
+      FG.finderRemoverImagemModelo(m.id).then(function (r) {
+        if (fndErro(r, 'Falha ao remover a foto.')) return;
+        FG.toast('Foto removida.'); fechar(); renderFinderModelos();
+      });
+    });
+
+    document.getElementById('fm-ok').addEventListener('click', function () {
+      var dados = {
+        codigo: document.getElementById('fm-cod').value.trim().toLowerCase(),
+        nome: document.getElementById('fm-nome').value.trim(),
+        ano: Number(document.getElementById('fm-ano').value),
+        label: document.getElementById('fm-label').value.trim(),
+        arvore: document.getElementById('fm-arv').value.trim(),
+        cilindrada: document.getElementById('fm-cil').value.trim(),
+        tipoMotor: document.getElementById('fm-tm').value.trim(),
+        categoria: document.getElementById('fm-cat').value.trim(),
+        docTecnica: document.getElementById('fm-doc').value.trim(),
+        ativo: document.getElementById('fm-ativo').value === '1'
+      };
+      if (!dados.nome || !dados.ano || (novo && !dados.codigo)) { FG.toast('Preencha código, nome e ano.'); return; }
+      var salvar = novo ? FG.finderCriarModelo(dados) : FG.finderEditarModelo(m.id, dados);
+      salvar.then(function (r) {
+        if (fndErro(r, 'Falha ao salvar o modelo.')) return;
+        var codigo = novo ? dados.codigo : m.id;
+        var arquivo = document.getElementById('fm-foto').files[0];
+        var fotoOk = arquivo
+          ? FG.finderUploadImagemModelo(codigo, arquivo)
+          : Promise.resolve({ ok: true });
+        fotoOk.then(function (rf) {
+          if (rf.ok === false) FG.toast('Modelo salvo, mas a foto falhou: ' + (rf.msg || ''), 'erro');
+          else FG.toast(novo ? 'Modelo criado.' : 'Modelo salvo.');
+          fechar(); renderFinderModelos();
+        });
+      });
+    });
+  }
+
+  /* ---------- nível 2: seções (diagramas) de um modelo ---------- */
+  function renderFinderModelo(codigo, ladoAtivo) {
+    setOn('finder');
+    view.innerHTML = '<div class="adm-card"><div class="c-body muted">Carregando…</div></div>';
+    FG.finderModelo(codigo).then(function (m) {
+      h1.textContent = 'Parts Finder — ' + m.label;
+      var lado = ladoAtivo === 'engine' ? 'engine' : 'chassi';
+      var secoes = m[lado] || [];
+
+      view.innerHTML =
+        fndCrumb([['Modelos', '#finder'], [m.label]]) +
+        '<div class="adm-bar">' +
+        '<div class="fnd-tabs">' + FND_LADOS.map(function (l) {
+          return '<button class="' + (l[0] === lado ? 'on' : '') + '" data-lado="' + l[0] + '">' + l[1] +
+            ' (' + ((m[l[0]] || []).length) + ')</button>';
+        }).join('') + '</div>' +
+        '<span class="grow"></span>' +
+        '<a class="btn-line" href="finder.html#/modelo/' + encodeURIComponent(m.id) + '/' + lado + '" target="_blank" rel="noopener">Ver no finder ↗</a> ' +
+        '<button class="btn-orange" id="fs-nova">Nova seção</button></div>' +
+        '<div class="adm-card"><div class="c-head">Seções — ' + (lado === 'engine' ? 'Engine (motor)' : 'Frame (chassi)') + '</div><div class="c-body">' +
+        '<table class="tbl"><thead><tr><th>Diagrama</th><th>Nº</th><th>Nome</th><th class="r">Peças</th>' +
+        '<th>Posição</th><th>Ações</th></tr></thead><tbody>' +
+        (secoes.length ? secoes.map(function (s, i) {
+          return '<tr><td>' + thumbCell(s.imagem, s.nome) + '</td>' +
+            '<td>' + esc(s.numero) + '</td><td><b>' + esc(s.nome) + '</b></td>' +
+            '<td class="r">' + (s.qtdPecas || 0) + '</td>' +
+            '<td class="nowrap"><button class="btn-line btn-mini" data-mv="-1" data-i="' + i + '"' + (i === 0 ? ' disabled' : '') + '>▲</button> ' +
+            '<button class="btn-line btn-mini" data-mv="1" data-i="' + i + '"' + (i === secoes.length - 1 ? ' disabled' : '') + '>▼</button></td>' +
+            '<td class="nowrap"><a class="btn-orange btn-mini" href="#finder/secao/' + s.id + '">Peças e imagem</a> ' +
+            '<button class="btn-line btn-mini" data-ed="' + s.id + '">Editar</button> ' +
+            '<button class="btn-line btn-mini" data-del="' + s.id + '">Excluir</button></td></tr>';
+        }).join('') : '<tr><td colspan="6" class="muted">Nenhuma seção neste lado ainda.</td></tr>') +
+        '</tbody></table></div></div>';
+
+      Array.prototype.forEach.call(view.querySelectorAll('.fnd-tabs button'), function (b) {
+        b.addEventListener('click', function () { renderFinderModelo(codigo, b.getAttribute('data-lado')); });
+      });
+      document.getElementById('fs-nova').addEventListener('click', function () { modalSecao(m, lado); });
+
+      Array.prototype.forEach.call(view.querySelectorAll('[data-mv]'), function (b) {
+        b.addEventListener('click', function () {
+          var i = Number(b.getAttribute('data-i'));
+          var j = i + Number(b.getAttribute('data-mv'));
+          if (j < 0 || j >= secoes.length) return;
+          var ids = secoes.map(function (s) { return s.id; });
+          var t = ids[i]; ids[i] = ids[j]; ids[j] = t;
+          FG.finderOrdemSecoes(m.id, lado, ids).then(function (r) {
+            if (fndErro(r, 'Falha ao reordenar.')) return;
+            renderFinderModelo(codigo, lado);
+          });
+        });
+      });
+      Array.prototype.forEach.call(view.querySelectorAll('[data-ed]'), function (b) {
+        b.addEventListener('click', function () {
+          var s = secoes.find(function (x) { return String(x.id) === b.getAttribute('data-ed'); });
+          if (s) modalSecao(m, lado, s);
+        });
+      });
+      Array.prototype.forEach.call(view.querySelectorAll('[data-del]'), function (b) {
+        b.addEventListener('click', function () {
+          var s = secoes.find(function (x) { return String(x.id) === b.getAttribute('data-del'); });
+          if (!s) return;
+          if (!confirm('Excluir a seção "' + s.numero + ' ' + s.nome + '"?\nAs peças e áreas do diagrama vão junto.')) return;
+          FG.finderExcluirSecao(s.id).then(function (r) {
+            if (fndErro(r, 'Falha ao excluir.')) return;
+            FG.toast('Seção excluída.'); renderFinderModelo(codigo, lado);
+          });
+        });
+      });
+    }, function () {
+      view.innerHTML = '<div class="adm-card"><div class="c-body">Modelo não encontrado. <a href="#finder">Voltar</a></div></div>';
+    });
+  }
+
+  function modalSecao(m, lado, s) {
+    var novo = !s;
+    var back = document.createElement('div');
+    back.className = 'modal-back';
+    back.innerHTML =
+      '<div class="modal"><header><h3>' + (novo ? 'Nova seção — ' + esc(m.label) : 'Editar seção') + '</h3><button class="x">×</button></header>' +
+      '<div class="modal-body">' +
+      '<div class="field"><label>Lado</label><select id="se-lado"' + (novo ? '' : ' disabled') + '>' +
+      FND_LADOS.map(function (l) {
+        return '<option value="' + l[0] + '"' + (l[0] === lado ? ' selected' : '') + '>' + l[1] + '</option>';
+      }).join('') + '</select></div>' +
+      '<div class="fnd-2col">' +
+      '<div class="field"><label>Número (ex.: 01) *</label><input id="se-num" type="text" maxlength="8" value="' + (s ? esc(s.numero) : '') + '"></div>' +
+      '<div class="field"><label>Nome *</label><input id="se-nome" type="text" placeholder="FRONT FORK, TRIPLE CLAMP" value="' + (s ? esc(s.nome) : '') + '"></div>' +
+      '</div>' +
+      '<p class="muted" style="font-size:12px;">A imagem do diagrama e as peças são editadas em "Peças e imagem" depois de criar a seção.</p>' +
+      '</div>' +
+      '<div class="modal-foot"><button class="btn-line" id="se-canc">Cancelar</button>' +
+      '<button class="btn-orange" id="se-ok">Salvar</button></div></div>';
+    document.body.appendChild(back);
+
+    function fechar() { back.remove(); }
+    back.querySelector('.x').addEventListener('click', fechar);
+    document.getElementById('se-canc').addEventListener('click', fechar);
+    back.addEventListener('click', function (e) { if (e.target === back) fechar(); });
+
+    document.getElementById('se-ok').addEventListener('click', function () {
+      var dados = {
+        lado: document.getElementById('se-lado').value,
+        numero: document.getElementById('se-num').value.trim(),
+        nome: document.getElementById('se-nome').value.trim()
+      };
+      if (!dados.numero || !dados.nome) { FG.toast('Preencha número e nome.'); return; }
+      var salvar = novo ? FG.finderCriarSecao(m.id, dados)
+        : FG.finderEditarSecao(s.id, { numero: dados.numero, nome: dados.nome });
+      salvar.then(function (r) {
+        if (fndErro(r, 'Falha ao salvar a seção.')) return;
+        FG.toast(novo ? 'Seção criada.' : 'Seção salva.');
+        fechar(); renderFinderModelo(m.id, dados.lado);
+      });
+    });
+  }
+
+  /* ---------- nível 3: peças da seção + editor de hotspots ---------- */
+  function renderFinderSecao(secaoId) {
+    setOn('finder');
+    view.innerHTML = '<div class="adm-card"><div class="c-body muted">Carregando…</div></div>';
+    FG.finderSecao(secaoId).then(function (sec) {
+      h1.textContent = 'Parts Finder — ' + sec.numero + ' ' + sec.nome;
+
+      view.innerHTML =
+        fndCrumb([['Modelos', '#finder'],
+          [sec.modelo.label, '#finder/modelo/' + encodeURIComponent(sec.modelo.id)],
+          [sec.numero + ' ' + sec.nome]]) +
+        '<div class="adm-bar"><span class="muted" style="font-size:13px;">Lado: <b>' +
+        (sec.lado === 'engine' ? 'Engine (motor)' : 'Frame (chassi)') + '</b></span><span class="grow"></span>' +
+        '<a class="btn-line" href="finder.html#/secao/' + sec.id + '" target="_blank" rel="noopener">Ver no finder ↗</a></div>' +
+
+        /* ---- peças da lista ---- */
+        '<div class="adm-card"><div class="c-head">Peças desta seção (' + sec.pecas.length + ')</div><div class="c-body">' +
+        '<div class="fnd-add-row"><input id="fp-sku" list="fp-skus" type="text" placeholder="Código do artigo (SKU) — ex.: A46001094000FB">' +
+        '<datalist id="fp-skus">' + FG.all('products').map(function (p) {
+          return '<option value="' + esc(p.artigo) + '">' + esc(p.nome) + '</option>';
+        }).join('') + '</datalist>' +
+        '<button class="btn-orange btn-mini" id="fp-add">Adicionar peça</button>' +
+        '<span class="muted" style="font-size:12px;">A peça precisa existir no Catálogo. A miniatura vem da foto do produto.</span></div>' +
+        '<table class="tbl fnd-itens"><thead><tr><th>ID</th><th>Miniatura</th><th>Nome</th><th>Situação</th><th>Cód.</th>' +
+        '<th class="r">Preço</th><th>Qtd. padrão</th><th>Number on Image</th><th>Qtd. no conjunto</th><th>Posição</th><th>Ações</th></tr></thead>' +
+        '<tbody id="fp-tbody"></tbody></table>' +
+        '</div></div>' +
+
+        /* ---- diagrama + hotspots ---- */
+        '<div class="adm-card"><div class="c-head">Imagem do diagrama e áreas clicáveis</div><div class="c-body">' +
+        '<div class="fnd-add-row">' +
+        '<input id="hi-file" type="file" accept="image/*">' +
+        '<button class="btn-line btn-mini" id="hi-up">' + (sec.imagem ? 'Trocar imagem' : 'Enviar imagem') + '</button>' +
+        (sec.imagem ? '<button class="btn-line btn-mini" id="hi-del">Remover imagem</button>' : '') +
+        '<span class="grow"></span>' +
+        (sec.imagem ? '<button class="btn-orange" id="ha-save">Salvar áreas clicáveis</button>' : '') +
+        '</div>' +
+        (sec.imagem
+          ? '<p class="muted" style="font-size:12px;margin:8px 0;">Clique na imagem para criar uma área; arraste para posicionar. ' +
+            'O <b>Link Number</b> deve casar com o "Number on Image" das peças — clicar na área seleciona essas peças no finder do cliente.</p>' +
+            '<div class="ha-wrap"><div class="ha-canvas" id="ha-canvas"><img id="ha-img" src="' + esc(sec.imagem) + '" alt="diagrama" draggable="false"></div></div>' +
+            '<div class="ha-list-head"><span></span><span>Clickable Area (px)</span><span>Texto (opcional)</span><span>Link Number</span><span></span></div>' +
+            '<div id="ha-list"></div>'
+          : '<p class="muted">Envie a imagem do diagrama explodido para poder marcar as áreas clicáveis.</p>') +
+        '</div></div>';
+
+      /* ----- tabela de peças (linhas com edição inline) ----- */
+      var tbody = document.getElementById('fp-tbody');
+      function linhasPecas() {
+        tbody.innerHTML = sec.pecas.length ? sec.pecas.map(function (p, i) {
+          return '<tr data-id="' + p.id + '">' +
+            '<td class="muted">' + p.id + '</td>' +
+            '<td>' + thumbCell(p.imagem, p.nome) + '</td>' +
+            '<td><b>' + esc(p.nome) + '</b></td>' +
+            '<td><label class="fnd-hab"><input type="checkbox" class="fi-at"' + (p.ativo ? ' checked' : '') + '> Habilitar</label></td>' +
+            '<td>' + esc(p.sku) + '</td>' +
+            '<td class="r">' + FG.fmtMoney(p.preco) + '</td>' +
+            '<td><input class="fi-qp fnd-in" type="number" min="0" value="' + p.quantidadePadrao + '"></td>' +
+            '<td><input class="fi-num fnd-in" type="text" maxlength="12" value="' + esc(p.numeroImagem) + '"></td>' +
+            '<td><input class="fi-qtd fnd-in" type="number" min="1" value="' + p.quantidade + '"></td>' +
+            '<td class="nowrap"><button class="btn-line btn-mini" data-mv="-1" data-i="' + i + '"' + (i === 0 ? ' disabled' : '') + '>▲</button> ' +
+            '<button class="btn-line btn-mini" data-mv="1" data-i="' + i + '"' + (i === sec.pecas.length - 1 ? ' disabled' : '') + '>▼</button></td>' +
+            '<td><button class="link-action" data-rm="' + p.id + '">Remover</button></td></tr>';
+        }).join('') : '<tr><td colspan="11" class="muted">Nenhuma peça nesta seção. Adicione pela busca acima.</td></tr>';
+
+        Array.prototype.forEach.call(tbody.querySelectorAll('tr[data-id]'), function (tr) {
+          var pecaId = Number(tr.getAttribute('data-id'));
+          ['change'].forEach(function (evt) {
+            Array.prototype.forEach.call(tr.querySelectorAll('.fi-at,.fi-qp,.fi-num,.fi-qtd'), function (inp) {
+              inp.addEventListener(evt, function () {
+                FG.finderEditarPeca(pecaId, {
+                  ativo: tr.querySelector('.fi-at').checked,
+                  quantidadePadrao: Number(tr.querySelector('.fi-qp').value) || 0,
+                  numeroImagem: tr.querySelector('.fi-num').value.trim(),
+                  quantidade: Math.max(1, Number(tr.querySelector('.fi-qtd').value) || 1)
+                }).then(function (r) {
+                  if (fndErro(r, 'Falha ao salvar a peça.')) return;
+                  var p = sec.pecas.find(function (x) { return x.id === pecaId; });
+                  if (p) {
+                    p.ativo = tr.querySelector('.fi-at').checked;
+                    p.quantidadePadrao = Number(tr.querySelector('.fi-qp').value) || 0;
+                    p.numeroImagem = tr.querySelector('.fi-num').value.trim();
+                    p.quantidade = Math.max(1, Number(tr.querySelector('.fi-qtd').value) || 1);
+                  }
+                  FG.toast('Peça atualizada.');
+                });
+              });
+            });
+          });
+        });
+        Array.prototype.forEach.call(tbody.querySelectorAll('[data-mv]'), function (b) {
+          b.addEventListener('click', function () {
+            var i = Number(b.getAttribute('data-i'));
+            var j = i + Number(b.getAttribute('data-mv'));
+            if (j < 0 || j >= sec.pecas.length) return;
+            var t = sec.pecas[i]; sec.pecas[i] = sec.pecas[j]; sec.pecas[j] = t;
+            FG.finderOrdemPecas(sec.id, sec.pecas.map(function (p) { return p.id; })).then(function (r) {
+              if (fndErro(r, 'Falha ao reordenar.')) return;
+              linhasPecas();
+            });
+          });
+        });
+        Array.prototype.forEach.call(tbody.querySelectorAll('[data-rm]'), function (b) {
+          b.addEventListener('click', function () {
+            var pecaId = Number(b.getAttribute('data-rm'));
+            var p = sec.pecas.find(function (x) { return x.id === pecaId; });
+            if (!confirm('Remover ' + (p ? p.sku : 'a peça') + ' desta seção?')) return;
+            FG.finderExcluirPeca(pecaId).then(function (r) {
+              if (fndErro(r, 'Falha ao remover.')) return;
+              sec.pecas = sec.pecas.filter(function (x) { return x.id !== pecaId; });
+              FG.toast('Peça removida.'); linhasPecas();
+            });
+          });
+        });
+      }
+      linhasPecas();
+
+      document.getElementById('fp-add').addEventListener('click', function () {
+        var sku = document.getElementById('fp-sku').value.trim().toUpperCase();
+        if (!sku) { FG.toast('Informe o SKU da peça.'); return; }
+        FG.finderAddPeca(sec.id, { sku: sku }).then(function (r) {
+          if (fndErro(r, 'Falha ao adicionar (o SKU existe no catálogo?).')) return;
+          FG.toast('Peça adicionada.');
+          renderFinderSecao(secaoId); // recarrega com a nova linha
+        });
+      });
+
+      /* ----- upload / remoção da imagem do diagrama ----- */
+      document.getElementById('hi-up').addEventListener('click', function () {
+        var f = document.getElementById('hi-file').files[0];
+        if (!f) { FG.toast('Escolha o arquivo de imagem primeiro.'); return; }
+        FG.finderUploadImagemSecao(sec.id, f).then(function (r) {
+          if (fndErro(r, 'Falha no upload.')) return;
+          FG.toast('Imagem do diagrama salva.');
+          renderFinderSecao(secaoId);
+        });
+      });
+      var hiDel = document.getElementById('hi-del');
+      if (hiDel) hiDel.addEventListener('click', function () {
+        if (!confirm('Remover a imagem do diagrama? As áreas clicáveis continuam salvas.')) return;
+        FG.finderRemoverImagemSecao(sec.id).then(function (r) {
+          if (fndErro(r, 'Falha ao remover.')) return;
+          FG.toast('Imagem removida.'); renderFinderSecao(secaoId);
+        });
+      });
+
+      /* ----- editor visual de hotspots ----- */
+      if (!sec.imagem) return;
+      var canvas = document.getElementById('ha-canvas');
+      var img = document.getElementById('ha-img');
+      var lista = document.getElementById('ha-list');
+      var natW = 0, natH = 0;
+      var hs = sec.hotspots.map(function (h) {
+        return { x: h.x, y: h.y, w: h.w, h: h.h, texto: h.texto || '', linkNumero: h.linkNumero || '' };
+      });
+
+      function escala() { return natW / (img.clientWidth || 1); }
+
+      function boxHTML(h, i) {
+        var b = document.createElement('div');
+        b.className = 'ha-box';
+        b.setAttribute('data-i', i);
+        b.style.left = (h.x / natW * 100) + '%';
+        b.style.top = (h.y / natH * 100) + '%';
+        b.style.width = (h.w / natW * 100) + '%';
+        b.style.height = (h.h / natH * 100) + '%';
+        b.innerHTML = '<span>' + esc(h.linkNumero || (i + 1)) + '</span>';
+        return b;
+      }
+
+      function desenharBoxes() {
+        Array.prototype.forEach.call(canvas.querySelectorAll('.ha-box'), function (el) { el.remove(); });
+        hs.forEach(function (h, i) { canvas.appendChild(boxHTML(h, i)); });
+      }
+
+      function desenharLista() {
+        lista.innerHTML = hs.map(function (h, i) {
+          return '<div class="ha-row" data-i="' + i + '"><span class="muted">' + i + '</span>' +
+            '<span class="ha-size"><input class="hw" type="number" min="8" value="' + h.w + '"> × ' +
+            '<input class="hh" type="number" min="8" value="' + h.h + '"></span>' +
+            '<input class="ht" type="text" maxlength="200" placeholder="texto ao passar o mouse" value="' + esc(h.texto) + '">' +
+            '<input class="hl" type="text" maxlength="12" placeholder="nº" value="' + esc(h.linkNumero) + '">' +
+            '<button class="ha-x" title="Remover área">X</button></div>';
+        }).join('') || '<p class="muted" style="font-size:12px;">Nenhuma área ainda — clique na imagem para criar.</p>';
+
+        Array.prototype.forEach.call(lista.querySelectorAll('.ha-row'), function (row) {
+          var i = Number(row.getAttribute('data-i'));
+          row.querySelector('.hw').addEventListener('change', function (e) { hs[i].w = Math.max(8, Number(e.target.value) || 32); desenharBoxes(); });
+          row.querySelector('.hh').addEventListener('change', function (e) { hs[i].h = Math.max(8, Number(e.target.value) || 32); desenharBoxes(); });
+          row.querySelector('.ht').addEventListener('input', function (e) { hs[i].texto = e.target.value; });
+          row.querySelector('.hl').addEventListener('input', function (e) { hs[i].linkNumero = e.target.value.trim(); desenharBoxes(); });
+          row.querySelector('.ha-x').addEventListener('click', function () {
+            hs.splice(i, 1); desenharBoxes(); desenharLista();
+          });
+          row.addEventListener('mouseenter', function () {
+            var b = canvas.querySelector('.ha-box[data-i="' + i + '"]');
+            if (b) b.classList.add('sel');
+          });
+          row.addEventListener('mouseleave', function () {
+            var b = canvas.querySelector('.ha-box[data-i="' + i + '"]');
+            if (b) b.classList.remove('sel');
+          });
+        });
+      }
+
+      /* clique no vazio cria área; arrastar uma caixa move */
+      var drag = null;
+      canvas.addEventListener('pointerdown', function (e) {
+        var box = e.target.closest('.ha-box');
+        if (!box) return;
+        e.preventDefault();
+        var i = Number(box.getAttribute('data-i'));
+        drag = { i: i, px: e.clientX, py: e.clientY, x0: hs[i].x, y0: hs[i].y, moveu: false, box: box };
+        box.setPointerCapture && box.setPointerCapture(e.pointerId);
+      });
+      document.addEventListener('pointermove', function (e) {
+        if (!drag) return;
+        var k = escala();
+        var nx = Math.round(drag.x0 + (e.clientX - drag.px) * k);
+        var ny = Math.round(drag.y0 + (e.clientY - drag.py) * k);
+        var h = hs[drag.i];
+        h.x = Math.max(0, Math.min(natW - h.w, nx));
+        h.y = Math.max(0, Math.min(natH - h.h, ny));
+        if (Math.abs(e.clientX - drag.px) + Math.abs(e.clientY - drag.py) > 3) drag.moveu = true;
+        drag.box.style.left = (h.x / natW * 100) + '%';
+        drag.box.style.top = (h.y / natH * 100) + '%';
+      });
+      document.addEventListener('pointerup', function () { drag = null; });
+
+      canvas.addEventListener('click', function (e) {
+        if (e.target.closest('.ha-box')) return;   // clique numa caixa não cria outra
+        if (!natW) return;
+        var r = canvas.getBoundingClientRect();
+        var k = escala();
+        var cx = Math.round((e.clientX - r.left) * k);
+        var cy = Math.round((e.clientY - r.top) * k);
+        var nova = { x: Math.max(0, cx - 16), y: Math.max(0, cy - 16), w: 32, h: 32, texto: '', linkNumero: '' };
+        hs.push(nova);
+        desenharBoxes(); desenharLista();
+        var ultima = lista.querySelector('.ha-row[data-i="' + (hs.length - 1) + '"] .hl');
+        if (ultima) ultima.focus();
+      });
+
+      document.getElementById('ha-save').addEventListener('click', function () {
+        FG.finderSalvarHotspots(sec.id, hs).then(function (r) {
+          if (fndErro(r, 'Falha ao salvar as áreas.')) return;
+          FG.toast('Áreas clicáveis salvas.');
+        });
+      });
+
+      function prontoImg() {
+        natW = img.naturalWidth || 1; natH = img.naturalHeight || 1;
+        desenharBoxes(); desenharLista();
+      }
+      if (img.complete && img.naturalWidth) prontoImg();
+      else img.addEventListener('load', prontoImg);
+    }, function () {
+      view.innerHTML = '<div class="adm-card"><div class="c-body">Seção não encontrada. <a href="#finder">Voltar</a></div></div>';
+    });
+  }
+
+  /* =========================================================
      ROUTER
      ========================================================= */
   function route() {
     var h = (location.hash || '#dashboard').slice(1);
-    switch (h) {
+    var seg = h.split('/');
+    switch (seg[0]) {
       case 'dashboard': renderDash(); break;
       case 'usuarios': renderUsuarios(); break;
       case 'produtos': renderProdutos(); break;
       case 'pedidos': renderPedidos(); break;
       case 'prevenda': renderPreVenda(); break;
       case 'reivindicacoes': renderClaims(); break;
+      case 'finder':
+        if (seg[1] === 'modelo' && seg[2]) renderFinderModelo(decodeURIComponent(seg[2]));
+        else if (seg[1] === 'secao' && seg[2]) renderFinderSecao(Number(seg[2]));
+        else renderFinderModelos();
+        break;
       default: renderDash();
     }
     refreshBell();
