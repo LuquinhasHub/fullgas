@@ -4,6 +4,13 @@
 // O Tiny é a única fonte de verdade dos produtos importados dele:
 // estoque, preço, nome, descrição e foto são sempre espelho do
 // Tiny (sentido único Tiny → Fullgas, sem override manual).
+//
+// A atualização automática NÃO usa webhook (método descartado —
+// as notificações do Tiny se mostraram pouco confiáveis): é o
+// agendamento node-cron em tiny-cron.js que, a cada N minutos,
+// roda o MESMO lote do botão "Sincronizar" do admin
+// (sincronizarLote, no fim deste arquivo).
+//
 // Toda a comunicação com o Tiny passa por este arquivo — se a
 // API deles mudar, só este arquivo muda.
 // ============================================================
@@ -172,7 +179,7 @@ export async function registrarLog(tinyId, sku, evento, status, mensagem) {
 }
 
 // Aplica no produto local os campos espelhados do Tiny. Só grava o que veio
-// definido em `dados` — o webhook de estoque, por exemplo, só traz o saldo.
+// definido em `dados` (um campo ausente não apaga o valor atual).
 export async function aplicarAtualizacao(tinyId, dados, evento) {
   const rows = await query(
     'SELECT ProdutoId, Sku, TinyAtivo FROM dbo.Produto WHERE TinyId = @tid',
@@ -201,23 +208,15 @@ export async function aplicarAtualizacao(tinyId, dados, evento) {
   return { status: 'ok', sku: p.Sku };
 }
 
-// Busca o produto completo no Tiny e espelha tudo no banco. Usada pelo
-// webhook de alteração de produto (o payload do aviso não é confiável como
-// fonte de dados — só o id importa; o resto vem da consulta).
-export async function sincronizarPorTinyId(tinyId, evento) {
-  try {
-    const dados = await obterProdutoCompleto(tinyId);
-    return await aplicarAtualizacao(tinyId, dados, evento);
-  } catch (e) {
-    await registrarLog(tinyId, null, evento, 'erro', e.message);
-    return { status: 'erro', msg: e.message };
-  }
-}
-
 // Sincroniza um lote de produtos locais (por ProdutoId) contra o Tiny.
-// `produtoIds = null` sincroniza todos os produtos com TinyAtivo = 1.
+// É o coração da atualização automática E da manual — o botão "Sincronizar"
+// do admin e o agendamento do tiny-cron.js chamam esta mesma função:
+//   - `produtoIds = null` sincroniza todos os produtos com TinyAtivo = 1
+//     (é assim que o cron usa);
+//   - `evento` identifica a origem no TinySyncLog: 'lote' (botão do admin)
+//     ou 'cron' (agendamento automático).
 // Sequencial de propósito: a fila de requisições já limita o ritmo.
-export async function sincronizarLote(produtoIds = null) {
+export async function sincronizarLote(produtoIds = null, evento = 'lote') {
   let sqlSel = `SELECT ProdutoId, TinyId, Sku FROM dbo.Produto
                  WHERE TinyAtivo = 1 AND TinyId IS NOT NULL`;
   const params = {};
@@ -233,10 +232,10 @@ export async function sincronizarLote(produtoIds = null) {
   for (const p of produtos) {
     try {
       const dados = await obterProdutoCompleto(p.TinyId);
-      const r = await aplicarAtualizacao(p.TinyId, dados, 'lote');
+      const r = await aplicarAtualizacao(p.TinyId, dados, evento);
       resultados.push({ sku: p.Sku, tinyId: p.TinyId, ...r });
     } catch (e) {
-      await registrarLog(p.TinyId, p.Sku, 'lote', 'erro', e.message);
+      await registrarLog(p.TinyId, p.Sku, evento, 'erro', e.message);
       resultados.push({ sku: p.Sku, tinyId: p.TinyId, status: 'erro', msg: e.message });
     }
   }

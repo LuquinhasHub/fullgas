@@ -17,6 +17,7 @@ import preVendaRoutes from './routes/prevenda.routes.js';
 import reivindicacoesRoutes from './routes/reivindicacoes.routes.js';
 import finderRoutes from './routes/finder.routes.js';
 import tinyRoutes from './routes/tiny.routes.js';
+import { iniciarSincronizacaoAgendada } from './tiny-cron.js';
 
 const app = express();
 
@@ -83,6 +84,9 @@ getPool()
     app.listen(PORT, '0.0.0.0', () =>
       console.log(`✓ API ouvindo na porta ${PORT} (localhost e rede local)`)
     );
+    // Sincronização automática com o Tiny (node-cron, intervalo em minutos
+    // via TINY_SYNC_INTERVALO_MIN) — só depois do banco estar de pé.
+    iniciarSincronizacaoAgendada();
   })
   .catch(() => {
     console.error('A API não subiu porque não conectou no banco. Confira o arquivo .env.');

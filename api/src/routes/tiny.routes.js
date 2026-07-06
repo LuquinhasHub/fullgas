@@ -4,15 +4,17 @@
 //   GET  /api/tiny/produtos    lista do Tiny p/ importação (admin)
 //   POST /api/tiny/importar    importa/vincula selecionados (admin)
 //   POST /api/tiny/sync-lote   sincroniza produtos importados (admin)
-//   POST /api/tiny/webhook     aviso do Tiny (público, valida token)
 //   GET  /api/tiny/log         histórico de sincronizações (admin)
+//
+// A atualização automática não passa por rota: é o agendamento
+// node-cron (tiny-cron.js), que roda o mesmo lote do sync-lote.
 // ============================================================
-import express, { Router } from 'express';
+import { Router } from 'express';
 import { query } from '../db.js';
 import { requireAuth, requireAdmin } from '../auth.js';
 import {
   listarProdutos, obterProdutoCompleto, aplicarAtualizacao,
-  sincronizarPorTinyId, sincronizarLote, registrarLog
+  sincronizarLote, registrarLog
 } from '../tiny.js';
 
 const router = Router();
@@ -169,38 +171,8 @@ router.post('/tiny/sync-lote', requireAuth, requireAdmin, async (req, res, next)
   } catch (e) { tratarErro(e, res, next); }
 });
 
-// POST /api/tiny/webhook  (público — sem JWT; o Tiny não manda token de user)
-// Cadastre no Tiny a URL com o token na query string:
-//   https://sua-api/api/tiny/webhook?token=<TINY_TOKEN>
-// Responde 200 imediatamente (o Tiny para de reenviar ao receber 200) e
-// processa em background; qualquer falha fica no TinySyncLog.
-router.post('/tiny/webhook', express.urlencoded({ extended: true }), (req, res) => {
-  const body = req.body || {};
-  const tokenRecebido = req.query.token || body.token || '';
-  if (!process.env.TINY_TOKEN || tokenRecebido !== process.env.TINY_TOKEN) {
-    console.warn('Webhook Tiny recusado: token ausente ou inválido.');
-    return res.status(200).json({ ok: false });
-  }
-
-  // Alguns avisos chegam form-encoded com "dados" como string JSON.
-  let dados = body.dados || body;
-  if (typeof dados === 'string') {
-    try { dados = JSON.parse(dados); } catch { dados = {}; }
-  }
-  const tinyId = dados.idProduto || dados.id || dados.produto?.id;
-  res.status(200).json({ ok: true });
-  if (!tinyId) return;
-
-  const tipo = String(body.tipo || '').toLowerCase();
-  const tarefa = (tipo.includes('estoque') && dados.saldo !== undefined)
-    // Aviso de estoque já traz o saldo — aplica direto, sem consultar o Tiny.
-    ? aplicarAtualizacao(String(tinyId), { estoque: dados.saldo }, 'webhook')
-    // Demais avisos: o payload só serve de gatilho; os dados vêm da API.
-    : sincronizarPorTinyId(String(tinyId), 'webhook');
-  tarefa.catch(e => console.error('Webhook Tiny falhou:', e.message));
-});
-
-// GET /api/tiny/log?limite=100  (admin) — últimos registros de sincronização.
+// GET /api/tiny/log?limite=100  (admin) — últimos registros de sincronização
+// (evento 'cron' = rodada automática, 'lote' = botão do admin, 'importacao').
 router.get('/tiny/log', requireAuth, requireAdmin, async (req, res, next) => {
   try {
     const limite = Math.min(500, Math.max(1, Number(req.query.limite) || 100));
