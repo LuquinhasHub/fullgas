@@ -16,6 +16,7 @@ import faturasRoutes from './routes/faturas.routes.js';
 import preVendaRoutes from './routes/prevenda.routes.js';
 import reivindicacoesRoutes from './routes/reivindicacoes.routes.js';
 import finderRoutes from './routes/finder.routes.js';
+import tinyRoutes from './routes/tiny.routes.js';
 
 const app = express();
 
@@ -61,6 +62,7 @@ app.use('/api', faturasRoutes);
 app.use('/api', preVendaRoutes);
 app.use('/api', reivindicacoesRoutes);
 app.use('/api', finderRoutes);
+app.use('/api', tinyRoutes);
 
 // 404
 app.use((req, res) => res.status(404).json({ erro: 'Rota não encontrada.' }));

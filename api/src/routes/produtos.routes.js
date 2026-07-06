@@ -64,13 +64,16 @@ function toProduto(req, r) {
     estoque: r.Estoque,
     descricao: r.Descricao || '',
     previsao: r.PrevisaoChegada || null,
-    imagem: urlAbs(req, r.ImagemUrl)
+    imagem: urlAbs(req, r.ImagemUrl),
+    tinyAtivo: !!r.TinyAtivo,
+    tinySincronizadoEm: r.TinySincronizadoEm || null
   };
 }
 
 const SELECT_PROD =
   `SELECT p.ProdutoId, p.Sku, p.Nome, p.Descricao, p.Preco, p.Estoque,
-          p.PrevisaoChegada, p.ImagemUrl, c.Codigo AS CategoriaCodigo
+          p.PrevisaoChegada, p.ImagemUrl, p.TinyAtivo, p.TinySincronizadoEm,
+          c.Codigo AS CategoriaCodigo
      FROM dbo.Produto p
      JOIN dbo.Categoria c ON c.CategoriaId = p.CategoriaId`;
 
@@ -129,11 +132,25 @@ router.post('/produtos', requireAuth, requireAdmin, async (req, res, next) => {
 });
 
 // PUT /api/produtos/:sku  (admin) — edita
+// Produto do Tiny (TinyAtivo = 1): nome, preço, estoque, descrição e foto são
+// espelho do ERP — aqui só categoria e previsão de chegada podem mudar.
 router.put('/produtos/:sku', requireAuth, requireAdmin, async (req, res, next) => {
   try {
     const { nome, cat, preco, estoque, previsao, descricao } = req.body;
     const c = await query('SELECT CategoriaId FROM dbo.Categoria WHERE Codigo = @cat', { cat });
     if (!c.length) return res.status(400).json({ erro: 'Categoria inválida.' });
+
+    const atual = await query('SELECT TinyAtivo FROM dbo.Produto WHERE Sku = @sku', { sku: req.params.sku });
+    if (!atual.length) return res.status(404).json({ erro: 'Produto não encontrado.' });
+    if (atual[0].TinyAtivo) {
+      await query(
+        `UPDATE dbo.Produto
+            SET CategoriaId=@catId, PrevisaoChegada=@prev, AtualizadoEm=SYSUTCDATETIME()
+          WHERE Sku=@sku`,
+        { sku: req.params.sku, catId: c[0].CategoriaId, prev: previsao || null }
+      );
+      return res.json({ ok: true, tiny: true });
+    }
 
     await query(
       `UPDATE dbo.Produto
@@ -162,6 +179,11 @@ router.delete('/produtos/:sku', requireAuth, requireAdmin, async (req, res, next
 // (miniatura mostrada no Parts Finder e no painel). Campo multipart: "imagem".
 router.post('/produtos/:sku/imagem', requireAuth, requireAdmin, uploadImagemProduto, async (req, res, next) => {
   try {
+    const atual = await query('SELECT TinyAtivo FROM dbo.Produto WHERE Sku = @sku', { sku: req.params.sku });
+    if (atual.length && atual[0].TinyAtivo) {
+      apagarUpload(PROD_URL_BASE + req.file.filename);
+      return res.status(400).json({ erro: 'A foto deste produto é gerenciada pelo Tiny ERP.' });
+    }
     const rel = PROD_URL_BASE + req.file.filename;
     const rows = await query(
       `UPDATE dbo.Produto SET ImagemUrl = @img, AtualizadoEm = SYSUTCDATETIME()
@@ -181,6 +203,10 @@ router.post('/produtos/:sku/imagem', requireAuth, requireAdmin, uploadImagemProd
 // DELETE /api/produtos/:sku/imagem  (admin) — remove a foto da peça.
 router.delete('/produtos/:sku/imagem', requireAuth, requireAdmin, async (req, res, next) => {
   try {
+    const atual = await query('SELECT TinyAtivo FROM dbo.Produto WHERE Sku = @sku', { sku: req.params.sku });
+    if (atual.length && atual[0].TinyAtivo) {
+      return res.status(400).json({ erro: 'A foto deste produto é gerenciada pelo Tiny ERP.' });
+    }
     const rows = await query(
       `UPDATE dbo.Produto SET ImagemUrl = NULL, AtualizadoEm = SYSUTCDATETIME()
        OUTPUT deleted.ImagemUrl AS Anterior
