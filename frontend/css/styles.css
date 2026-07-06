@@ -135,6 +135,7 @@ h1, h2, h3 { margin: 0 0 .5em; }
 .pill-status.Anulada { background: #fee2e2; color: #b91c1c; }
 .pill-status.Aguardando { background: #e2e8f0; color: #475569; }
 .pill-status.Disponivel { background: #ccfbf1; color: #0f766e; }
+.pill-status.Tiny { background: #cffafe; color: #0e7490; }
 
 /* ---------- pré-venda (admin e cliente) ---------- */
 .fin-prevenda { border: 1px solid #e6e6e6; border-radius: 6px; margin: 10px 0; overflow: hidden; }

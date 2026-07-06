@@ -382,6 +382,31 @@
     });
   };
 
+  /* ---------- integração Tiny ERP (admin) ---------- */
+  // Lista paginada de produtos do Tiny com a situação local de cada um
+  // (novo / sku-existe / importado). REJEITA em erro — a tela trata.
+  FG.tinyProdutos = function (pagina, pesquisa) {
+    return api('/tiny/produtos?pagina=' + (pagina || 1) +
+      (pesquisa ? '&pesquisa=' + encodeURIComponent(pesquisa) : ''));
+  };
+  // Importa/vincula os produtos selecionados. Recarrega o catálogo no fim.
+  FG.tinyImportar = function (tinyIds, categoria) {
+    return req('POST', '/tiny/importar', { tinyIds: tinyIds, categoria: categoria }).then(function (r) {
+      if (!r.ok) return r;
+      return recarregarProdutos().then(function () { return r; });
+    });
+  };
+  // Sincroniza um bloco de SKUs contra o Tiny (a tela envia em lotes e soma
+  // os resumos). Recarrega o catálogo no fim.
+  FG.tinySyncLote = function (skus) {
+    return req('POST', '/tiny/sync-lote', { skus: skus }).then(function (r) {
+      if (!r.ok) return r;
+      return recarregarProdutos().then(function () { return r; });
+    });
+  };
+  // Últimos registros de sincronização (webhook/importação/lote).
+  FG.tinyLog = function () { return api('/tiny/log'); };
+
   // Expõe helpers para depuração no console.
   FG._api = api;
   FG._cache = CACHE;

@@ -181,7 +181,9 @@
         return '<tr><td>' + (p.imagem
             ? '<img class="fnd-thumb" src="' + esc(p.imagem) + '" alt="">'
             : '<span class="fnd-thumb vazio">sem foto</span>') + '</td>' +
-          '<td>' + p.artigo + '</td><td>' + esc(p.nome) + '</td><td>' + esc(c ? c.nome : p.cat) + '</td>' +
+          '<td>' + p.artigo + '</td><td>' + esc(p.nome) +
+          (p.tinyAtivo ? ' <span class="pill-status Tiny" title="Gerenciado pelo Tiny ERP">Tiny</span>' : '') +
+          '</td><td>' + esc(c ? c.nome : p.cat) + '</td>' +
           '<td class="r">' + FG.fmtMoney(p.preco) + '</td>' +
           '<td class="r">' + (p.estoque > 0
             ? p.estoque
@@ -208,26 +210,36 @@
 
   function modalProduto(p) {
     var novo = !p;
+    // Produto do Tiny: nome, preço, estoque, descrição e foto são espelho do
+    // ERP — ficam travados aqui. Só categoria e previsão continuam editáveis.
+    var tiny = !!(p && p.tinyAtivo);
+    var trava = tiny ? ' disabled' : '';
     var back = document.createElement('div');
     back.className = 'modal-back';
     back.innerHTML =
       '<div class="modal"><header><h3>' + (novo ? 'Novo produto' : 'Editar ' + p.artigo) + '</h3><button class="x">×</button></header>' +
       '<div class="modal-body">' +
+      (tiny
+        ? '<div class="adm-banner">🔒 Este produto é gerenciado pelo <b>Tiny ERP</b>: nome, preço, estoque, descrição e foto ' +
+          'são atualizados automaticamente. Para alterar, edite no Tiny. Aqui só categoria e previsão de chegada.' +
+          (p.tinySincronizadoEm ? '<br><span class="muted">Última sincronização: ' + FG.fmtDateTime(p.tinySincronizadoEm) + '</span>' : '') +
+          '</div>'
+        : '') +
       '<div class="field"><label>Número do artigo</label><input id="mp-art" type="text"' + (novo ? '' : ' disabled') + ' value="' + (p ? p.artigo : '') + '"></div>' +
-      '<div class="field"><label>Nome</label><input id="mp-nome" type="text" value="' + (p ? esc(p.nome) : '') + '"></div>' +
+      '<div class="field"><label>Nome</label><input id="mp-nome" type="text"' + trava + ' value="' + (p ? esc(p.nome) : '') + '"></div>' +
       '<div class="field"><label>Categoria</label><select id="mp-cat">' +
       FG.all('categories').map(function (c) {
         return '<option value="' + c.id + '"' + (p && p.cat === c.id ? ' selected' : '') + '>' + esc(c.nome) + '</option>';
       }).join('') + '</select></div>' +
-      '<div class="field"><label>Preço (R$)</label><input id="mp-preco" type="number" step="0.01" min="0" value="' + (p ? p.preco : '') + '"></div>' +
-      '<div class="field"><label>Estoque</label><input id="mp-est" type="number" min="0" value="' + (p ? p.estoque : 0) + '"></div>' +
+      '<div class="field"><label>Preço (R$)</label><input id="mp-preco" type="number" step="0.01" min="0"' + trava + ' value="' + (p ? p.preco : '') + '"></div>' +
+      '<div class="field"><label>Estoque</label><input id="mp-est" type="number" min="0"' + trava + ' value="' + (p ? p.estoque : 0) + '"></div>' +
       '<div class="field"><label>Previsão de chegada (se sem estoque)</label><input id="mp-prev" type="text" placeholder="dd/mm/aa" value="' + (p && p.previsao ? p.previsao : '') + '"></div>' +
-      '<div class="field"><label>Descrição</label><textarea id="mp-desc" rows="3">' + (p ? esc(p.descricao) : '') + '</textarea></div>' +
+      '<div class="field"><label>Descrição</label><textarea id="mp-desc" rows="3"' + trava + '>' + (p ? esc(p.descricao) : '') + '</textarea></div>' +
       '<div class="field"><label>Foto da peça (miniatura no Parts Finder)</label>' +
       '<div class="fnd-foto-row">' +
       (p && p.imagem ? '<img class="fnd-thumb" src="' + esc(p.imagem) + '" alt="">' : '<span class="fnd-thumb vazio">sem foto</span>') +
-      '<input id="mp-foto" type="file" accept="image/*">' +
-      (p && p.imagem ? '<button class="btn-line btn-mini" id="mp-foto-del" type="button">Remover foto</button>' : '') +
+      '<input id="mp-foto" type="file" accept="image/*"' + trava + '>' +
+      (p && p.imagem && !tiny ? '<button class="btn-line btn-mini" id="mp-foto-del" type="button">Remover foto</button>' : '') +
       '</div></div>' +
       '</div>' +
       '<div class="modal-foot"><button class="btn-line" id="mp-canc">Cancelar</button>' +
@@ -1108,6 +1120,193 @@
   }
 
   /* =========================================================
+     TINY ERP — importação, sincronização em lote e log
+     ---------------------------------------------------------
+     O Tiny é a fonte de verdade dos produtos importados dele.
+     Aqui o admin: (1) importa produtos do Tiny para o catálogo,
+     (2) força a sincronização em lote dos já importados e
+     (3) confere o log (webhook / importação / lote).
+     ========================================================= */
+  var TINY_LOTE = 20; // blocos por requisição — o Tiny limita o ritmo da API
+
+  function tinyPillLocal(st) {
+    if (st === 'importado') return '<span class="pill-status aprovado">Já importado</span>';
+    if (st === 'sku-existe') return '<span class="pill-status Aguardando">SKU existe — vincula</span>';
+    return '<span class="pill-status Pendente">Novo</span>';
+  }
+  function tinyPillLog(st) {
+    var cls = st === 'ok' ? 'aprovado' : st === 'erro' ? 'bloqueado' : 'Aguardando';
+    return '<span class="pill-status ' + cls + '">' + esc(st) + '</span>';
+  }
+
+  function renderTiny() {
+    h1.textContent = 'Integração Tiny ERP'; setOn('tiny');
+    view.innerHTML =
+      '<div class="adm-bar"><span class="muted" style="font-size:13px;">O Tiny é a fonte de verdade: estoque, preço, nome, ' +
+      'descrição e foto dos produtos importados são sempre espelho do ERP — pelo webhook (automático) ou pela sincronização em lote abaixo.</span></div>' +
+
+      '<div class="adm-card"><div class="c-head">Produtos no Tiny — importação</div><div class="c-body">' +
+      '<div class="fnd-add-row">' +
+      '<input id="ty-busca" type="text" placeholder="Pesquisar por nome ou código no Tiny">' +
+      '<button class="btn-line btn-mini" id="ty-buscar">Buscar</button>' +
+      '<span class="grow"></span>' +
+      '<label style="font-size:12px;">Categoria p/ novos: <select id="ty-cat">' +
+      FG.all('categories').map(function (c) { return '<option value="' + c.id + '">' + esc(c.nome) + '</option>'; }).join('') +
+      '</select></label>' +
+      '<button class="btn-orange btn-mini" id="ty-importar">Importar selecionados</button>' +
+      '</div><div id="ty-imp" class="muted">Carregando…</div></div></div>' +
+
+      '<div class="adm-card"><div class="c-head">Produtos sincronizados com o Tiny</div><div class="c-body" id="ty-sync"></div></div>' +
+
+      '<div class="adm-card"><div class="c-head">Log de sincronização</div><div class="c-body">' +
+      '<div class="fnd-add-row"><span class="muted" style="font-size:12px;">Últimos 100 registros (webhook, importação e lote).</span>' +
+      '<span class="grow"></span><button class="btn-line btn-mini" id="ty-log-rl">Atualizar</button></div>' +
+      '<div id="ty-log" class="muted">Carregando…</div></div></div>';
+
+    /* ----- importação (lista paginada do Tiny) ----- */
+    function carregarImportacao(pagina) {
+      var box = document.getElementById('ty-imp');
+      box.innerHTML = '<p class="muted">Consultando o Tiny…</p>';
+      FG.tinyProdutos(pagina, document.getElementById('ty-busca').value.trim()).then(function (r) {
+        box.innerHTML =
+          '<table class="tbl"><thead><tr>' +
+          '<th><input type="checkbox" id="ty-todos" title="Selecionar todos"></th>' +
+          '<th>ID Tiny</th><th>SKU</th><th>Nome</th><th class="r">Preço</th><th>Situação no Fullgas</th></tr></thead><tbody>' +
+          (r.produtos.length ? r.produtos.map(function (p) {
+            var pode = p.statusLocal !== 'importado';
+            return '<tr><td>' + (pode ? '<input type="checkbox" class="ty-sel" value="' + esc(p.tinyId) + '">' : '') + '</td>' +
+              '<td class="muted">' + esc(p.tinyId) + '</td><td>' + esc(p.sku || '—') + '</td><td>' + esc(p.nome) + '</td>' +
+              '<td class="r">' + FG.fmtMoney(p.preco) + '</td><td>' + tinyPillLocal(p.statusLocal) + '</td></tr>';
+          }).join('') : '<tr><td colspan="6" class="muted">Nada encontrado no Tiny.</td></tr>') +
+          '</tbody></table>' +
+          '<div class="fnd-add-row" style="margin-top:8px;">' +
+          '<button class="btn-line btn-mini" id="ty-ant"' + (r.pagina <= 1 ? ' disabled' : '') + '>« Anterior</button>' +
+          '<span class="muted" style="font-size:12px;">Página ' + r.pagina + ' de ' + (r.totalPaginas || 1) + '</span>' +
+          '<button class="btn-line btn-mini" id="ty-prox"' + (r.pagina >= r.totalPaginas ? ' disabled' : '') + '>Próxima »</button></div>';
+
+        var todos = document.getElementById('ty-todos');
+        if (todos) todos.addEventListener('change', function () {
+          Array.prototype.forEach.call(box.querySelectorAll('.ty-sel'), function (c) { c.checked = todos.checked; });
+        });
+        document.getElementById('ty-ant').addEventListener('click', function () { carregarImportacao(r.pagina - 1); });
+        document.getElementById('ty-prox').addEventListener('click', function () { carregarImportacao(r.pagina + 1); });
+      }, function (e) {
+        box.innerHTML = '<p class="muted">Erro ao consultar o Tiny: ' + esc((e && e.message) || '') + '</p>';
+      });
+    }
+
+    document.getElementById('ty-buscar').addEventListener('click', function () { carregarImportacao(1); });
+    document.getElementById('ty-busca').addEventListener('keydown', function (e) { if (e.key === 'Enter') carregarImportacao(1); });
+
+    document.getElementById('ty-importar').addEventListener('click', function () {
+      var ids = Array.prototype.map.call(view.querySelectorAll('#ty-imp .ty-sel:checked'), function (c) { return c.value; });
+      if (!ids.length) { FG.toast('Selecione ao menos um produto do Tiny.'); return; }
+      var btn = document.getElementById('ty-importar');
+      btn.disabled = true; btn.textContent = 'Importando…';
+      FG.tinyImportar(ids, document.getElementById('ty-cat').value).then(function (r) {
+        btn.disabled = false; btn.textContent = 'Importar selecionados';
+        if (r.ok === false) { FG.toast(r.msg || 'Falha na importação.', 'erro'); return; }
+        FG.toast(r.sucesso + ' importado(s)' + (r.erros ? ', ' + r.erros + ' com erro (ver log)' : '') +
+          (r.ignorados ? ', ' + r.ignorados + ' já importado(s)' : '') + '.', r.erros ? 'erro' : undefined);
+        carregarImportacao(1); desenharSync(); carregarLog();
+      });
+    });
+
+    /* ----- sincronizados (produtos locais com TinyAtivo) ----- */
+    function desenharSync() {
+      var el = document.getElementById('ty-sync');
+      var prods = FG.all('products').filter(function (p) { return p.tinyAtivo; });
+      if (!prods.length) {
+        el.innerHTML = '<p class="muted">Nenhum produto importado do Tiny ainda. Importe pela lista acima.</p>';
+        return;
+      }
+      el.innerHTML =
+        '<div class="fnd-add-row">' +
+        '<button class="btn-orange btn-mini" id="ty-sync-sel">Sincronizar selecionados</button>' +
+        '<button class="btn-line btn-mini" id="ty-sync-all">Sincronizar todos (' + prods.length + ')</button>' +
+        '<span class="muted" style="font-size:12px;" id="ty-sync-msg"></span></div>' +
+        '<table class="tbl"><thead><tr>' +
+        '<th><input type="checkbox" id="ty-sync-todos" title="Selecionar todos"></th>' +
+        '<th>SKU</th><th>Nome</th><th class="r">Preço</th><th class="r">Estoque</th><th>Última sincronização</th></tr></thead><tbody>' +
+        prods.map(function (p) {
+          return '<tr><td><input type="checkbox" class="ty-sync-sel" value="' + esc(p.artigo) + '"></td>' +
+            '<td>' + esc(p.artigo) + '</td><td>' + esc(p.nome) + '</td>' +
+            '<td class="r">' + FG.fmtMoney(p.preco) + '</td><td class="r">' + p.estoque + '</td>' +
+            '<td>' + (p.tinySincronizadoEm ? FG.fmtDateTime(p.tinySincronizadoEm) : '—') + '</td></tr>';
+        }).join('') + '</tbody></table>';
+
+      var todos = document.getElementById('ty-sync-todos');
+      todos.addEventListener('change', function () {
+        Array.prototype.forEach.call(el.querySelectorAll('.ty-sync-sel'), function (c) { c.checked = todos.checked; });
+      });
+
+      // Envia em blocos (a API consulta o Tiny produto a produto, e o Tiny
+      // limita o ritmo — um catálogo grande leva alguns minutos).
+      function sincronizar(skus) {
+        var fila = skus.slice();
+        var soma = { total: 0, sucesso: 0, erros: 0, ignorados: 0 };
+        var msg = document.getElementById('ty-sync-msg');
+        var btns = [document.getElementById('ty-sync-sel'), document.getElementById('ty-sync-all')];
+        btns.forEach(function (b) { b.disabled = true; });
+
+        function passo() {
+          if (!fila.length) {
+            FG.toast(soma.sucesso + ' atualizado(s)' + (soma.erros ? ', ' + soma.erros + ' com erro (ver log)' : '') + '.',
+              soma.erros ? 'erro' : undefined);
+            desenharSync(); carregarLog();
+            return;
+          }
+          msg.textContent = 'Sincronizando… ' + (skus.length - fila.length) + '/' + skus.length +
+            ' (pode levar alguns minutos)';
+          FG.tinySyncLote(fila.splice(0, TINY_LOTE)).then(function (r) {
+            if (r.ok === false) {
+              btns.forEach(function (b) { b.disabled = false; });
+              msg.textContent = '';
+              FG.toast(r.msg || 'Falha na sincronização.', 'erro');
+              return;
+            }
+            soma.total += r.total; soma.sucesso += r.sucesso;
+            soma.erros += r.erros; soma.ignorados += r.ignorados;
+            passo();
+          });
+        }
+        passo();
+      }
+
+      document.getElementById('ty-sync-sel').addEventListener('click', function () {
+        var skus = Array.prototype.map.call(el.querySelectorAll('.ty-sync-sel:checked'), function (c) { return c.value; });
+        if (!skus.length) { FG.toast('Selecione ao menos um produto.'); return; }
+        sincronizar(skus);
+      });
+      document.getElementById('ty-sync-all').addEventListener('click', function () {
+        sincronizar(prods.map(function (p) { return p.artigo; }));
+      });
+    }
+
+    /* ----- log ----- */
+    function carregarLog() {
+      var el = document.getElementById('ty-log');
+      FG.tinyLog().then(function (rows) {
+        el.innerHTML =
+          '<table class="tbl"><thead><tr><th>Data</th><th>Evento</th><th>SKU</th><th>ID Tiny</th><th>Status</th><th>Mensagem</th></tr></thead><tbody>' +
+          (rows.length ? rows.map(function (l) {
+            return '<tr><td>' + FG.fmtDateTime(l.data) + '</td><td>' + esc(l.evento) + '</td>' +
+              '<td>' + esc(l.sku || '—') + '</td><td class="muted">' + esc(l.tinyId || '—') + '</td>' +
+              '<td>' + tinyPillLog(l.status) + '</td><td>' + esc(l.mensagem || '') + '</td></tr>';
+          }).join('') : '<tr><td colspan="6" class="muted">Nenhuma sincronização registrada ainda.</td></tr>') +
+          '</tbody></table>';
+      }, function (e) {
+        el.innerHTML = '<p class="muted">Erro ao carregar o log: ' + esc((e && e.message) || '') + '</p>';
+      });
+    }
+    document.getElementById('ty-log-rl').addEventListener('click', carregarLog);
+
+    carregarImportacao(1);
+    desenharSync();
+    carregarLog();
+  }
+
+  /* =========================================================
      ROUTER
      ========================================================= */
   function route() {
@@ -1120,6 +1319,7 @@
       case 'pedidos': renderPedidos(); break;
       case 'prevenda': renderPreVenda(); break;
       case 'reivindicacoes': renderClaims(); break;
+      case 'tiny': renderTiny(); break;
       case 'finder':
         if (seg[1] === 'modelo' && seg[2]) renderFinderModelo(decodeURIComponent(seg[2]));
         else if (seg[1] === 'secao' && seg[2]) renderFinderSecao(Number(seg[2]));
