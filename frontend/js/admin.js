@@ -1125,7 +1125,7 @@
      O Tiny é a fonte de verdade dos produtos importados dele.
      Aqui o admin: (1) importa produtos do Tiny para o catálogo,
      (2) força a sincronização em lote dos já importados e
-     (3) confere o log (webhook / importação / lote).
+     (3) confere o log (cron / importação / lote).
      ========================================================= */
   var TINY_LOTE = 20; // blocos por requisição — o Tiny limita o ritmo da API
 
@@ -1143,7 +1143,8 @@
     h1.textContent = 'Integração Tiny ERP'; setOn('tiny');
     view.innerHTML =
       '<div class="adm-bar"><span class="muted" style="font-size:13px;">O Tiny é a fonte de verdade: estoque, preço, nome, ' +
-      'descrição e foto dos produtos importados são sempre espelho do ERP — pelo webhook (automático) ou pela sincronização em lote abaixo.</span></div>' +
+      'descrição e foto dos produtos importados são sempre espelho do ERP — pela sincronização automática agendada na API ' +
+      '(node-cron, a cada X minutos, evento "cron" no log) ou pelo botão de sincronizar abaixo.</span></div>' +
 
       '<div class="adm-card"><div class="c-head">Produtos no Tiny — importação</div><div class="c-body">' +
       '<div class="fnd-add-row">' +
@@ -1159,7 +1160,7 @@
       '<div class="adm-card"><div class="c-head">Produtos sincronizados com o Tiny</div><div class="c-body" id="ty-sync"></div></div>' +
 
       '<div class="adm-card"><div class="c-head">Log de sincronização</div><div class="c-body">' +
-      '<div class="fnd-add-row"><span class="muted" style="font-size:12px;">Últimos 100 registros (webhook, importação e lote).</span>' +
+      '<div class="fnd-add-row"><span class="muted" style="font-size:12px;">Últimos 100 registros (cron = automático, lote = botão, importação).</span>' +
       '<span class="grow"></span><button class="btn-line btn-mini" id="ty-log-rl">Atualizar</button></div>' +
       '<div id="ty-log" class="muted">Carregando…</div></div></div>';
 

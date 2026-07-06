@@ -404,7 +404,7 @@
       return recarregarProdutos().then(function () { return r; });
     });
   };
-  // Últimos registros de sincronização (webhook/importação/lote).
+  // Últimos registros de sincronização (cron/importação/lote).
   FG.tinyLog = function () { return api('/tiny/log'); };
 
   // Expõe helpers para depuração no console.

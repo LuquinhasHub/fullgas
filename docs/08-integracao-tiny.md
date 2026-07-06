@@ -13,21 +13,26 @@ no Fullgas para produtos de origem Tiny.
 
 A atualização acontece de duas formas complementares:
 
-1. **Webhook** — quando um produto muda no Tiny, o Tiny avisa a API do Fullgas
-   automaticamente, e o produto correspondente é atualizado na hora.
-2. **Sincronização em lote** — o admin pode, a qualquer momento, selecionar um
-   grupo de produtos (ou todos) e forçar uma atualização manual contra o Tiny.
-   Útil para conferir que tudo está em dia, ou quando o webhook falhar por
-   algum motivo (rede fora do ar, etc.).
+1. **Sincronização agendada (node-cron)** — a API roda automaticamente, a cada
+   N **minutos** (`TINY_SYNC_INTERVALO_MIN` no `.env`), o mesmo lote do botão
+   "Sincronizar" do admin, espelhando todos os produtos com `TinyAtivo = 1`.
+   > **Nota de revisão**: a primeira versão desta integração usava **webhook**
+   > (o Tiny avisava a API a cada mudança). O método foi descartado porque a
+   > parte de notificação dos webhooks se mostrou pouco confiável; no lugar
+   > entrou o agendamento node-cron (`api/src/tiny-cron.js`), que reaproveita
+   > o mecanismo do botão de sincronizar que já existia no projeto.
+2. **Sincronização em lote (manual)** — o admin pode, a qualquer momento,
+   selecionar um grupo de produtos (ou todos) e forçar uma atualização
+   imediata contra o Tiny, sem esperar a próxima rodada do cron.
 
 ```
-Produto muda no Tiny                       Admin clica "Sincronizar em lote"
+Cron dispara a cada N minutos              Admin clica "Sincronizar em lote"
       ↓                                                  ↓
-Tiny envia POST → .../api/tiny/webhook      API busca cada produto no Tiny
+API busca cada produto Tiny no Tiny         API busca cada produto no Tiny
       ↓                                                  ↓
-API atualiza o produto no banco             API atualiza todos no banco
+API atualiza todos no banco                 API atualiza todos no banco
       ↓                                                  ↓
-Loja reflete a mudança imediatamente        Loja reflete a mudança imediatamente
+Loja reflete a mudança                      Loja reflete a mudança imediatamente
 ```
 
 ## Decisões de negócio confirmadas
@@ -36,12 +41,14 @@ Loja reflete a mudança imediatamente        Loja reflete a mudança imediatamen
    os campos, sempre**. Sem exceção e sem edição manual no Fullgas.
 2. **Sem override**: o admin do Fullgas não edita nenhum campo de produto
    Tiny. Se precisar mudar algo, muda no Tiny — a mudança volta pro Fullgas
-   pelo webhook ou pela sincronização em lote.
-3. **Sincronização em lote**: além do webhook automático, existe uma tela no
-   admin para selecionar produtos (ou "selecionar todos") e disparar uma
+   pela sincronização agendada (cron) ou pelo lote manual.
+3. **Sincronização em lote**: além do agendamento automático, existe uma tela
+   no admin para selecionar produtos (ou "selecionar todos") e disparar uma
    atualização manual imediata contra o Tiny.
 4. **Sentido**: somente Tiny → Fullgas. O Fullgas nunca escreve de volta no Tiny.
 5. **API do Tiny**: usar a **v2** (token simples, sem OAuth2).
+6. **Atualização automática por node-cron, não por webhook**: decisão tomada
+   após testes — ver a nota de revisão na visão geral.
 
 ---
 
@@ -77,7 +84,7 @@ CREATE TABLE dbo.TinySyncLog (
     LogId         INT           IDENTITY(1,1) NOT NULL,
     TinyId        VARCHAR(40)   NULL,
     Sku           VARCHAR(40)   NULL,
-    Evento        VARCHAR(20)   NOT NULL,  -- 'webhook' | 'importacao' | 'lote'
+    Evento        VARCHAR(20)   NOT NULL,  -- 'cron' | 'importacao' | 'lote'
     Status        VARCHAR(10)   NOT NULL,  -- 'ok' | 'erro'
     Mensagem      NVARCHAR(500) NULL,
     CriadoEm     DATETIME2(0)  NOT NULL
@@ -97,7 +104,7 @@ GO
 
 ---
 
-### Variável de ambiente
+### Variáveis de ambiente
 
 Adicionar ao `api/.env` e ao `api/.env.example`:
 
@@ -105,6 +112,11 @@ Adicionar ao `api/.env` e ao `api/.env.example`:
 # --- Integração Tiny ERP ---
 TINY_TOKEN=seu_token_aqui
 # Gere em: Tiny → Menu → Início → Extensões → Token API
+
+# Sincronização automática (node-cron): intervalo em MINUTOS entre as rodadas
+# que espelham todos os produtos Tiny (mesmo lote do botão "Sincronizar" do
+# admin). Use 1 a 59, ou múltiplos de 60 (60 = 1h). 0 ou vazio = desligado.
+TINY_SYNC_INTERVALO_MIN=15
 ```
 
 ---
@@ -150,7 +162,7 @@ export async function obterProduto(tinyId) {
 
 // Aplica os dados do Tiny num produto do banco. SEM overrides: todo campo
 // presente no payload é sempre sobrescrito.
-export async function aplicarAtualizacao(tinyId, dados, evento = 'webhook') {
+export async function aplicarAtualizacao(tinyId, dados, evento = 'lote') {
   const produtos = await query(
     `SELECT ProdutoId, Sku, TinyAtivo FROM dbo.Produto WHERE TinyId = @tid`,
     { tid: tinyId }
@@ -232,19 +244,28 @@ export async function sincronizarLote(produtoIds) {
 GET  /api/tiny/produtos          Lista produtos do Tiny (admin) — tela de importação
 POST /api/tiny/importar          Importa produtos selecionados pro banco
 POST /api/tiny/sync-lote         Sincroniza um lote de produtos selecionados (admin)
-POST /api/tiny/webhook           Recebe notificações do Tiny (público, sem auth JWT)
 GET  /api/tiny/log               Histórico de sincronizações (admin)
 ```
 
-**Detalhe do webhook**:
+A atualização automática **não passa por rota** — é o agendamento node-cron
+descrito a seguir.
 
-- Não usa o guard JWT (o Tiny não manda token de usuário).
-- Valida que a requisição veio do Tiny verificando o `token` no body
-  (o Tiny inclui o token da conta nas notificações — compare com `TINY_TOKEN`).
-- Extrai o `tinyId` e os dados alterados do payload.
-- Chama `tiny.aplicarAtualizacao(tinyId, dados, 'webhook')`.
-- Responde `200 OK` sempre (mesmo em erro interno) — o Tiny para de reenviar
-  se receber 200; erros ficam no log.
+**Sincronização agendada (node-cron)** — `api/src/tiny-cron.js`:
+
+- Substitui o webhook. Ao subir a API (depois do banco conectar), o
+  `server.js` chama `iniciarSincronizacaoAgendada()`.
+- A cada `TINY_SYNC_INTERVALO_MIN` **minutos** (1–59, ou múltiplos de 60 para
+  virar horas; 0 ou vazio desliga), roda `sincronizarLote(null, 'cron')` — o
+  **mesmo lote do botão "Sincronizar" do admin**, cobrindo todos os produtos
+  com `TinyAtivo = 1`.
+- No `TinySyncLog` a rodada automática grava `Evento = 'cron'`; o botão do
+  admin grava `'lote'` — o log diferencia as duas origens.
+- Trava de sobreposição: se uma rodada ainda estiver em andamento quando a
+  próxima disparar, a nova é pulada (aviso no console). Nunca rodam duas ao
+  mesmo tempo.
+- Ritmo: cada produto custa até 2 requisições ao Tiny e a fila do `tiny.js`
+  espaça as chamadas (~1,1 s) pelo limite de ~60 req/min do Tiny. Escolha um
+  intervalo maior que a duração de uma rodada do catálogo inteiro.
 
 **Detalhe do sync em lote** (`POST /api/tiny/sync-lote`):
 
@@ -269,18 +290,18 @@ GET  /api/tiny/log               Histórico de sincronizações (admin)
 
 ---
 
-### Configuração do webhook no Tiny
+### Configuração da sincronização automática
 
-Após o deploy da API, configurar no Tiny:
-- Menu → Configurações → Notificações → Adicionar URL
-- URL: `https://sua-api.onrender.com/api/tiny/webhook?token=<TINY_TOKEN>`
-  (o token na query string é o que autentica o aviso — sem ele a API ignora)
-- Eventos a marcar: **Produto alterado**, **Estoque alterado**
+**Nada a configurar no lado do Tiny** (não há webhook nem URL de notificação
+para cadastrar; ngrok deixou de ser necessário). Basta o `api/.env`:
 
-Para testar localmente (antes do deploy):
-- Subir ngrok: `ngrok http 3000`
-- Usar a URL do ngrok como destino temporário no Tiny
-- O Tiny vai chamar `https://abc123.ngrok-free.app/api/tiny/webhook?token=<TINY_TOKEN>`
+- `TINY_TOKEN` — token da API v2.
+- `TINY_SYNC_INTERVALO_MIN` — intervalo em minutos entre as rodadas
+  automáticas (0 ou vazio desliga; a sincronização manual pelo botão do
+  admin continua funcionando mesmo com o cron desligado).
+
+Ao subir, a API loga o estado do agendamento no console:
+`✓ Sync Tiny (cron): agendado a cada 15 min (expressão "*/15 * * * *")`.
 
 ---
 
@@ -308,7 +329,7 @@ Nova seção no `admin.html` / `admin.js`: **"Produtos do Tiny"**.
 - Após o sync, mostrar um resumo: "42 produtos atualizados, 1 com erro (ver log)".
 
 **Log de sincronização**:
-- Tabela simples em `/api/tiny/log`: data, SKU, evento (webhook/importação/lote),
+- Tabela simples em `/api/tiny/log`: data, SKU, evento (cron/importação/lote),
   status, mensagem de erro se houver. Últimos 100 registros.
 
 ---
@@ -324,14 +345,16 @@ Nova seção no `admin.html` / `admin.js`: **"Produtos do Tiny"**.
 6. No formulário de edição desses produtos, os campos aparecem como
    somente leitura.
 
-### Webhook
+### Sincronização agendada (node-cron)
 7. No Tiny, alterar o estoque e o preço de um produto importado.
-8. O Tiny chama o webhook automaticamente (ou via ngrok em dev).
-9. Em até 5 segundos, estoque e preço no Fullgas refletem os novos valores.
-10. Log registra a sincronização com `Evento = 'webhook'`, `Status = 'ok'`.
+8. Aguardar a próxima rodada do agendamento (até `TINY_SYNC_INTERVALO_MIN`
+   minutos).
+9. Estoque e preço no Fullgas refletem os novos valores sem nenhuma ação
+   manual.
+10. Log registra a sincronização com `Evento = 'cron'`, `Status = 'ok'`.
 
 ### Sincronização em lote
-11. Admin altera manualmente um produto no Tiny (sem esperar o webhook).
+11. Admin altera manualmente um produto no Tiny (sem esperar o cron).
 12. No painel Fullgas, seleciona esse produto na lista de "Produtos Tiny" e
     clica "Sincronizar selecionados".
 13. O produto atualiza imediatamente com os dados do Tiny.
@@ -343,9 +366,9 @@ Nova seção no `admin.html` / `admin.js`: **"Produtos do Tiny"**.
 
 ## Fora do escopo desta implementação
 
-- **Webhook de criação de produto**: o Tiny não notifica sobre produtos novos,
-  só sobre alterações. Produtos novos no Tiny precisam ser importados manualmente
-  pelo admin via tela de importação.
+- **Criação automática de produto**: a sincronização (agendada ou manual) só
+  atualiza produtos **já importados** (`TinyAtivo = 1`). Produtos novos no
+  Tiny precisam ser importados manualmente pelo admin via tela de importação.
 - **Sincronização de categorias**: as categorias do Tiny não mapeiam para as
   categorias do Fullgas. O admin define a categoria do Fullgas na hora de importar.
 - **Variações/grades**: produtos com variação no Tiny (ex.: tamanho P/M/G)
