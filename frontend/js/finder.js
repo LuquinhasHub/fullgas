@@ -242,14 +242,22 @@
       document.getElementById('ms-input').value = s.modelo.label;
       var outro = s.lado === 'chassi' ? 'engine' : 'chassi';
 
+      // Cabeçalho (legenda das colunas). Alinha com o grid do .part-row: as
+      // duas primeiras colunas (checkbox e nº) ficam sem rótulo.
+      var cabecalho = '<div class="part-head">' +
+        '<span></span><span></span>' +
+        '<span>SKU</span><span>Descrição</span>' +
+        '<span>Quantidade</span><span></span></div>';
+
       var linhas = s.pecas.map(function (p, i) {
         var marcada = p.quantidadePadrao > 0;
+        // Ver a peça na loja abre em NOVA aba: o cliente não perde o finder.
+        var link = 'loja.html#/produto/' + encodeURIComponent(p.sku);
         return '<div class="part-row' + (marcada ? ' sel' : '') + '" data-row="' + i + '" data-num="' + esc(p.numeroImagem) + '">' +
           '<input type="checkbox" class="pr-chk" data-row="' + i + '"' + (marcada ? ' checked' : '') + '>' +
           '<span>' + (i + 1) + '</span>' +
-          '<a href="loja.html#/produto/' + encodeURIComponent(p.sku) + '">' + esc(p.sku) + '</a>' +
-          '<b><a href="loja.html#/produto/' + encodeURIComponent(p.sku) + '">' + esc(p.nome) + '</a></b>' +
-          '<input class="cm" type="text" placeholder="Comment">' +
+          '<a href="' + link + '" target="_blank" rel="noopener">' + esc(p.sku) + '</a>' +
+          '<b><a href="' + link + '" target="_blank" rel="noopener">' + esc(p.nome) + '</a></b>' +
           '<input class="qn" type="number" min="0" value="' + p.quantidadePadrao + '" data-art="' + esc(p.sku) + '">' +
           '<span>(' + p.quantidade + ')</span>' +
           '</div>';
@@ -268,7 +276,7 @@
         '<div>' +
         '<div class="part-toolbar"><span class="muted">' + esc(s.numero) + ' — ' + esc(s.nome) + '</span>' +
         '<button class="btn" id="fa-cart">🛒 ADD ITEM(S) TO BASKET</button></div>' +
-        (linhas || '<p class="muted">Nenhuma peça cadastrada nesta seção ainda.</p>') +
+        (linhas ? cabecalho + linhas : '<p class="muted">Nenhuma peça cadastrada nesta seção ainda.</p>') +
         '</div>' +
         '<div class="diagram-box">' +
         (s.imagem
@@ -367,12 +375,15 @@
           el.style.top = (h.y / natH * 100) + '%';
           el.style.width = (h.w / natW * 100) + '%';
           el.style.height = (h.h / natH * 100) + '%';
+          // Clicar no quadrado marca a(s) peça(s) daquele número na lista.
+          // Compara como String: o data-num do row é string e o linkNumero
+          // pode vir número da API (evita "1" === 1 dar falso).
           el.addEventListener('click', function () {
-            var num = h.linkNumero;
+            var num = h.linkNumero != null ? String(h.linkNumero) : '';
             if (!num) { if (h.texto) FG.toast(h.texto); return; }
             var alvo = null;
             Array.prototype.forEach.call(fdView.querySelectorAll('.part-row'), function (row) {
-              if (row.getAttribute('data-num') === num) {
+              if (String(row.getAttribute('data-num')) === num) {
                 var chk = row.querySelector('.pr-chk');
                 chk.checked = true;
                 row.classList.add('sel');

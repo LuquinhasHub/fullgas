@@ -485,14 +485,16 @@ main.finder { padding: 8px 28px 70px; }
 
 .part-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 36px; align-items: start; }
 @media (max-width: 1020px) { .part-layout { grid-template-columns: 1fr; } }
-.part-row { display: grid; grid-template-columns: 26px 26px 150px 1fr 150px 70px 44px; gap: 8px; align-items: center; border-bottom: 1px solid #e3e3e3; padding: 9px 8px; font-size: 12px; }
+/* grid compartilhado pela legenda (.part-head) e pelas linhas (.part-row):
+   checkbox | nº | SKU | descrição | quantidade | (qtd de referência) */
+.part-head, .part-row { display: grid; grid-template-columns: 26px 26px 150px 1fr 70px 44px; gap: 8px; align-items: center; }
+.part-head { padding: 6px 8px; border-bottom: 2px solid #ccc; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: #666; }
+.part-row { border-bottom: 1px solid #e3e3e3; padding: 9px 8px; font-size: 12px; }
 .part-row:nth-child(even) { background: #f6f6f6; }
 .part-row.sel { background: var(--red); color: #fff; }
-.part-row.sel a, .part-row.sel .pr-min { color: #fff; }
+.part-row.sel a { color: #fff; }
 .part-row b a { color: var(--ink); }
 .part-row b a:hover { color: var(--red); }
-.part-row .pr-min { grid-column: 5 / 8; text-align: right; color: #555; font-size: 11px; }
-.part-row input.cm { border: 1px solid #ddd; padding: 5px 7px; font-size: 11px; width: 100%; }
 .part-row input.qn { width: 100%; border: 1px solid #ddd; padding: 5px 4px; text-align: center; }
 .diagram-box { border: 1px solid #ccc; min-height: 460px; display: flex; flex-direction: column; gap: 0; padding: 0; }
 .diagram-box .cap { font-size: 11px; color: var(--gray); }
