@@ -392,8 +392,11 @@ main.shop { padding: 0 18px 70px; }
 .prod-img img, .prod-page .big-img img { max-width: 100%; max-height: 100%; object-fit: contain; cursor: zoom-in; }
 .prod-name { color: var(--red); font-size: 18px; font-weight: 800; text-transform: uppercase; letter-spacing: .5px; }
 .prod-name a { color: var(--red); }
-.prod-desc { margin: 8px 0 16px; color: #333; font-size: 13px; }
+/* white-space: pre-line preserva as quebras de linha da descrição (listas do
+   Tiny viram uma linha por item, com marcador "• " já embutido no texto) */
+.prod-desc { margin: 8px 0 16px; color: #333; font-size: 13px; white-space: pre-line; }
 .prod-desc li { margin-bottom: 3px; }
+.prod-desc-full { font-size: 14px; line-height: 1.5; }
 .prod-meta { display: flex; gap: 50px; flex-wrap: wrap; border-top: 1px solid #ddd; padding-top: 10px; font-size: 12px; align-items: center; }
 .prod-meta .m b { display: block; font-weight: 600; color: #777; border-bottom: 1px solid #ddd; margin-bottom: 5px; padding-bottom: 4px; }
 .prod-buy { margin-left: auto; display: flex; align-items: center; gap: 10px; }

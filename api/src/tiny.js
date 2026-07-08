@@ -77,19 +77,27 @@ async function tinyPost(endpoint, params = {}) {
 
 /* ---------------- normalização dos dados do Tiny ---------------- */
 
-// Descrição no Tiny pode vir com HTML; a coluna aceita 1000 chars de texto.
+// Descrição no Tiny vem em HTML (parágrafos e listas <ul><li>). A coluna
+// guarda 1000 chars de TEXTO — mas preservamos a estrutura como quebras de
+// linha: cada item de lista vira uma linha com marcador "• " e o fim de cada
+// bloco (</p>, </li>, </div>...) quebra linha. Sem isso os itens ficariam
+// grudados num texto corrido. A loja renderiza essas quebras (white-space).
 function limparDescricao(html) {
   if (!html) return null;
   const texto = String(html)
+    .replace(/<li[^>]*>/gi, '\n• ')                       // item de lista → linha com marcador
     .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/p>/gi, '\n')
-    .replace(/<[^>]+>/g, '')
+    .replace(/<\/(p|div|ul|ol|tr|h[1-6])\s*>/gi, '\n')     // fim de bloco → quebra (</li> não: o <li> já abriu linha)
+    .replace(/<[^>]+>/g, '')                              // remove as demais tags
     .replace(/&nbsp;/gi, ' ')
     .replace(/&amp;/gi, '&')
     .replace(/&lt;/gi, '<')
     .replace(/&gt;/gi, '>')
     .replace(/&quot;/gi, '"')
+    .replace(/&#3?9;|&apos;/gi, "'")
     .replace(/[ \t]+/g, ' ')
+    .replace(/ *\n */g, '\n')                             // sem espaços em volta das quebras
+    .replace(/\n{3,}/g, '\n\n')                           // no máximo uma linha em branco
     .trim();
   return texto ? texto.slice(0, 1000) : null;
 }

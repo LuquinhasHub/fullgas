@@ -161,7 +161,7 @@
       return '<div class="prod-row">' +
         '<div class="prod-img">' + prodImg(p) + '</div>' +
         '<div><div class="prod-name"><a href="#/produto/' + p.artigo + '">' + esc(p.nome) + '</a></div>' +
-        '<ul class="prod-desc"><li>' + esc(p.descricao) + '</li></ul>' +
+        '<div class="prod-desc">' + esc(p.descricao) + '</div>' +
         '<div class="prod-meta">' +
         '<div class="m"><b>Article No.</b>' + p.artigo + '</div>' +
         '<div class="m"><b>Stock</b>' + stockHTML(p) + '</div>' +
@@ -246,7 +246,7 @@
       '<div class="big-img">' + prodImg(p, 240) + '</div>' +
       '<div><div class="prod-name">' + esc(p.nome) + '</div>' +
       '<p class="muted">Article No. ' + p.artigo + '</p>' +
-      '<p>' + esc(p.descricao) + '</p>' +
+      '<div class="prod-desc prod-desc-full">' + esc(p.descricao) + '</div>' +
       '<div class="price-big">' + FG.fmtMoney(p.preco) + '</div>' +
       '<p><b>Stock:</b> ' + stockHTML(p) + (p.estoque > 0 ? ' <span class="muted">(' + p.estoque + ' un.)</span>' : '') + '</p>' +
       (FG.compravel(p.artigo)
