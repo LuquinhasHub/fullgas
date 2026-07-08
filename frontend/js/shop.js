@@ -73,7 +73,10 @@
     return '<span class="stock-out">Indisponível</span>';
   }
 
+  // Foto real do produto quando houver (upload do admin ou espelhada do Tiny
+  // ERP); sem foto, cai no desenho esquemático da categoria.
   function prodImg(p, w) {
+    if (p.imagem) return '<img src="' + esc(p.imagem) + '" alt="' + esc(p.nome) + '" loading="lazy">';
     var key = { tecnicos: 'escape', vestuario: 'oculos', balance: 'bike', kits: 'kit', retail: 'loja', marketing: 'sacola', ferramentas: 'ferramenta' }[p.cat];
     if (p.cat === 'pecas') return FG.bikeSVG('frame', w || 120, { cls: 'lite' });
     return catIcon(key || 'engrenagem', w || 95);

@@ -387,6 +387,8 @@ main.shop { padding: 0 18px 70px; }
 .prod-row { display: grid; grid-template-columns: 200px 1fr; gap: 26px; padding: 26px 0; border-bottom: 1px solid #eee; }
 @media (max-width: 700px) { .prod-row { grid-template-columns: 1fr; } }
 .prod-img { background: #fafafa; border: 1px solid #eee; height: 170px; display: flex; align-items: center; justify-content: center; }
+/* foto real do produto (upload/Tiny) dentro dos quadros da loja */
+.prod-img img, .prod-page .big-img img { max-width: 100%; max-height: 100%; object-fit: contain; }
 .prod-name { color: var(--red); font-size: 18px; font-weight: 800; text-transform: uppercase; letter-spacing: .5px; }
 .prod-name a { color: var(--red); }
 .prod-desc { margin: 8px 0 16px; color: #333; font-size: 13px; }
