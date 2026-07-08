@@ -20,6 +20,14 @@
 
   document.getElementById('fd-who').textContent = sess.email + ' - ' + sess.empresa;
 
+  /* carrinho da loja no topo — o finder envia peças à mesma cesta da loja,
+     então o contador acompanha cada "ADD ITEM(S) TO BASKET" */
+  function refreshCart() {
+    var el = document.getElementById('fd-cart-n');
+    if (el) el.textContent = FG.cartCount();
+  }
+  refreshCart();
+
   /* estado atual: modelo (código) + lado (chassi/engine) */
   var atual = { modelo: null, lado: 'chassi' };
   var MODELOS = [];           // lista p/ árvore e busca (carregada da API)
@@ -172,6 +180,7 @@
       fdView.innerHTML =
         '<div class="finder-model-name">' + esc(m.label) + '</div>' +
         '<div class="finder-links">' +
+        '<button id="fl-back">‹ Voltar</button>' +
         '<button id="fl-img">🖼 Show Image</button>' +
         '<a href="#/modelo/' + esc(m.id) + '/' + outro + '">Switch To ' + (outro === 'engine' ? 'Engine' : 'Frame') + '</a>' +
         '<button id="fl-doc">📘 Technical documentation</button>' +
@@ -211,6 +220,12 @@
         if (m.docTecnica) window.open(m.docTecnica, '_blank', 'noopener');
         else FG.toast('Nenhuma documentação técnica cadastrada para este modelo.');
       });
+      // Voltar à tela inicial de busca (reabre o painel recolhido).
+      document.getElementById('fl-back').addEventListener('click', function () {
+        location.hash = '';
+        spBody.classList.remove('hidden');
+        spToggle.textContent = '▾ Search';
+      });
     }, function () {
       fdView.innerHTML = '<p class="muted">Modelo não encontrado.</p>';
     });
@@ -245,6 +260,7 @@
         ' <span class="chev">›</span> ' + esc(s.nome) +
         '<button class="link-action crumb-print" id="fa-print">🖨 Print</button></div>' +
         '<div class="fnd-actions">' +
+        '<a class="btn" href="#/modelo/' + esc(s.modelo.id) + '/' + s.lado + '">‹ VOLTAR</a>' +
         '<button class="btn" id="fa-next"' + (s.vizinhos.proxima ? '' : ' disabled') + '>NEXT CATEGORY</button>' +
         '<a class="btn" href="#/modelo/' + esc(s.modelo.id) + '/' + outro + '">SWITCH TO ' + (outro === 'engine' ? 'ENGINE' : 'FRAME') + '</a>' +
         '</div>' +
@@ -313,6 +329,7 @@
         if (add) FG.toast(add + ' item(ns) enviados à cesta da loja.' + (recusadas ? ' ' + recusadas + ' indisponível(is).' : ''));
         else if (recusadas) FG.toast('Peça(s) indisponível(is) no momento — sem estoque e sem previsão.', 'erro');
         else FG.toast('Marque ao menos uma peça com quantidade.');
+        refreshCart();
       });
 
       /* ---------- diagrama: zoom + hotspots ---------- */
@@ -328,10 +345,14 @@
         slider.value = z;
         canvas.style.width = Math.round(natW * z) + 'px';
       }
+      // Ajuste automático: a imagem INTEIRA cabe no quadro (largura E altura),
+      // qualquer que seja o tamanho enviado pelo admin — o padrão dos diagramas
+      // é 750×1080 (retrato), que sem o limite de altura estouraria o quadro.
       function zoomAjuste() {
         if (!natW) return 0.6;
-        var fit = (viewport.clientWidth - 2) / natW;
-        return Math.max(0.1, Math.min(1.6, Math.round(fit * 20) / 20));
+        var fit = Math.min((viewport.clientWidth - 2) / natW,
+                           (viewport.clientHeight - 2) / natH);
+        return Math.max(0.1, Math.min(1.6, Math.floor(fit * 20) / 20));
       }
 
       function montarHotspots() {
@@ -341,6 +362,7 @@
           el.type = 'button';
           el.setAttribute('data-num', h.linkNumero || '');
           el.title = (h.texto ? h.texto + ' — ' : '') + (h.linkNumero ? 'nº ' + h.linkNumero + ' na imagem' : '');
+          if (h.linkNumero) el.innerHTML = '<span class="hs-n">' + esc(h.linkNumero) + '</span>';
           el.style.left = (h.x / natW * 100) + '%';
           el.style.top = (h.y / natH * 100) + '%';
           el.style.width = (h.w / natW * 100) + '%';

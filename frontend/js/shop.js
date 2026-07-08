@@ -82,6 +82,21 @@
     return catIcon(key || 'engrenagem', w || 95);
   }
 
+  /* clique na foto do produto abre em tamanho grande (lightbox) — listener
+     delegado no container, porque as telas são re-renderizadas a cada rota */
+  view.addEventListener('click', function (e) {
+    var img = e.target.closest('.prod-img img, .prod-page .big-img img');
+    if (!img) return;
+    var back = document.createElement('div');
+    back.className = 'modal-back';
+    back.innerHTML = '<div class="modal modal-img"><header><h3>' + esc(img.alt || 'Foto do produto') + '</h3>' +
+      '<button class="x">×</button></header><div class="modal-body">' +
+      '<img src="' + esc(img.src) + '" alt="' + esc(img.alt || '') + '"></div></div>';
+    document.body.appendChild(back);
+    back.querySelector('.x').addEventListener('click', function () { back.remove(); });
+    back.addEventListener('click', function (ev) { if (ev.target === back) back.remove(); });
+  });
+
   /* =========================================================
      ROTA: grade de categorias
      ========================================================= */

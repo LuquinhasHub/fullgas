@@ -387,8 +387,9 @@ main.shop { padding: 0 18px 70px; }
 .prod-row { display: grid; grid-template-columns: 200px 1fr; gap: 26px; padding: 26px 0; border-bottom: 1px solid #eee; }
 @media (max-width: 700px) { .prod-row { grid-template-columns: 1fr; } }
 .prod-img { background: #fafafa; border: 1px solid #eee; height: 170px; display: flex; align-items: center; justify-content: center; }
-/* foto real do produto (upload/Tiny) dentro dos quadros da loja */
-.prod-img img, .prod-page .big-img img { max-width: 100%; max-height: 100%; object-fit: contain; }
+/* foto real do produto (upload/Tiny) dentro dos quadros da loja —
+   o clique abre a foto ampliada num modal (ver shop.js) */
+.prod-img img, .prod-page .big-img img { max-width: 100%; max-height: 100%; object-fit: contain; cursor: zoom-in; }
 .prod-name { color: var(--red); font-size: 18px; font-weight: 800; text-transform: uppercase; letter-spacing: .5px; }
 .prod-name a { color: var(--red); }
 .prod-desc { margin: 8px 0 16px; color: #333; font-size: 13px; }
@@ -432,6 +433,10 @@ main.finder { padding: 8px 28px 70px; }
 .finder-top { display: flex; align-items: flex-start; justify-content: space-between; padding: 20px 28px 0; }
 .finder-top h1 { font-size: 25px; margin: 0; }
 .finder-top .who { font-size: 13px; font-weight: 700; margin-top: 6px; }
+/* carrinho da loja no topo do finder (mesma cesta da loja) */
+.finder-top-right { display: flex; align-items: center; gap: 22px; }
+.fd-cart { position: relative; font-size: 22px; text-decoration: none; line-height: 1; }
+.fd-cart .cart-n { position: absolute; top: -7px; right: -12px; background: var(--red); color: #fff; border-radius: 9px; font-size: 10px; font-weight: 800; padding: 0 5px; }
 .usage-btn { margin: 14px 28px 0 auto; display: block; }
 
 .search-panel { border: 1px solid #ccc; border-bottom: 6px solid #e6e6e6; margin: 16px 0 22px; padding: 14px 26px 22px; position: relative; }
@@ -511,13 +516,17 @@ main.finder { padding: 8px 28px 70px; }
 .diag-tools .dg-btn:disabled { opacity: .4; cursor: default; }
 .diag-tools input[type="range"] { width: 130px; accent-color: var(--red); }
 .diag-tools .dg-marks { font-size: 10px; color: #555; letter-spacing: .02em; }
-.diag-viewport { overflow: auto; max-height: 560px; min-height: 420px; background: #fff; flex: 1; }
+/* altura FIXA: é a referência do ajuste automático do zoom (finder.js encaixa
+   a imagem inteira — largura e altura — dentro deste quadro) */
+.diag-viewport { overflow: auto; height: 560px; background: #fff; flex: 1; }
 .diag-canvas { position: relative; width: 100%; }
 .diag-canvas img { display: block; width: 100%; height: auto; user-select: none; }
 .diag-vazio { display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 10px; padding: 20px; min-height: 420px; }
 
-/* hotspot: área clicável invisível que "acende" no hover/seleção */
-.hotspot { position: absolute; background: transparent; border: 1px solid transparent; cursor: pointer; padding: 0; border-radius: 3px; }
+/* hotspot: área clicável SEMPRE visível (quadrado amarelo, como no editor do
+   admin) com o nº da peça no canto; "acende" em vermelho no hover/seleção */
+.hotspot { position: absolute; background: rgba(245, 196, 0, .14); border: 2px solid #f5c400; cursor: pointer; padding: 0; border-radius: 3px; }
+.hotspot .hs-n { position: absolute; top: 0; right: 0; font-size: 10px; font-weight: 700; color: #7a6200; background: rgba(255, 255, 255, .85); padding: 0 3px; line-height: 1.3; pointer-events: none; }
 .hotspot:hover, .hotspot.hover { border-color: var(--red); background: rgba(210, 10, 17, .10); }
 .hotspot.on { border-color: var(--red); background: rgba(210, 10, 17, .18); box-shadow: 0 0 0 1px rgba(210, 10, 17, .35); }
 
@@ -533,7 +542,7 @@ main.finder { padding: 8px 28px 70px; }
   /* finder: imprime a tela da seção (lista de peças + diagrama) */
   main.finder, main.finder * { visibility: visible; }
   main.finder .search-panel, main.finder .fnd-actions, main.finder .diag-tools { display: none; }
-  main.finder .diag-viewport { max-height: none; overflow: visible; }
+  main.finder .diag-viewport { height: auto; overflow: visible; }
 }
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; transition: none !important; }
