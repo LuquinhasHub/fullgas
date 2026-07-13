@@ -45,7 +45,10 @@ Loja reflete a mudança                      Loja reflete a mudança imediatamen
 3. **Sincronização em lote**: além do agendamento automático, existe uma tela
    no admin para selecionar produtos (ou "selecionar todos") e disparar uma
    atualização manual imediata contra o Tiny.
-4. **Sentido**: somente Tiny → Fullgas. O Fullgas nunca escreve de volta no Tiny.
+4. **Sentido**: produtos são somente Tiny → Fullgas (o Fullgas nunca edita
+   produto no Tiny). No sentido inverso vão só os **pedidos** — ver a seção
+   "Exportação de pedidos ao Tiny" abaixo (o estoque é compartilhado com o
+   Magento, então cada compra vira um pedido 'aprovado' no Tiny na hora).
 5. **API do Tiny**: usar a **v2** (token simples, sem OAuth2).
 6. **Atualização automática por node-cron, não por webhook**: decisão tomada
    após testes — ver a nota de revisão na visão geral.
@@ -364,6 +367,69 @@ Nova seção no `admin.html` / `admin.js`: **"Produtos do Tiny"**.
 
 ---
 
+## Exportação de pedidos ao Tiny (Fullgas → Tiny)
+
+> Migração `018_tiny_pedidos.sql` · módulo `api/src/tiny-pedidos.js` ·
+> liga/desliga com `TINY_EXPORTAR_PEDIDOS=1` no `.env` (além do `TINY_TOKEN`).
+
+O estoque do Tiny é **compartilhado com outro e-commerce (Magento)**. Para a
+peça vendida no Fullgas sumir de lá o quanto antes — e para o Fullgas não
+vender uma peça que o Magento acabou de levar — a integração ganhou o sentido
+inverso:
+
+### O que acontece na compra (POST /api/pedidos)
+
+1. **Checagem de estoque em tempo real**: antes de baixar o estoque local, a
+   API consulta o saldo REAL no Tiny para cada item da cesta (chamada
+   prioritária: fura a fila do cron) e atualiza o espelho local. Se o Magento
+   acabou de vender a última peça, o cliente é barrado na hora. Tiny fora do
+   ar **não trava a venda** — segue com o estoque local.
+2. O pedido local é criado como sempre (baixa atômica, pré-venda etc.) e, na
+   **mesma transação**, nasce uma linha em `TinyPedidoExport` (escopo
+   `normal`, itens em estoque).
+3. Após o commit, a exportação roda em segundo plano: `pedido.incluir.php`
+   cria o pedido no Tiny (cliente = a concessionária + endereço de entrega;
+   `numero_pedido_ecommerce` = número do pedido Fullgas) e
+   `pedido.alterar.situacao.php` o marca **'aprovado'** — é a aprovação que
+   baixa o estoque no Tiny. ⚠ **Configure a conta do Tiny para "lançar
+   estoque na aprovação do pedido".**
+
+### Pré-venda (backorder)
+
+Itens sem estoque não vão no pedido do Tiny da compra. Quando o admin libera
+o envio do backorder (escopo `backorder` ou ajuste manual da quantidade
+enviada), cada liberação gera um **segundo pedido** no Tiny com o snapshot dos
+itens liberados (`ItensJson`), numerado `NNNN-PV<id>`.
+
+### Falhas, retry e cancelamento
+
+- Tiny fora do ar na compra → a linha fica `erro` e o **cron re-tenta** a cada
+  rodada (até 5 tentativas). O admin acompanha no card "Pedidos exportados ao
+  Tiny" do painel e pode **Reexportar** (zera as tentativas).
+- `TinyPedidoId` é gravado logo após a inclusão: um pedido **nunca** é criado
+  duas vezes no Tiny — se só a aprovação falhar, o retry apenas reaprova.
+- **Reserva pendente**: enquanto uma exportação não chega ao Tiny, o saldo de
+  lá ainda não desconta a venda. Todo espelhamento de estoque (cron, lote e
+  checagem do checkout) subtrai essas reservas — sem isso o cron "devolveria"
+  ao site um estoque já vendido.
+- **Cancelamento local** → o(s) pedido(s) no Tiny são marcados 'cancelado'
+  (devolve o estoque lá). Se a chamada falhar, `UltimoErro` avisa que precisa
+  cancelar manualmente no Tiny.
+
+### Roteiro de teste
+
+1. Com `TINY_EXPORTAR_PEDIDOS=1`, fazer uma compra na loja com item em estoque.
+2. Conferir no Tiny: pedido criado com o número do e-commerce = número Fullgas,
+   situação 'aprovado', estoque baixado.
+3. No admin → Tiny ERP → "Pedidos exportados": linha `enviado` com o nº do Tiny.
+4. Derrubar o token (ou a rede), comprar de novo → linha `erro`; restaurar e
+   esperar o cron (ou Reexportar) → vira `enviado` sem duplicar pedido no Tiny.
+5. Cancelar o pedido no Fullgas → situação 'cancelado' no Tiny, estoque devolvido.
+6. Vender a última unidade de uma peça no Magento e, antes do cron rodar,
+   tentar comprá-la no Fullgas → a checagem em tempo real barra a compra.
+
+---
+
 ## Fora do escopo desta implementação
 
 - **Criação automática de produto**: a sincronização (agendada ou manual) só
@@ -374,8 +440,9 @@ Nova seção no `admin.html` / `admin.js`: **"Produtos do Tiny"**.
 - **Variações/grades**: produtos com variação no Tiny (ex.: tamanho P/M/G)
   entram como produtos simples no Fullgas. Suporte a variações pode entrar
   como melhoria futura.
-- **Escrita no Tiny**: o Fullgas nunca altera dados no Tiny.
-  Pedidos feitos no Fullgas não são enviados pro Tiny (fase futura, se necessário).
+- **Devolução parcial no Tiny**: reduzir a "quantidade enviada" de uma
+  pré-venda já exportada devolve o estoque local, mas o pedido no Tiny fica
+  como estava — ajuste manualmente por lá (o console da API avisa).
 - **Edição manual de produtos Tiny no Fullgas**: removida por decisão de
   negócio. Se precisar reintroduzir no futuro, é o sistema de "override por
   campo" que havia numa versão anterior deste documento.

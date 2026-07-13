@@ -1159,6 +1159,12 @@
 
       '<div class="adm-card"><div class="c-head">Produtos sincronizados com o Tiny</div><div class="c-body" id="ty-sync"></div></div>' +
 
+      '<div class="adm-card"><div class="c-head">Pedidos exportados ao Tiny</div><div class="c-body">' +
+      '<div class="fnd-add-row"><span class="muted" style="font-size:12px;">Cada compra no site vira um pedido aprovado no Tiny ' +
+      '(baixa o estoque lá na hora). Erros ficam em retry automático — ou reexporte aqui.</span>' +
+      '<span class="grow"></span><button class="btn-line btn-mini" id="ty-ped-rl">Atualizar</button></div>' +
+      '<div id="ty-ped" class="muted">Carregando…</div></div></div>' +
+
       '<div class="adm-card"><div class="c-head">Log de sincronização</div><div class="c-body">' +
       '<div class="fnd-add-row"><span class="muted" style="font-size:12px;">Últimos 100 registros (cron = automático, lote = botão, importação).</span>' +
       '<span class="grow"></span><button class="btn-line btn-mini" id="ty-log-rl">Atualizar</button></div>' +
@@ -1284,6 +1290,45 @@
       });
     }
 
+    /* ----- pedidos exportados ao Tiny ----- */
+    function tinyPillExport(st) {
+      var cls = st === 'enviado' ? 'aprovado' : st === 'erro' ? 'bloqueado' : 'Aguardando';
+      var rot = st === 'enviado' ? 'Exportado' : st === 'erro' ? 'Erro' : st === 'cancelado' ? 'Cancelado' : 'Pendente';
+      return '<span class="pill-status ' + cls + '">' + rot + '</span>';
+    }
+    function carregarPedidosTiny() {
+      var el = document.getElementById('ty-ped');
+      FG.tinyPedidos().then(function (rows) {
+        el.innerHTML =
+          '<table class="tbl"><thead><tr><th>Data</th><th>Pedido</th><th>Escopo</th><th>Nº no Tiny</th>' +
+          '<th>Status</th><th>Detalhe</th><th></th></tr></thead><tbody>' +
+          (rows.length ? rows.map(function (x) {
+            return '<tr><td>' + FG.fmtDateTime(x.criadoEm) + '</td><td>' + esc(x.pedido) + '</td>' +
+              '<td>' + (x.escopo === 'backorder' ? 'Pré-venda' : 'Normal') + '</td>' +
+              '<td class="muted">' + esc(x.tinyNumero || '—') + '</td>' +
+              '<td>' + tinyPillExport(x.status) + '</td>' +
+              '<td class="muted" style="max-width:260px;">' + esc(x.erro || '') + '</td>' +
+              '<td>' + (x.status === 'erro'
+                ? '<button class="btn-line btn-mini ty-ped-re" data-id="' + x.id + '">Reexportar</button>' : '') + '</td></tr>';
+          }).join('') : '<tr><td colspan="7" class="muted">Nenhum pedido exportado ainda.</td></tr>') +
+          '</tbody></table>';
+        Array.prototype.forEach.call(el.querySelectorAll('.ty-ped-re'), function (b) {
+          b.addEventListener('click', function () {
+            b.disabled = true; b.textContent = 'Reexportando…';
+            FG.tinyReexportar(b.getAttribute('data-id')).then(function (r) {
+              FG.toast(r.ok !== false && r.status === 'enviado'
+                ? 'Pedido exportado ao Tiny.' : (r.msg || 'Ainda com erro — veja o detalhe.'),
+                r.status === 'enviado' ? undefined : 'erro');
+              carregarPedidosTiny();
+            });
+          });
+        });
+      }, function (e) {
+        el.innerHTML = '<p class="muted">Erro ao carregar: ' + esc((e && e.message) || '') + '</p>';
+      });
+    }
+    document.getElementById('ty-ped-rl').addEventListener('click', carregarPedidosTiny);
+
     /* ----- log ----- */
     function carregarLog() {
       var el = document.getElementById('ty-log');
@@ -1304,6 +1349,7 @@
 
     carregarImportacao(1);
     desenharSync();
+    carregarPedidosTiny();
     carregarLog();
   }
 

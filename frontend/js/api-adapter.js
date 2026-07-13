@@ -406,6 +406,12 @@
   };
   // Últimos registros de sincronização (cron/importação/lote).
   FG.tinyLog = function () { return api('/tiny/log'); };
+  // Exportações de pedido ao Tiny (compra no site → pedido aprovado no Tiny).
+  FG.tinyPedidos = function () { return api('/tiny/pedidos'); };
+  // Força nova tentativa de uma exportação com erro.
+  FG.tinyReexportar = function (exportId) {
+    return req('POST', '/tiny/pedidos/' + exportId + '/reexportar');
+  };
 
   // Expõe helpers para depuração no console.
   FG._api = api;

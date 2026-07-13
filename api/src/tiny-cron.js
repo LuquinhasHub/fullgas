@@ -33,6 +33,7 @@
 import cron from 'node-cron';
 import 'dotenv/config';
 import { sincronizarLote } from './tiny.js';
+import { processarExportacoes } from './tiny-pedidos.js';
 
 // Trava de sobreposição: true enquanto uma rodada está em andamento.
 let rodando = false;
@@ -59,6 +60,12 @@ async function rodada() {
   rodando = true;
   const inicio = Date.now();
   try {
+    // Antes de espelhar produtos, re-tenta exportações de pedido que ficaram
+    // pendentes/com erro (Tiny fora do ar na hora da compra, etc.). Barato
+    // quando não há nada na fila; e precisa vir ANTES: enquanto a exportação
+    // não chega ao Tiny, o espelho desconta a reserva pendente do saldo.
+    await processarExportacoes();
+
     const resultados = await sincronizarLote(null, 'cron');
     const ok = resultados.filter(r => r.status === 'ok').length;
     const erros = resultados.filter(r => r.status === 'erro').length;

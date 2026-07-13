@@ -5,6 +5,8 @@
 //   POST /api/tiny/importar    importa/vincula selecionados (admin)
 //   POST /api/tiny/sync-lote   sincroniza produtos importados (admin)
 //   GET  /api/tiny/log         histórico de sincronizações (admin)
+//   GET  /api/tiny/pedidos     exportações de pedido ao Tiny (admin)
+//   POST /api/tiny/pedidos/:id/reexportar   força nova tentativa (admin)
 //
 // A atualização automática não passa por rota: é o agendamento
 // node-cron (tiny-cron.js), que roda o mesmo lote do sync-lote.
@@ -16,6 +18,7 @@ import {
   listarProdutos, obterProdutoCompleto, aplicarAtualizacao,
   sincronizarLote, registrarLog
 } from '../tiny.js';
+import { exportarPedido } from '../tiny-pedidos.js';
 
 const router = Router();
 
@@ -185,6 +188,50 @@ router.get('/tiny/log', requireAuth, requireAdmin, async (req, res, next) => {
       id: r.LogId, tinyId: r.TinyId, sku: r.Sku, evento: r.Evento,
       status: r.Status, mensagem: r.Mensagem, data: r.CriadoEm
     })));
+  } catch (e) { tratarErro(e, res, next); }
+});
+
+// GET /api/tiny/pedidos?limite=100  (admin) — exportações de pedido ao Tiny,
+// mais recentes primeiro. 'enviado' = criado E aprovado no Tiny; 'erro' fica
+// em retry pelo cron (até o limite de tentativas) ou pelo botão Reexportar.
+router.get('/tiny/pedidos', requireAuth, requireAdmin, async (req, res, next) => {
+  try {
+    const limite = Math.min(500, Math.max(1, Number(req.query.limite) || 100));
+    const rows = await query(
+      `SELECT TOP (@n) te.ExportId, te.Escopo, te.Status, te.TinyPedidoId, te.TinyNumero,
+              te.Tentativas, te.UltimoErro, te.CriadoEm, te.ExportadoEm,
+              p.NumeroPedido
+         FROM dbo.TinyPedidoExport te
+         JOIN dbo.Pedido p ON p.PedidoId = te.PedidoId
+        ORDER BY te.ExportId DESC`,
+      { n: limite }
+    );
+    res.json(rows.map(r => ({
+      id: r.ExportId, pedido: r.NumeroPedido, escopo: r.Escopo, status: r.Status,
+      tinyPedidoId: r.TinyPedidoId, tinyNumero: r.TinyNumero,
+      tentativas: r.Tentativas, erro: r.UltimoErro,
+      criadoEm: r.CriadoEm, exportadoEm: r.ExportadoEm
+    })));
+  } catch (e) { tratarErro(e, res, next); }
+});
+
+// POST /api/tiny/pedidos/:id/reexportar  (admin) — zera as tentativas e tenta
+// na hora. Não recria pedido já incluído no Tiny (só reaprova, se faltou).
+router.post('/tiny/pedidos/:id/reexportar', requireAuth, requireAdmin, async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const rows = await query(
+      'SELECT ExportId, Status FROM dbo.TinyPedidoExport WHERE ExportId = @id', { id }
+    );
+    if (!rows.length) return res.status(404).json({ erro: 'Exportação não encontrada.' });
+    if (rows[0].Status === 'enviado')
+      return res.status(409).json({ erro: 'Este pedido já foi exportado ao Tiny.' });
+    if (rows[0].Status === 'cancelado')
+      return res.status(409).json({ erro: 'Exportação cancelada não pode ser reexportada.' });
+
+    await query('UPDATE dbo.TinyPedidoExport SET Tentativas = 0 WHERE ExportId = @id', { id });
+    const status = await exportarPedido(id);
+    res.json({ ok: status === 'enviado', status });
   } catch (e) { tratarErro(e, res, next); }
 });
 

@@ -3,7 +3,9 @@
 // ------------------------------------------------------------
 // O Tiny é a única fonte de verdade dos produtos importados dele:
 // estoque, preço, nome, descrição e foto são sempre espelho do
-// Tiny (sentido único Tiny → Fullgas, sem override manual).
+// Tiny (Tiny → Fullgas, sem override manual). No sentido inverso
+// vão só os PEDIDOS (tiny-pedidos.js): cada compra no site vira um
+// pedido 'aprovado' no Tiny, baixando o estoque lá na hora.
 //
 // A atualização automática NÃO usa webhook (método descartado —
 // as notificações do Tiny se mostraram pouco confiáveis): é o
@@ -22,18 +24,32 @@ const BASE = 'https://api.tiny.com.br/api2';
 // O Tiny v2 bloqueia o token que passa de ~60 requisições por minuto.
 // Todas as chamadas passam por uma fila que garante o intervalo mínimo —
 // um lote grande fica lento, mas nunca derruba a integração inteira.
+// Chamadas PRIORITÁRIAS (cliente esperando: checagem de estoque do checkout
+// e exportação de pedido) furam a fila — entram na FRENTE do lote do cron,
+// senão o checkout ficaria minutos atrás de uma rodada de sincronização.
 const INTERVALO_MS = 1100;
-let fila = Promise.resolve();
+const filaEspera = [];   // resolvers aguardando a vez de chamar o Tiny
+let despachando = false;
 let ultimaChamadaEm = 0;
 
-function aguardarVez() {
-  const minhaVez = fila.then(async () => {
+function aguardarVez(prioritario = false) {
+  return new Promise(resolve => {
+    if (prioritario) filaEspera.unshift(resolve);
+    else filaEspera.push(resolve);
+    despachar();
+  });
+}
+
+async function despachar() {
+  if (despachando) return;
+  despachando = true;
+  while (filaEspera.length) {
     const espera = ultimaChamadaEm + INTERVALO_MS - Date.now();
     if (espera > 0) await new Promise(r => setTimeout(r, espera));
     ultimaChamadaEm = Date.now();
-  });
-  fila = minhaVez.catch(() => {});
-  return minhaVez;
+    filaEspera.shift()();
+  }
+  despachando = false;
 }
 
 class TinyError extends Error {
@@ -46,10 +62,10 @@ class TinyError extends Error {
 
 // POST na API v2 (o Tiny só aceita POST form-encoded). Lança TinyError
 // quando o retorno vem com status "Erro".
-async function tinyPost(endpoint, params = {}) {
+async function tinyPost(endpoint, params = {}, { prioritario = false } = {}) {
   const token = process.env.TINY_TOKEN;
   if (!token) throw new TinyError('TINY_TOKEN não configurado no .env da API.');
-  await aguardarVez();
+  await aguardarVez(prioritario);
 
   const body = new URLSearchParams({ token, formato: 'json' });
   for (const [k, v] of Object.entries(params)) {
@@ -170,6 +186,56 @@ export async function obterProdutoCompleto(tinyId) {
   };
 }
 
+/* ---------------- pedidos no Tiny (escrita) ---------------- */
+
+// Saldo atual de um produto no Tiny — usado pela checagem em tempo real do
+// checkout (prioritário: o cliente está esperando a resposta).
+export async function obterSaldoAtual(tinyId) {
+  const est = (await tinyPost('produto.obter.estoque.php', { id: tinyId }, { prioritario: true })).produto;
+  return clampEstoque(est?.saldo);
+}
+
+// Inclui um pedido no Tiny (pedido.incluir.php). Recebe o objeto já no formato
+// da API v2 (cliente, itens, numero_pedido_ecommerce...) e devolve { id, numero }
+// do pedido criado lá. O retorno vem em registros[].registro (às vezes objeto).
+export async function incluirPedido(pedido) {
+  const ret = await tinyPost('pedido.incluir.php',
+    { pedido: JSON.stringify({ pedido }) }, { prioritario: true });
+  const regs = ret.registros;
+  const reg = Array.isArray(regs) ? regs[0]?.registro : (regs?.registro ?? regs);
+  if (String(reg?.status).toLowerCase() === 'erro') {
+    const msg = (reg.erros || []).map(e => e?.erro).filter(Boolean).join('; ')
+      || 'Erro não especificado ao incluir o pedido.';
+    throw new TinyError(`Tiny: ${msg}`, reg.codigo_erro);
+  }
+  if (!reg?.id) throw new TinyError('Tiny não devolveu o id do pedido incluído.');
+  return { id: String(reg.id), numero: reg.numero != null ? String(reg.numero) : null };
+}
+
+// Muda a situação de um pedido no Tiny. 'aprovado' baixa o estoque lá (com a
+// conta configurada para lançar estoque na aprovação); 'cancelado' devolve.
+export async function alterarSituacaoPedido(tinyPedidoId, situacao) {
+  await tinyPost('pedido.alterar.situacao.php',
+    { id: tinyPedidoId, situacao }, { prioritario: true });
+}
+
+// Vendas do Fullgas ainda não registradas no Tiny (exportação pendente ou com
+// erro): o saldo do Tiny ainda não desconta essas peças, então quem ESPELHA o
+// estoque precisa subtraí-las — sem isso o cron "devolveria" ao site um estoque
+// que já foi vendido aqui. Cobre o escopo 'normal' (itens baixados na criação
+// do pedido); a janela do 'backorder' dura segundos e ficou de fora de propósito.
+export async function reservaPendente(produtoId) {
+  const rows = await query(
+    `SELECT ISNULL(SUM(pi.Quantidade), 0) AS Reserva
+       FROM dbo.PedidoItem pi
+       JOIN dbo.TinyPedidoExport te ON te.PedidoId = pi.PedidoId
+      WHERE te.Escopo = 'normal' AND te.Status IN ('pendente', 'erro')
+        AND pi.EmBackorder = 0 AND pi.ProdutoId = @pid`,
+    { pid: produtoId }
+  );
+  return rows[0]?.Reserva || 0;
+}
+
 /* ---------------- gravação no banco ---------------- */
 
 export async function registrarLog(tinyId, sku, evento, status, mensagem) {
@@ -205,7 +271,13 @@ export async function aplicarAtualizacao(tinyId, dados, evento) {
 
   const sets = ['TinySincronizadoEm = SYSUTCDATETIME()', 'AtualizadoEm = SYSUTCDATETIME()'];
   const params = { pid: p.ProdutoId };
-  if (dados.estoque !== undefined) { sets.push('Estoque = @est'); params.est = clampEstoque(dados.estoque); }
+  if (dados.estoque !== undefined) {
+    // Saldo do Tiny menos as vendas locais que ainda não chegaram lá
+    // (exportação pendente/erro) — ver reservaPendente.
+    const reserva = await reservaPendente(p.ProdutoId);
+    sets.push('Estoque = @est');
+    params.est = Math.max(0, clampEstoque(dados.estoque) - reserva);
+  }
   if (dados.preco !== undefined) { sets.push('Preco = @preco'); params.preco = Math.max(0, Number(dados.preco) || 0); }
   if (dados.nome !== undefined && dados.nome) { sets.push('Nome = @nome'); params.nome = String(dados.nome).slice(0, 200); }
   if (dados.descricao !== undefined) { sets.push('Descricao = @desc'); params.desc = dados.descricao || null; }

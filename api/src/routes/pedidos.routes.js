@@ -8,6 +8,10 @@
 import { Router } from 'express';
 import { query, getPool, sql } from '../db.js';
 import { requireAuth, requireAdmin } from '../auth.js';
+import {
+  exportacaoLigada, atualizarEstoqueCesta, inserirExportacao,
+  processarExportacoes, cancelarExportacoesDoPedido
+} from '../tiny-pedidos.js';
 
 const router = Router();
 
@@ -262,6 +266,13 @@ router.post('/pedidos', requireAuth, async (req, res, next) => {
     merged.set(skuItem, (merged.get(skuItem) || 0) + qtd);
   }
 
+  // O estoque é compartilhado com outro e-commerce via Tiny: antes de baixar o
+  // estoque local, consulta o saldo REAL no Tiny para cada item da cesta (se a
+  // integração estiver ligada). Se o Magento acabou de vender a peça, o cliente
+  // é barrado aqui — e não descobre depois. Tiny fora do ar não trava a venda.
+  try { await atualizarEstoqueCesta([...merged.keys()]); }
+  catch (e) { console.warn('⚠ Checagem de estoque no Tiny indisponível:', e.message); }
+
   const pool = await getPool();
   const tx = new sql.Transaction(pool);
   try {
@@ -365,7 +376,18 @@ router.post('/pedidos', requireAuth, async (req, res, next) => {
     // pré-venda são acompanhadas pelo rastreador de envio (sem cobrança própria).
     await gerarFaturaPedido(tx, pedidoId, req.user.empresaId, total);
 
+    // Agenda a exportação ao Tiny na MESMA transação: ou o pedido nasce com a
+    // exportação agendada, ou nada. Só os itens em estoque — a pré-venda vira
+    // exportação própria quando o admin liberar o envio (escopo 'backorder').
+    if (exportacaoLigada() && itensSnap.some(i => !i.backorder)) {
+      await inserirExportacao(tx, pedidoId, 'normal');
+    }
+
     await tx.commit();
+
+    // Fire-and-forget: cria e aprova o pedido no Tiny (baixa o estoque lá).
+    // Falha não afeta a resposta — a linha fica 'erro' e o cron re-tenta.
+    processarExportacoes();
 
     const emp = await query('SELECT RazaoSocial FROM dbo.Empresa WHERE EmpresaId = @id', { id: req.user.empresaId });
     const itensEmBackorder = itensSnap.filter(i => i.backorder)
@@ -461,6 +483,10 @@ router.put('/pedidos/:numero/status', requireAuth, requireAdmin, async (req, res
         .query("UPDATE dbo.Pedido SET Status = 'Cancelado', AtualizadoEm = SYSUTCDATETIME() WHERE PedidoId = @pid");
 
       await tx.commit();
+
+      // Cancela também no Tiny (devolve o estoque lá). Fire-and-forget.
+      cancelarExportacoesDoPedido(ped.PedidoId);
+
       return res.json({ ok: true, status: 'Cancelado' });
     }
 
@@ -475,12 +501,14 @@ router.put('/pedidos/:numero/status', requireAuth, requireAdmin, async (req, res
         .input('pid', sql.Int, ped.PedidoId)
         .input('alvo', sql.Bit, alvoBackorder)
         .query(`SELECT pi.PedidoItemId, pi.ProdutoId, pi.Quantidade,
-                       pi.QuantidadeEnviada, pi.EmBackorder
+                       pi.QuantidadeEnviada, pi.EmBackorder,
+                       pi.Sku, pi.NomeProduto, pi.PrecoUnitario
                   FROM dbo.PedidoItem pi
                  WHERE pi.PedidoId = @pid AND pi.Quantidade > pi.QuantidadeEnviada
                    AND pi.EmBackorder = @alvo`);
 
       let enviados = 0;
+      const liberados = []; // snapshot da pré-venda liberada agora (p/ Tiny)
       for (const it of cand.recordset) {
         const restante = it.Quantidade - it.QuantidadeEnviada;
         if (it.EmBackorder) {
@@ -491,6 +519,7 @@ router.put('/pedidos/:numero/status', requireAuth, requireAdmin, async (req, res
             .query(`UPDATE dbo.Produto SET Estoque = Estoque - @rem, AtualizadoEm = SYSUTCDATETIME()
                      WHERE ProdutoId = @prod AND Estoque >= @rem`);
           if (!dec.rowsAffected[0]) continue; // sem estoque: fica pendente
+          liberados.push({ sku: it.Sku, nome: it.NomeProduto, preco: Number(it.PrecoUnitario), qtd: restante });
         }
         await new sql.Request(tx)
           .input('iid', sql.Int, it.PedidoItemId)
@@ -548,7 +577,14 @@ router.put('/pedidos/:numero/status', requireAuth, requireAdmin, async (req, res
         .input('st', sql.VarChar(14), novoStatus)
         .query('UPDATE dbo.Pedido SET Status = @st, AtualizadoEm = SYSUTCDATETIME() WHERE PedidoId = @pid');
 
+      // Pré-venda liberada agora vira um pedido próprio no Tiny (baixa o
+      // estoque lá): snapshot do que saiu NESTA liberação, na mesma transação.
+      if (exportacaoLigada() && liberados.length) {
+        await inserirExportacao(tx, ped.PedidoId, 'backorder', liberados);
+      }
+
       await tx.commit();
+      if (liberados.length) processarExportacoes(); // fire-and-forget
       return res.json({
         ok: true, status: novoStatus, parcial: faltam, entrega: numeroEntrega
       });
@@ -584,7 +620,8 @@ router.put('/pedidos/:numero/itens/:itemId/enviado', requireAuth, requireAdmin, 
     const cur = await new sql.Request(tx)
       .input('num', sql.VarChar(20), req.params.numero)
       .input('iid', sql.Int, Number(req.params.itemId))
-      .query(`SELECT pi.PedidoItemId, pi.ProdutoId, pi.Quantidade, pi.QuantidadeEnviada, pi.EmBackorder
+      .query(`SELECT pi.PedidoId, pi.PedidoItemId, pi.ProdutoId, pi.Quantidade, pi.QuantidadeEnviada,
+                     pi.EmBackorder, pi.Sku, pi.NomeProduto, pi.PrecoUnitario
                 FROM dbo.PedidoItem pi
                 JOIN dbo.Pedido p ON p.PedidoId = pi.PedidoId
                WHERE p.NumeroPedido = @num AND pi.PedidoItemId = @iid`);
@@ -617,7 +654,19 @@ router.put('/pedidos/:numero/itens/:itemId/enviado', requireAuth, requireAdmin, 
       .input('q', sql.Int, qtd)
       .query('UPDATE dbo.PedidoItem SET QuantidadeEnviada = @q WHERE PedidoItemId = @iid');
 
+    // Aumento em item de pré-venda consumiu estoque local: espelha no Tiny
+    // como liberação (pedido próprio lá). Redução não é desfeita no Tiny —
+    // ajuste manualmente por lá se a liberação já tiver sido exportada.
+    if (exportacaoLigada() && it.EmBackorder && delta > 0) {
+      await inserirExportacao(tx, it.PedidoId, 'backorder',
+        [{ sku: it.Sku, nome: it.NomeProduto, preco: Number(it.PrecoUnitario), qtd: delta }]);
+    } else if (it.EmBackorder && delta < 0) {
+      console.warn(`⚠ Quantidade enviada reduzida no item ${it.Sku} (pedido ${req.params.numero}): ` +
+        'se a liberação já foi exportada ao Tiny, ajuste o pedido lá manualmente.');
+    }
+
     await tx.commit();
+    if (exportacaoLigada() && it.EmBackorder && delta > 0) processarExportacoes();
     res.json({ ok: true, itemId: it.PedidoItemId, qtdEnviada: qtd });
   } catch (e) {
     try { await tx.rollback(); } catch { /* já desfeita */ }
