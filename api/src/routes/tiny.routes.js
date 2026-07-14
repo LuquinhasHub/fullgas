@@ -174,15 +174,20 @@ router.post('/tiny/sync-lote', requireAuth, requireAdmin, async (req, res, next)
   } catch (e) { tratarErro(e, res, next); }
 });
 
-// GET /api/tiny/log?limite=100  (admin) — últimos registros de sincronização
-// (evento 'cron' = rodada automática, 'lote' = botão do admin, 'importacao').
+// GET /api/tiny/log?limite=100&sku=  (admin) — últimos registros de
+// sincronização (evento 'cron' = rodada automática, 'lote' = botão do admin,
+// 'importacao'). Com ?sku=, só os registros daquele produto — é o que o
+// editor de produto do catálogo exibe (o log saiu da tela Tiny ERP).
 router.get('/tiny/log', requireAuth, requireAdmin, async (req, res, next) => {
   try {
     const limite = Math.min(500, Math.max(1, Number(req.query.limite) || 100));
+    const sku = String(req.query.sku || '').trim();
     const rows = await query(
       `SELECT TOP (@n) LogId, TinyId, Sku, Evento, Status, Mensagem, CriadoEm
-         FROM dbo.TinySyncLog ORDER BY LogId DESC`,
-      { n: limite }
+         FROM dbo.TinySyncLog
+        WHERE (@sku = '' OR Sku = @sku)
+        ORDER BY LogId DESC`,
+      { n: limite, sku }
     );
     res.json(rows.map(r => ({
       id: r.LogId, tinyId: r.TinyId, sku: r.Sku, evento: r.Evento,
@@ -191,20 +196,23 @@ router.get('/tiny/log', requireAuth, requireAdmin, async (req, res, next) => {
   } catch (e) { tratarErro(e, res, next); }
 });
 
-// GET /api/tiny/pedidos?limite=100  (admin) — exportações de pedido ao Tiny,
-// mais recentes primeiro. 'enviado' = criado E aprovado no Tiny; 'erro' fica
-// em retry pelo cron (até o limite de tentativas) ou pelo botão Reexportar.
+// GET /api/tiny/pedidos?pedido=<numero>  (admin) — exportações de pedido ao
+// Tiny, mais recentes primeiro. Com ?pedido=, só as daquele pedido — é o que
+// o detalhe da venda no admin exibe. 'enviado' = criado E aprovado no Tiny;
+// 'erro' fica em retry pelo cron (até o limite) ou pelo botão Reexportar.
 router.get('/tiny/pedidos', requireAuth, requireAdmin, async (req, res, next) => {
   try {
     const limite = Math.min(500, Math.max(1, Number(req.query.limite) || 100));
+    const pedido = String(req.query.pedido || '').trim();
     const rows = await query(
       `SELECT TOP (@n) te.ExportId, te.Escopo, te.Status, te.TinyPedidoId, te.TinyNumero,
               te.Tentativas, te.UltimoErro, te.CriadoEm, te.ExportadoEm,
               p.NumeroPedido
          FROM dbo.TinyPedidoExport te
          JOIN dbo.Pedido p ON p.PedidoId = te.PedidoId
+        WHERE (@ped = '' OR p.NumeroPedido = @ped)
         ORDER BY te.ExportId DESC`,
-      { n: limite }
+      { n: limite, ped: pedido }
     );
     res.json(rows.map(r => ({
       id: r.ExportId, pedido: r.NumeroPedido, escopo: r.Escopo, status: r.Status,

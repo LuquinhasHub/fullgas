@@ -401,13 +401,12 @@
       if (!o) return;
       var backHTML = (o.itensEmBackorder && o.itensEmBackorder.length) ?
         '<div class="backorder-aviso" style="max-width:540px;margin:14px auto;text-align:left;">' +
-        '<b>⚠ Itens em pré-venda:</b> serão enviados quando o estoque for reposto, ' +
-        'em uma entrega/fatura separada.<ul>' +
+        '<b>⚠ Itens em pré-venda:</b> serão enviados quando o estoque for reposto.<ul>' +
         o.itensEmBackorder.map(function (b) {
           return '<li>' + esc(b.nome) + ' <span class="muted">(' + b.sku + ')</span> — ' + b.quantidade + ' un.</li>';
         }).join('') + '</ul></div>' : '';
       view.innerHTML = '<div class="empty-box"><h2 style="color:var(--green);">✔ Pedido enviado!</h2>' +
-        '<p>Número do pedido: <b>' + o.cx + ' / ' + o.id + '</b></p>' +
+        '<p>Número do pedido: <b>' + o.id + '</b></p>' +
         backHTML +
         '<p class="muted">Acompanhe o andamento no histórico de pedidos.</p>' +
         '<a class="btn red" href="#/pedidos">Ver histórico</a> <a class="btn" href="#/">Continuar comprando</a></div>';
@@ -415,65 +414,41 @@
   }
 
   /* =========================================================
-     ROTA: históricos (pedidos / entregas)
+     ROTA: histórico de pedidos (entregas saíram do fluxo —
+     não há módulo de entrega no projeto)
      ========================================================= */
-  var histAba = 'order';
   var verEmpresa = false;
 
   function renderHistorico() {
-    setBand(histAba === 'order' ? 'Order History' : 'Delivery History', [{ nome: 'Histórico' }]);
-    var html = '<div class="hist-tabs">' +
-      '<button class="' + (histAba === 'order' ? 'on' : '') + '" data-t="order">ORDER HISTORY</button>' +
-      '<button class="' + (histAba === 'delivery' ? 'on' : '') + '" data-t="delivery">DELIVERY HISTORY</button></div>' +
-      '<div id="hist-body"></div>';
-    view.innerHTML = html;
-    Array.prototype.forEach.call(view.querySelectorAll('.hist-tabs button'), function (b) {
-      b.addEventListener('click', function () { histAba = b.getAttribute('data-t'); renderHistorico(); });
-    });
+    setBand('Order History', [{ nome: 'Histórico' }]);
+    view.innerHTML = '<div id="hist-body"></div>';
     var body = document.getElementById('hist-body');
 
-    if (histAba === 'order') {
-      var orders = FG.all('orders').filter(function (o) {
-        return verEmpresa ? o.empresa === sess.empresa : o.usuario === sess.email;
-      });
-      if (sess.papel === 'admin' && !orders.length && !verEmpresa) orders = FG.all('orders');
-      if (!orders.length) {
-        body.innerHTML = '<div class="empty-box">No Orders Found<br>' +
-          '<button class="btn red" id="ho-all">Show all orders of company</button></div>';
-        document.getElementById('ho-all').addEventListener('click', function () { verEmpresa = true; renderHistorico(); });
-        return;
-      }
-      body.innerHTML =
-        '<p class="right muted" style="font-size:11px;">SHOW ALL ORDERS OF COMPANY ' +
-        '<input type="checkbox" id="ho-chk"' + (verEmpresa ? ' checked' : '') + '></p>' +
-        orders.map(function (o) {
-          return '<div class="order-card"><div class="oc-head">' +
-            '<span><b>' + o.cx + ' / ' + o.id + '</b></span>' +
-            '<span>' + FG.fmtDateTime(o.data) + '</span>' +
-            '<span><span class="pill-status ' + esc(o.status) + '">' + esc(o.status) + '</span></span>' +
-            '<span style="margin-left:auto;"><b>' + FG.fmtMoney(o.total) + '</b></span></div>' +
-            '<div class="oc-items">' + o.itens.map(function (it) {
-              return '<div>' + it.qtd + '× <a href="#/produto/' + it.artigo + '">' + esc(it.nome) + '</a> ' +
-                '<span class="muted">(' + it.artigo + ')</span> — ' + FG.fmtMoney(it.preco * it.qtd) + '</div>';
-            }).join('') + '</div></div>';
-        }).join('');
-      document.getElementById('ho-chk').addEventListener('change', function (e) { verEmpresa = e.target.checked; renderHistorico(); });
+    var orders = FG.all('orders').filter(function (o) {
+      return verEmpresa ? o.empresa === sess.empresa : o.usuario === sess.email;
+    });
+    if (sess.papel === 'admin' && !orders.length && !verEmpresa) orders = FG.all('orders');
+    if (!orders.length) {
+      body.innerHTML = '<div class="empty-box">No Orders Found<br>' +
+        '<button class="btn red" id="ho-all">Show all orders of company</button></div>';
+      document.getElementById('ho-all').addEventListener('click', function () { verEmpresa = true; renderHistorico(); });
       return;
     }
-
-    /* delivery history */
-    var dels = FG.all('deliveries');
-    body.innerHTML = dels.length ?
-      '<table class="table"><thead><tr><th>Delivery Number</th><th>Delivery Date</th><th>Tracking Number</th>' +
-      '<th>Order Number(s)</th><th>Invoice Date</th><th>Invoice Number</th></tr></thead><tbody>' +
-      dels.map(function (d) {
-        return '<tr><td>' + d.numero + '</td><td>' + FG.fmtDate(d.data) + '</td>' +
-          '<td>' + d.rastreios.join('<br>') + '</td>' +
-          '<td style="color:var(--red);font-weight:600;">' + d.pedidos.map(esc).join('<br>') + '</td>' +
-          '<td>' + FG.fmtDate(d.dataFatura) + '</td>' +
-          '<td><a href="portal.html#financeiro">' + d.fatura + '</a></td></tr>';
-      }).join('') + '</tbody></table>'
-      : '<div class="empty-box">Nenhuma entrega registrada.</div>';
+    body.innerHTML =
+      '<p class="right muted" style="font-size:11px;">SHOW ALL ORDERS OF COMPANY ' +
+      '<input type="checkbox" id="ho-chk"' + (verEmpresa ? ' checked' : '') + '></p>' +
+      orders.map(function (o) {
+        return '<div class="order-card"><div class="oc-head">' +
+          '<span><b>' + o.id + '</b></span>' +
+          '<span>' + FG.fmtDateTime(o.data) + '</span>' +
+          '<span><span class="pill-status ' + esc(o.status) + '">' + esc(o.status) + '</span></span>' +
+          '<span style="margin-left:auto;"><b>' + FG.fmtMoney(o.total) + '</b></span></div>' +
+          '<div class="oc-items">' + o.itens.map(function (it) {
+            return '<div>' + it.qtd + '× <a href="#/produto/' + it.artigo + '">' + esc(it.nome) + '</a> ' +
+              '<span class="muted">(' + it.artigo + ')</span> — ' + FG.fmtMoney(it.preco * it.qtd) + '</div>';
+          }).join('') + '</div></div>';
+      }).join('');
+    document.getElementById('ho-chk').addEventListener('change', function (e) { verEmpresa = e.target.checked; renderHistorico(); });
   }
 
   /* =========================================================

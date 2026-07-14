@@ -199,8 +199,8 @@
     return putPedido('/pedidos/' + encodeURIComponent(id) + '/status', { status: status });
   };
 
-  // Detalhe rico do pedido (itens com qtdEnviada/backorder/estoque, entregas,
-  // faturas e progresso). Promise<detalhe|null>.
+  // Detalhe rico do pedido (itens com qtdEnviada/backorder/estoque, faturas
+  // e progresso). Promise<detalhe|null>.
   FG.pedidoDetalhe = function (numero) {
     return apiGet('/pedidos/' + encodeURIComponent(numero));
   };
@@ -404,10 +404,15 @@
       return recarregarProdutos().then(function () { return r; });
     });
   };
-  // Últimos registros de sincronização (cron/importação/lote).
-  FG.tinyLog = function () { return api('/tiny/log'); };
-  // Exportações de pedido ao Tiny (compra no site → pedido aprovado no Tiny).
-  FG.tinyPedidos = function () { return api('/tiny/pedidos'); };
+  // Registros de sincronização de UM produto (o log fica no editor do produto).
+  FG.tinyLog = function (sku, limite) {
+    return api('/tiny/log?limite=' + (limite || 20) +
+      (sku ? '&sku=' + encodeURIComponent(sku) : ''));
+  };
+  // Exportações ao Tiny de UM pedido (exibidas no detalhe da venda no admin).
+  FG.tinyPedidos = function (pedido) {
+    return api('/tiny/pedidos' + (pedido ? '?pedido=' + encodeURIComponent(pedido) : ''));
+  };
   // Força nova tentativa de uma exportação com erro.
   FG.tinyReexportar = function (exportId) {
     return req('POST', '/tiny/pedidos/' + exportId + '/reexportar');

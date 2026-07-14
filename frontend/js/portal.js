@@ -620,7 +620,6 @@
       '<aside class="side-nav"><h2>Gestão de pedidos</h2>' +
       '<div class="group-title">Cestas</div>' + nav('Cesta atual') +
       '<div class="group-title">Pedidos</div>' + nav('Ordens pendentes') + nav('Arquivado') +
-      '<div class="group-title">Entregas</div>' + nav('Entregas em processo') + nav('Entregas arquivadas') +
       '</aside>' +
       '<section id="ped-body"></section></div>';
     view.innerHTML = html;
@@ -638,27 +637,6 @@
       body.innerHTML = '<div class="empty-box">' +
         (n ? 'Sua cesta atual tem <b>' + n + '</b> item(ns) aguardando envio.' : 'Sua cesta está vazia.') +
         '<br><a class="btn red" href="loja.html#/carrinho">Abrir cesta na loja</a></div>';
-      return;
-    }
-
-    if (pedFiltro.indexOf('Entregas') === 0) {
-      var arq = pedFiltro === 'Entregas arquivadas';
-      var dels = FG.all('deliveries').filter(function (d, i) { return arq ? i >= 2 : i < 2; });
-      body.innerHTML =
-        '<div class="toolbar"><button class="tool" id="pd-csv">📄 Export. p/ Excel</button></div>' +
-        '<table class="table"><thead><tr><th class="filt">N° da entrega</th><th class="filt">Data</th>' +
-        '<th>Rastreio(s)</th><th>Pedido(s)</th><th>Fatura</th></tr></thead><tbody>' +
-        (dels.length ? dels.map(function (d) {
-          return '<tr><td>' + d.numero + '</td><td>' + FG.fmtDate(d.data) + '</td>' +
-            '<td>' + d.rastreios.join('<br>') + '</td><td>' + d.pedidos.map(esc).join('<br>') + '</td>' +
-            '<td><a href="#financeiro">' + d.fatura + '</a></td></tr>';
-        }).join('') : '<tr><td colspan="5" class="muted">Vazio</td></tr>') +
-        '</tbody></table>';
-      document.getElementById('pd-csv').addEventListener('click', function () {
-        var linhas = [['N° entrega', 'Data', 'Rastreios', 'Pedidos', 'Fatura']];
-        dels.forEach(function (d) { linhas.push([d.numero, FG.fmtDate(d.data), d.rastreios.join(' '), d.pedidos.join(' | '), d.fatura]); });
-        FG.exportCSV('entregas', linhas);
-      });
       return;
     }
 
@@ -680,7 +658,7 @@
         var statusCol = '<span class="pill-status ' + esc(o.status) + '">' + esc(o.status) + '</span>' +
           (o.progresso && o.progresso.parcial ? ' <span class="pill-status Parcial">Parcial</span>' : '') +
           (o.temBackorder ? '<br><span class="muted" style="font-size:11px;">contém pré-venda</span>' : '');
-        return '<tr><td><a href="#pedido/' + esc(o.id) + '">' + o.cx + ' / ' + o.id + '</a>' +
+        return '<tr><td><a href="#pedido/' + esc(o.id) + '">' + esc(o.id) + '</a>' +
           ' <button class="link-action pd-open" data-i="' + i + '" title="Ver itens">⤢</button>' +
           '<div class="pd-itens hidden" data-i="' + i + '">' +
           o.itens.map(function (it) { return '<div class="muted">' + it.qtd + '× ' + esc(it.nome) + ' (' + it.artigo + ')</div>'; }).join('') +
@@ -700,8 +678,8 @@
       Array.prototype.forEach.call(body.querySelectorAll('.pd-itens'), function (d) { d.classList.remove('hidden'); });
     });
     document.getElementById('pd-csv').addEventListener('click', function () {
-      var linhas = [['Pedido', 'CX', 'Data', 'Status', 'Total']];
-      meus.forEach(function (o) { linhas.push([o.id, o.cx, FG.fmtDateTime(o.data), o.status, o.total.toFixed(2)]); });
+      var linhas = [['Pedido', 'Data', 'Status', 'Total']];
+      meus.forEach(function (o) { linhas.push([o.id, FG.fmtDateTime(o.data), o.status, o.total.toFixed(2)]); });
       FG.exportCSV('pedidos', linhas);
     });
   }
@@ -742,7 +720,7 @@
 
     var html =
       '<div style="margin-bottom:12px;"><a class="btn" href="#pedidos">← Voltar para Pedidos</a></div>' +
-      '<div class="ped-det-head"><h2 style="margin:0;">Pedido ' + esc(d.cx) + ' / ' + esc(d.id) + '</h2>' +
+      '<div class="ped-det-head"><h2 style="margin:0;">Pedido ' + esc(d.id) + '</h2>' +
       '<span class="pill-status ' + esc(d.status) + '">' + esc(d.status) + '</span>' +
       (pg.parcial ? ' <span class="pill-status Parcial">Parcial</span>' : '') + '</div>' +
       '<p class="muted">' + FG.fmtDateTime(d.data) + ' · ' + esc(d.empresa) + ' · Total ' + FG.fmtMoney(d.total) + '</p>' +
@@ -754,20 +732,17 @@
 
     if (preVenda.length)
       html += '<h3 class="sec-title">Itens em pré-venda</h3>' +
-        '<div class="backorder-aviso">Estes itens serão enviados quando o estoque for reposto. ' +
-        'Eles farão parte de uma entrega separada.</div>' + tabelaItens(preVenda);
+        '<div class="backorder-aviso">Estes itens serão enviados quando o estoque for reposto.</div>' +
+        tabelaItens(preVenda);
 
-    if (d.entregas.length)
-      html += '<h3 class="sec-title">Entregas e faturas</h3>' +
-        '<table class="table"><thead><tr><th>Entrega</th><th>Data</th><th>Status</th>' +
-        '<th>Rastreio(s)</th><th>Fatura</th><th class="right">Valor</th></tr></thead><tbody>' +
-        d.entregas.map(function (e) {
-          return '<tr><td>' + esc(e.numero) + '</td><td>' + (e.data ? FG.fmtDate(e.data) : '—') + '</td>' +
-            '<td><span class="pill-status ' + esc(e.status) + '">' + esc(e.status) + '</span></td>' +
-            '<td>' + (e.rastreios.join('<br>') || '—') + '</td>' +
-            '<td>' + (e.fatura || '—') +
-              (e.faturaStatus ? ' <span class="pill-status ' + esc(e.faturaStatus) + '">' + esc(e.faturaStatus) + '</span>' : '') + '</td>' +
-            '<td class="right">' + (e.faturaValor != null ? FG.fmtMoney(e.faturaValor) : '—') + '</td></tr>';
+    if (d.faturas && d.faturas.length)
+      html += '<h3 class="sec-title">Faturas</h3>' +
+        '<table class="table"><thead><tr><th>Fatura</th><th>Data</th><th>Status</th>' +
+        '<th class="right">Valor</th></tr></thead><tbody>' +
+        d.faturas.map(function (f) {
+          return '<tr><td>' + esc(f.numero) + '</td><td>' + (f.data ? FG.fmtDate(f.data) : '—') + '</td>' +
+            '<td>' + (f.status ? '<span class="pill-status ' + esc(f.status) + '">' + esc(f.status) + '</span>' : '—') + '</td>' +
+            '<td class="right">' + (f.valor != null ? FG.fmtMoney(f.valor) : '—') + '</td></tr>';
         }).join('') + '</tbody></table>';
 
     view.innerHTML = html;
@@ -947,7 +922,7 @@
           return '<tr><td>' + esc(x.it.artigo) + '</td><td>' + esc(x.it.nome) + '</td>' +
             '<td class="right">' + x.it.qtd + '</td>' +
             '<td>' + (x.o.data ? FG.fmtDate(x.o.data) : '—') + '</td>' +
-            '<td><a href="#pedido/' + esc(x.o.id) + '">' + esc(x.o.cx) + '</a></td>' +
+            '<td><a href="#pedido/' + esc(x.o.id) + '">' + esc(x.o.id) + '</a></td>' +
             '<td>' + pill + '</td></tr>';
         }).join('') + '</tbody></table>';
     }
