@@ -656,6 +656,7 @@
       '<th class="filt">Criado</th><th>Status</th><th class="right">Total</th></tr></thead><tbody id="pd-rows">' +
       (meus.length ? meus.map(function (o, i) {
         var statusCol = '<span class="pill-status ' + esc(o.status) + '">' + esc(o.status) + '</span>' +
+          (o.garantia ? ' <span class="pill-status Garantia">Garantia</span>' : '') +
           (o.progresso && o.progresso.parcial ? ' <span class="pill-status Parcial">Parcial</span>' : '') +
           (o.temBackorder ? '<br><span class="muted" style="font-size:11px;">contém pré-venda</span>' : '');
         return '<tr><td><a href="#pedido/' + esc(o.id) + '">' + esc(o.id) + '</a>' +
@@ -722,6 +723,7 @@
       '<div style="margin-bottom:12px;"><a class="btn" href="#pedidos">← Voltar para Pedidos</a></div>' +
       '<div class="ped-det-head"><h2 style="margin:0;">Pedido ' + esc(d.id) + '</h2>' +
       '<span class="pill-status ' + esc(d.status) + '">' + esc(d.status) + '</span>' +
+      (d.garantia ? ' <span class="pill-status Garantia">Garantia — reposição sem cobrança</span>' : '') +
       (pg.parcial ? ' <span class="pill-status Parcial">Parcial</span>' : '') + '</div>' +
       '<p class="muted">' + FG.fmtDateTime(d.data) + ' · ' + esc(d.empresa) + ' · Total ' + FG.fmtMoney(d.total) + '</p>' +
       '<div class="prog-wrap"><div class="prog-bar"><div class="prog-fill" style="width:' + pg.pct + '%;"></div></div>' +
@@ -805,6 +807,40 @@
     });
   }
 
+  // Modal (SÓ ADMIN) para transferir o chassi para outra concessionária,
+  // digitando o nome dela (razão social ou nome fantasia).
+  function modalTransferir(v, onDone) {
+    var back = document.createElement('div');
+    back.className = 'modal-back';
+    back.innerHTML =
+      '<div class="modal"><header><h3>Transferir revendedor — ' + esc(v.niv) + '</h3><button class="x">×</button></header>' +
+      '<div class="modal-body">' +
+      '<p class="muted" style="margin-top:0;">O chassi passa a pertencer à concessionária informada. ' +
+      'Digite a razão social (ou nome fantasia) exata.</p>' +
+      '<div class="field"><label>Concessionária de destino *</label>' +
+      '<input id="tf-emp" type="text" placeholder="Ex.: POWER MOTOS LTDA" autocomplete="off"></div>' +
+      '</div>' +
+      '<div class="modal-foot"><button class="btn-line" id="tf-canc">Cancelar</button>' +
+      '<button class="btn red" id="tf-ok">Transferir</button></div></div>';
+    document.body.appendChild(back);
+
+    function fechar() { back.remove(); }
+    back.querySelector('.x').addEventListener('click', fechar);
+    back.querySelector('#tf-canc').addEventListener('click', fechar);
+    back.addEventListener('click', function (e) { if (e.target === back) fechar(); });
+    document.getElementById('tf-emp').focus();
+
+    document.getElementById('tf-ok').addEventListener('click', async function () {
+      var nome = document.getElementById('tf-emp').value.trim();
+      if (!nome) { FG.toast('Informe o nome da concessionária.'); return; }
+      var r = await FG.transferirVeiculo(v.niv, nome);
+      if (!r.ok) { FG.toast(r.msg || 'Não foi possível transferir.', 'erro'); return; }
+      fechar();
+      FG.toast('Veículo transferido para ' + esc(r.empresa || nome) + '.');
+      if (onDone) onDone();
+    });
+  }
+
   function renderAcoes(nivBusca) {
     setCrumb(['Ações do veículo']); setTabOn('acoes');
     view.innerHTML =
@@ -840,12 +876,15 @@
         '<div style="display:flex;gap:10px;flex-wrap:wrap;">' +
         (v.status === 'Disponível' ? '<button class="btn red" id="av-venda">Registrar venda</button>' : '') +
         (!v.garantia ? '<button class="btn" id="av-gar">Ativar garantia</button>' : '') +
+        (sess.papel === 'admin' ? '<button class="btn" id="av-transf">Transferir revendedor</button>' : '') +
         '<a class="btn" href="#reivindicacoes">Criar reivindicação</a>' +
         '<a class="btn" href="finder.html">Abrir no Parts Finder</a>' +
         '</div></div>';
 
       var bv = document.getElementById('av-venda');
       if (bv) bv.addEventListener('click', function () { modalVenda(v, buscar); });
+      var bt = document.getElementById('av-transf');
+      if (bt) bt.addEventListener('click', function () { modalTransferir(v, buscar); });
       var bg = document.getElementById('av-gar');
       if (bg) bg.addEventListener('click', async function () {
         var r = await FG.ativarGarantia(v.niv);

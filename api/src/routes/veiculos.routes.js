@@ -3,7 +3,7 @@
 // ============================================================
 import { Router } from 'express';
 import { query } from '../db.js';
-import { requireAuth } from '../auth.js';
+import { requireAuth, requireAdmin } from '../auth.js';
 
 const router = Router();
 
@@ -136,6 +136,46 @@ router.post('/veiculos/:niv/venda', requireAuth, async (req, res, next) => {
 
     const rows = await query(SELECT_VEIC + ' WHERE v.VeiculoId = @id', { id: veic.VeiculoId });
     res.json(toVeiculo(rows[0]));
+  } catch (e) { next(e); }
+});
+
+// PUT /api/veiculos/:niv/transferir (SÓ ADMIN) — { empresa } transfere o
+// chassi para outra concessionária, pelo NOME (razão social ou fantasia; a
+// comparação é case-insensitive pela collation do banco). Nome ambíguo ou
+// inexistente devolve erro com sugestões parecidas.
+router.put('/veiculos/:niv/transferir', requireAuth, requireAdmin, async (req, res, next) => {
+  try {
+    const nome = String(req.body?.empresa || '').trim();
+    if (!nome) return res.status(400).json({ erro: 'Informe o nome da concessionária de destino.' });
+
+    const veic = await acharVeiculo(req.params.niv, req.user);
+    if (!veic) return res.status(404).json({ erro: 'Veículo não encontrado.' });
+
+    const emp = await query(
+      `SELECT EmpresaId, RazaoSocial FROM dbo.Empresa
+        WHERE Ativo = 1 AND (RazaoSocial = @n OR NomeFantasia = @n)`, { n: nome });
+    if (!emp.length) {
+      const parecidas = await query(
+        `SELECT TOP 5 RazaoSocial FROM dbo.Empresa
+          WHERE Ativo = 1 AND (RazaoSocial LIKE @p OR NomeFantasia LIKE @p)
+          ORDER BY RazaoSocial`, { p: '%' + nome + '%' });
+      return res.status(404).json({
+        erro: 'Concessionária não encontrada: "' + nome + '".' +
+          (parecidas.length ? ' Parecidas: ' + parecidas.map(r => r.RazaoSocial).join(', ') + '.' : '')
+      });
+    }
+    if (emp.length > 1)
+      return res.status(409).json({ erro: 'Mais de uma concessionária com esse nome — informe a razão social exata.' });
+    if (emp[0].EmpresaId === veic.EmpresaId)
+      return res.status(409).json({ erro: 'O veículo já pertence a ' + emp[0].RazaoSocial + '.' });
+
+    await query(
+      'UPDATE dbo.Veiculo SET EmpresaId = @eid, AtualizadoEm = SYSUTCDATETIME() WHERE VeiculoId = @id',
+      { eid: emp[0].EmpresaId, id: veic.VeiculoId }
+    );
+
+    const rows = await query(SELECT_VEIC + ' WHERE v.VeiculoId = @id', { id: veic.VeiculoId });
+    res.json({ ...toVeiculo(rows[0]), empresa: emp[0].RazaoSocial });
   } catch (e) { next(e); }
 });
 

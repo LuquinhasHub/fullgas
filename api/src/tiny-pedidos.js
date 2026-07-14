@@ -98,7 +98,7 @@ export async function inserirExportacao(tx, pedidoId, escopo, itens = null) {
 // Exportada só para depuração/teste (monta sem enviar).
 export async function montarPayload(exp) {
   const ped = (await query(
-    `SELECT p.PedidoId, p.NumeroPedido, p.DataPedido, p.EmpresaId,
+    `SELECT p.PedidoId, p.NumeroPedido, p.DataPedido, p.EmpresaId, p.Tipo,
             u.Email AS UsuarioEmail,
             e.RazaoSocial, e.NomeFantasia, e.Cnpj, e.Email AS EmpresaEmail, e.Telefone
        FROM dbo.Pedido p
@@ -168,9 +168,10 @@ export async function montarPayload(exp) {
     numero_pedido_ecommerce: backorder
       ? `${ped.NumeroPedido}-PV${exp.ExportId}`
       : ped.NumeroPedido,
-    obs: (backorder
-      ? `Pré-venda liberada do pedido Fullgas ${ped.NumeroPedido}`
-      : `Pedido Fullgas ${ped.NumeroPedido}`) + ` — usuário ${ped.UsuarioEmail}.`
+    obs: (ped.Tipo === 'garantia' ? 'GARANTIA (reposição sem cobrança) — ' : '') +
+      (backorder
+        ? `Pré-venda liberada do pedido Fullgas ${ped.NumeroPedido}`
+        : `Pedido Fullgas ${ped.NumeroPedido}`) + ` — usuário ${ped.UsuarioEmail}.`
   };
 }
 

@@ -238,6 +238,15 @@
     });
   };
 
+  // Transfere o chassi para outra concessionária, pelo nome (SÓ ADMIN).
+  // Recarrega o cache de veículos no sucesso.
+  FG.transferirVeiculo = function (niv, empresa) {
+    return req('PUT', '/veiculos/' + encodeURIComponent(niv) + '/transferir', { empresa: empresa }).then(function (r) {
+      if (!r.ok) return r;
+      return recarregarVeiculos().then(function () { return r; });
+    });
+  };
+
   /* ---------- reivindicações ---------- */
   // Cria reivindicação. `dados` = { tipo, niv, descricao, status, pecas?,
   // dataDefeito?, horimetro?, quilometragem? }, onde pecas = [{ sku, quantidade }].
@@ -275,10 +284,15 @@
   };
 
   // Muda o status da reivindicação (admin). Promise<{ ok, ... }>.
+  // Aprovar cria um pedido de garantia (e baixa estoque) — recarrega também
+  // pedidos, produtos e o rastreador de pré-venda.
   FG.setClaimStatus = function (id, status) {
     return req('PUT', '/reivindicacoes/' + encodeURIComponent(id) + '/status', { status: status }).then(function (r) {
       if (!r.ok) { FG.toast(r.msg || 'Não foi possível atualizar o status.', 'erro'); return r; }
-      return recarregarClaims().then(function () { return r; });
+      var extras = status === 'Aprovada'
+        ? [recarregarPedidos(), recarregarProdutos(), recarregarPreVenda()]
+        : [];
+      return Promise.all([recarregarClaims()].concat(extras)).then(function () { return r; });
     });
   };
 

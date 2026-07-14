@@ -85,7 +85,7 @@
   /* clique na foto do produto abre em tamanho grande (lightbox) — listener
      delegado no container, porque as telas são re-renderizadas a cada rota */
   view.addEventListener('click', function (e) {
-    var img = e.target.closest('.prod-img img, .prod-page .big-img img');
+    var img = e.target.closest('.prod-img img, .prod-page .big-img img, .cart-img img');
     if (!img) return;
     var back = document.createElement('div');
     back.className = 'modal-back';
@@ -341,7 +341,7 @@
     cart.forEach(function (i) {
       var p = FG.product(i.artigo); if (!p) return;
       html += '<div class="cart-line">' +
-        '<span>' + prodImg(p, 70) + '</span>' +
+        '<span class="cart-img">' + prodImg(p, 70) + '</span>' +
         '<span><b><a href="#/produto/' + p.artigo + '">' + esc(p.nome) + '</a></b><br><span class="muted">' + p.artigo + '</span>' +
         '<br>' + stockHTML(p) + '</span>' +
         '<span>' + FG.fmtMoney(p.preco) + '</span>' +
@@ -438,8 +438,10 @@
       '<p class="right muted" style="font-size:11px;">SHOW ALL ORDERS OF COMPANY ' +
       '<input type="checkbox" id="ho-chk"' + (verEmpresa ? ' checked' : '') + '></p>' +
       orders.map(function (o) {
+        // O número linka direto para o detalhe do pedido na aba Pedidos do portal.
         return '<div class="order-card"><div class="oc-head">' +
-          '<span><b>' + o.id + '</b></span>' +
+          '<span><b><a href="portal.html#pedido/' + esc(o.id) + '" title="Ver detalhes do pedido">' + esc(o.id) + '</a></b>' +
+          (o.garantia ? ' <span class="pill-status Garantia">Garantia</span>' : '') + '</span>' +
           '<span>' + FG.fmtDateTime(o.data) + '</span>' +
           '<span><span class="pill-status ' + esc(o.status) + '">' + esc(o.status) + '</span></span>' +
           '<span style="margin-left:auto;"><b>' + FG.fmtMoney(o.total) + '</b></span></div>' +

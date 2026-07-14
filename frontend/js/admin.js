@@ -413,7 +413,8 @@
       '<table class="tbl"><thead><tr><th>Pedido</th><th>Empresa</th><th>Data</th>' +
       '<th class="r">Total</th><th>Status</th><th></th></tr></thead><tbody>' +
       orders.map(function (o, i) {
-        return '<tr><td><b>' + esc(o.id) + '</b></td>' +
+        return '<tr><td><b>' + esc(o.id) + '</b>' +
+          (o.garantia ? '<br><span class="pill-status Garantia">Garantia</span>' : '') + '</td>' +
           '<td>' + esc(o.empresa) + '<br><span class="muted">' + esc(o.usuario) + '</span></td>' +
           '<td>' + FG.fmtDateTime(o.data) + '</td>' +
           '<td class="r">' + FG.fmtMoney(o.total) + '</td>' +
@@ -525,7 +526,8 @@
       '<div class="modal-body">' +
       (c.reenviada ? '<div class="reenviada-aviso">↩ Devolvida pelo revendedor — revisar' + (c.atualizadoEm ? ' (em ' + FG.fmtDateTime(c.atualizadoEm) + ')' : '') + '</div>' : '') +
       (c.sentBack ? '<div class="devolvida-aviso">↩ Devolvida ao revendedor — aguardando. Falta: ' + esc(c.faltaInformacao || '—') + '</div>' : '') +
-      (c.status === 'Aprovada' && c.valorGarantia ? '<div class="det-credito">✔ Aprovada — crédito de ' + FG.fmtMoney(c.valorGarantia) + ' descontado da fatura.</div>' : '') +
+      (c.status === 'Aprovada' ? '<div class="det-credito">✔ Aprovada — pedido de garantia criado para repor a(s) peça(s) sem cobrança' +
+        (c.valorGarantia ? ' (valor de referência: ' + FG.fmtMoney(c.valorGarantia) + ')' : '') + '. Acompanhe na área de pedidos.</div>' : '') +
       '<div class="det-grid">' +
       linha('N° da reivindicação', '<b class="cl-num">' + esc(c.id) + '</b>') +
       linha('Status', esc(c.status)) +
@@ -556,11 +558,13 @@
         if (novo === c.status) { FG.toast('Selecione um status diferente.'); return; }
         if ((novo === 'Aprovada' || novo === 'Recusada') &&
           !confirm('Definir como "' + novo + '"? Esse status é FINAL e não poderá ser alterado' +
-            (novo === 'Aprovada' ? ' (gera crédito na fatura do cliente)' : '') + '.')) return;
+            (novo === 'Aprovada' ? ' (cria um pedido de garantia repondo as peças, sem cobrança)' : '') + '.')) return;
         var r = await FG.setClaimStatus(c.id, novo);
         if (r && r.ok === false) return;
         fechar();
-        FG.toast('Status atualizado.');
+        FG.toast(r && r.pedidoGarantia
+          ? 'Garantia aprovada — pedido de reposição ' + r.pedidoGarantia + ' criado.'
+          : 'Status atualizado.');
         renderClaims();
       });
       document.getElementById('ad-devolver').addEventListener('click', function () { fechar(); modalDevolver(c.id); });
@@ -630,7 +634,7 @@
         var linhas = grupos[emp].map(function (it) {
           var disp = it.status === 'Disponivel';
           var acao = disp
-            ? '<button class="btn-orange btn-mini pv-enviar" data-ped="' + esc(it.pedido) + '" data-item="' + it.itemId + '" data-qtd="' + it.qtd + '">Marcar Enviado</button>'
+            ? '<button class="btn-orange btn-mini pv-enviar" data-ped="' + esc(it.pedido) + '" data-item="' + it.itemId + '" data-qtd="' + it.qtd + '">Liberar envio</button>'
             : '<span class="muted" style="font-size:11px;">' + (it.estoque > 0 ? 'estoque insuficiente (' + it.estoque + '/' + it.pendente + ')' : 'sem estoque') + '</span>';
           return '<tr><td>' + esc(it.artigo) + '</td><td>' + esc(it.nome) + '</td>' +
             '<td class="r">' + it.pendente + '</td>' +
@@ -647,8 +651,8 @@
     Array.prototype.forEach.call(view.querySelectorAll('.pv-enviar'), function (b) {
       b.addEventListener('click', async function () {
         var r = await FG.setItemEnviado(b.getAttribute('data-ped'), b.getAttribute('data-item'), Number(b.getAttribute('data-qtd')));
-        if (r && r.ok === false) FG.toast(r.msg || 'Não foi possível marcar como enviado.', 'erro');
-        else FG.toast('Peça marcada como enviada.');
+        if (r && r.ok === false) FG.toast(r.msg || 'Não foi possível liberar a peça.', 'erro');
+        else FG.toast('Peça liberada para separação — confirme o envio no pedido quando sair.');
         renderPreVenda();
       });
     });

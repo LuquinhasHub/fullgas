@@ -56,6 +56,7 @@ function montarPedidos(pedidoRows, itemRows) {
       data: toIso(p.DataPedido),
       usuario: p.UsuarioEmail,
       empresa: p.Empresa,
+      garantia: p.Tipo === 'garantia',
       itens,
       total: Number(p.Total),
       status: p.Status,
@@ -71,7 +72,7 @@ function montarPedidos(pedidoRows, itemRows) {
 }
 
 const SELECT_PEDIDO =
-  `SELECT p.PedidoId, p.NumeroPedido, p.DataPedido, p.Status, p.Total,
+  `SELECT p.PedidoId, p.NumeroPedido, p.DataPedido, p.Status, p.Total, p.Tipo,
           u.Email AS UsuarioEmail, e.RazaoSocial AS Empresa
      FROM dbo.Pedido p
      JOIN dbo.Usuario u ON u.UsuarioId = p.UsuarioId
@@ -176,6 +177,7 @@ router.get('/pedidos/:numero', requireAuth, async (req, res, next) => {
       data: toIso(p.DataPedido),
       usuario: p.UsuarioEmail,
       empresa: p.Empresa,
+      garantia: p.Tipo === 'garantia',
       total: Number(p.Total),
       status: p.Status,
       itens,
@@ -493,10 +495,11 @@ router.put('/pedidos/:numero/status', requireAuth, requireAdmin, async (req, res
       }
 
       // Pedido com peças em estoque: status considera só elas (a pré-venda segue
-      // no rastreador, à parte). Pedido só de pré-venda: só vira 'Enviado' quando
-      // TODAS as peças saírem (o que exige estoque).
+      // no rastreador, à parte). LIBERAR pré-venda (escopo 'backorder') nunca
+      // marca o pedido como 'Enviado' — a peça só foi liberada para SEPARAÇÃO;
+      // o envio de verdade é o admin quem confirma depois, mudando o status.
       const faltam = totNormais > 0 ? pendNormais > 0 : pendTotal > 0;
-      const novoStatus = faltam ? 'Processando' : 'Enviado';
+      const novoStatus = (alvoBackorder || faltam) ? 'Processando' : 'Enviado';
       await new sql.Request(tx)
         .input('pid', sql.Int, ped.PedidoId)
         .input('st', sql.VarChar(14), novoStatus)

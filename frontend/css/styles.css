@@ -131,6 +131,7 @@ h1, h2, h3 { margin: 0 0 .5em; }
 .pill-status.cliente { background: #e5e7eb; color: #374151; }
 .pill-status.Parcial { background: #fde68a; color: #92400e; }
 .pill-status.PreVenda { background: #ffe1cf; color: #9a3412; }
+.pill-status.Garantia { background: #dbeafe; color: #1d4ed8; }
 .pill-status.Emitida { background: #dcfce7; color: #15803d; }
 .pill-status.Anulada { background: #fee2e2; color: #b91c1c; }
 .pill-status.Aguardando { background: #e2e8f0; color: #475569; }
@@ -416,6 +417,10 @@ main.shop { padding: 0 18px 70px; }
 /* carrinho */
 .cart-line { display: grid; grid-template-columns: 110px 1fr 120px 110px 120px 36px; gap: 16px; align-items: center; padding: 14px 0; border-bottom: 1px solid #eee; }
 @media (max-width: 800px) { .cart-line { grid-template-columns: 1fr 1fr; } }
+/* Foto do item contida na célula (sem isso, a foto real do Tiny transborda a
+   coluna de 110px e "engole" o nome/link do produto ao lado). */
+.cart-line .cart-img { background: #fafafa; border: 1px solid #eee; width: 110px; height: 74px; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.cart-line .cart-img img { max-width: 100%; max-height: 100%; object-fit: contain; cursor: zoom-in; }
 .cart-tot { display: flex; justify-content: flex-end; gap: 40px; align-items: center; padding: 20px 0; font-size: 16px; }
 .cart-tot .v { font-size: 22px; font-weight: 800; }
 
