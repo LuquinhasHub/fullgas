@@ -945,25 +945,22 @@
         (sec.lado === 'engine' ? 'Engine (motor)' : 'Frame (chassi)') + '</b></span><span class="grow"></span>' +
         '<a class="btn-line" href="finder.html#/secao/' + sec.id + '" target="_blank" rel="noopener">Ver no finder ↗</a></div>' +
 
-        /* Layout em DUAS COLUNAS no estilo do catálogo de referência
-           (docs/Finder/EXEMPLAR): cards de peças à esquerda — numerados, com
-           status de compra e edição inline — e o diagrama com as áreas
-           clicáveis à direita, lado a lado como o cliente vê. */
-        '<div class="fnde-layout">' +
-
-        /* ---- coluna esquerda: peças ---- */
+        /* ---- peças da seção: tabela no topo, largura cheia ---- */
         '<div class="adm-card"><div class="c-head">Peças desta seção (' + sec.pecas.length + ')</div><div class="c-body">' +
-        '<div class="fnd-add-row"><input id="fp-sku" list="fp-skus" type="text" placeholder="Adicionar pelo SKU — ex.: A46001094000FB">' +
+        '<div class="fnd-add-row"><input id="fp-sku" list="fp-skus" type="text" placeholder="Código do artigo (SKU) — ex.: A46001094000FB">' +
         '<datalist id="fp-skus">' + FG.all('products').map(function (p) {
           return '<option value="' + esc(p.artigo) + '">' + esc(p.nome) + '</option>';
         }).join('') + '</datalist>' +
-        '<button class="btn-orange btn-mini" id="fp-add">Adicionar</button></div>' +
-        '<input id="fp-filtro" class="fnde-filtro" type="text" placeholder="🔍 Filtrar por número, código ou nome">' +
-        '<div class="fnde-list" id="fp-list"></div>' +
+        '<button class="btn-orange btn-mini" id="fp-add">Adicionar peça</button>' +
+        '<span class="muted" style="font-size:12px;">A peça precisa existir no Catálogo. A miniatura vem da foto do produto.</span></div>' +
+        '<table class="tbl fnd-itens"><thead><tr><th>ID</th><th>Miniatura</th><th>Nome</th><th>Status</th><th>Situação</th><th>Cód.</th>' +
+        '<th class="r">Preço</th><th>Qtd. padrão</th><th>Number on Image</th><th>Qtd. no conjunto</th><th>Posição</th><th>Ações</th></tr></thead>' +
+        '<tbody id="fp-tbody"></tbody></table>' +
         '</div></div>' +
 
-        /* ---- coluna direita: diagrama + hotspots ---- */
-        '<div class="adm-card"><div class="c-head">Diagrama e áreas clicáveis</div><div class="c-body">' +
+        /* ---- diagrama à ESQUERDA + áreas clicáveis à DIREITA com rolagem
+                própria — espelho invertido do que o cliente vê no finder ---- */
+        '<div class="adm-card"><div class="c-head">Imagem do diagrama e áreas clicáveis</div><div class="c-body">' +
         '<div class="fnd-add-row">' +
         '<input id="hi-file" type="file" accept="image/*">' +
         '<button class="btn-line btn-mini" id="hi-up">' + (sec.imagem ? 'Trocar imagem' : 'Enviar imagem') + '</button>' +
@@ -973,97 +970,81 @@
         '</div>' +
         (sec.imagem
           ? '<p class="muted" style="font-size:12px;margin:8px 0;">Clique na imagem para criar uma área; arraste para posicionar. ' +
-            'O <b>Link Number</b> deve casar com o "Nº imagem" das peças — clicar na área seleciona essas peças no finder do cliente.</p>' +
+            'O <b>Link Number</b> deve casar com o "Number on Image" das peças — clicar na área seleciona essas peças no finder do cliente.</p>' +
+            '<div class="ha-2col">' +
             '<div class="ha-wrap"><div class="ha-canvas" id="ha-canvas"><img id="ha-img" src="' + esc(sec.imagem) + '" alt="diagrama" draggable="false"></div></div>' +
+            '<div class="ha-side">' +
             '<div class="ha-list-head"><span></span><span>Clickable Area (px)</span><span>Link Number</span><span></span></div>' +
-            '<div id="ha-list"></div>'
+            '<div id="ha-list" class="ha-scroll"></div>' +
+            '</div></div>'
           : '<p class="muted">Envie a imagem do diagrama explodido para poder marcar as áreas clicáveis.</p>') +
-        '</div></div>' +
+        '</div></div>';
 
-        '</div>'; // fecha .fnde-layout
-
-      /* ----- cards de peças (edição inline, estilo exemplar) ----- */
-      var listaPecas = document.getElementById('fp-list');
-      var filtroPecas = '';
+      /* ----- tabela de peças (linhas com edição inline) ----- */
+      var tbody = document.getElementById('fp-tbody');
 
       // Mesmo princípio de cores da loja: verde = em estoque, amarelo =
       // pré-venda (com previsão), vermelho = indisponível para compra.
       function statusPecaAdm(p) {
-        if (p.estoque > 0) return '<div class="fnde-status ok">● Em estoque (' + p.estoque + ' un.)</div>';
-        if (p.previsao) return '<div class="fnde-status pre">● Pré-venda · ' + esc(p.previsao) + '</div>';
-        return '<div class="fnde-status out">● Indisponível</div>';
+        if (p.estoque > 0) return '<span class="fnde-status ok">● Em estoque (' + p.estoque + ')</span>';
+        if (p.previsao) return '<span class="fnde-status pre">● Pré-venda · ' + esc(p.previsao) + '</span>';
+        return '<span class="fnde-status out">● Indisponível</span>';
       }
 
       function linhasPecas() {
-        var t = filtroPecas.toLowerCase();
-        var visiveis = sec.pecas.filter(function (p) {
-          if (!t) return true;
-          return p.sku.toLowerCase().indexOf(t) >= 0 ||
-            p.nome.toLowerCase().indexOf(t) >= 0 ||
-            String(p.numeroImagem).toLowerCase() === t;
-        });
+        tbody.innerHTML = sec.pecas.length ? sec.pecas.map(function (p, i) {
+          return '<tr data-id="' + p.id + '">' +
+            '<td class="muted">' + p.id + '</td>' +
+            '<td>' + thumbCell(p.imagem, p.nome) + '</td>' +
+            '<td><b>' + esc(p.nome) + '</b></td>' +
+            '<td>' + statusPecaAdm(p) + '</td>' +
+            '<td><label class="fnd-hab"><input type="checkbox" class="fi-at"' + (p.ativo ? ' checked' : '') + '> Habilitar</label></td>' +
+            '<td>' + esc(p.sku) + '</td>' +
+            '<td class="r">' + FG.fmtMoney(p.preco) + '</td>' +
+            '<td><input class="fi-qp fnd-in" type="number" min="0" value="' + p.quantidadePadrao + '"></td>' +
+            '<td><input class="fi-num fnd-in" type="text" maxlength="12" value="' + esc(p.numeroImagem) + '"></td>' +
+            '<td><input class="fi-qtd fnd-in" type="number" min="1" value="' + p.quantidade + '"></td>' +
+            '<td class="nowrap"><button class="btn-line btn-mini" data-mv="-1" data-i="' + i + '"' + (i === 0 ? ' disabled' : '') + '>▲</button> ' +
+            '<button class="btn-line btn-mini" data-mv="1" data-i="' + i + '"' + (i === sec.pecas.length - 1 ? ' disabled' : '') + '>▼</button></td>' +
+            '<td><button class="link-action" data-rm="' + p.id + '">Remover</button></td></tr>';
+        }).join('') : '<tr><td colspan="12" class="muted">Nenhuma peça nesta seção. Adicione pela busca acima.</td></tr>';
 
-        listaPecas.innerHTML = visiveis.length ? visiveis.map(function (p) {
-          var i = sec.pecas.indexOf(p);
-          return '<div class="fnde-card' + (p.ativo ? '' : ' off') + '" data-id="' + p.id + '">' +
-            '<div class="fnde-head">' +
-            '<span class="fnde-num" title="Número no diagrama">' + esc(p.numeroImagem || '–') + '</span>' +
-            thumbCell(p.imagem, p.nome) +
-            '<div class="fnde-tit"><b>' + esc(p.nome) + '</b>' +
-            '<span class="sku">' + esc(p.sku) + '</span></div>' +
-            '<span class="fnde-preco">' + FG.fmtMoney(p.preco) + '</span>' +
-            '</div>' +
-            statusPecaAdm(p) +
-            '<div class="fnde-controls">' +
-            '<label>Nº imagem <input class="fi-num" type="text" maxlength="12" value="' + esc(p.numeroImagem) + '"></label>' +
-            '<label>Qtd. padrão <input class="fi-qp" type="number" min="0" value="' + p.quantidadePadrao + '"></label>' +
-            '<label>No conjunto <input class="fi-qtd" type="number" min="1" value="' + p.quantidade + '"></label>' +
-            '<label class="fnd-hab"><input type="checkbox" class="fi-at"' + (p.ativo ? ' checked' : '') + '> Habilitar</label>' +
-            '<span class="grow"></span>' +
-            '<button class="btn-line btn-mini" data-mv="-1" data-i="' + i + '"' + (i === 0 ? ' disabled' : '') + ' title="Subir">▲</button>' +
-            '<button class="btn-line btn-mini" data-mv="1" data-i="' + i + '"' + (i === sec.pecas.length - 1 ? ' disabled' : '') + ' title="Descer">▼</button>' +
-            '<button class="link-action" data-rm="' + p.id + '">Remover</button>' +
-            '</div></div>';
-        }).join('') : '<p class="muted" style="font-size:12px;">' +
-          (sec.pecas.length ? 'Nenhuma peça bate com o filtro.' : 'Nenhuma peça nesta seção. Adicione pela busca acima.') + '</p>';
-
-        Array.prototype.forEach.call(listaPecas.querySelectorAll('.fnde-card[data-id]'), function (card) {
-          var pecaId = Number(card.getAttribute('data-id'));
-          Array.prototype.forEach.call(card.querySelectorAll('.fi-at,.fi-qp,.fi-num,.fi-qtd'), function (inp) {
+        Array.prototype.forEach.call(tbody.querySelectorAll('tr[data-id]'), function (tr) {
+          var pecaId = Number(tr.getAttribute('data-id'));
+          Array.prototype.forEach.call(tr.querySelectorAll('.fi-at,.fi-qp,.fi-num,.fi-qtd'), function (inp) {
             inp.addEventListener('change', function () {
               FG.finderEditarPeca(pecaId, {
-                ativo: card.querySelector('.fi-at').checked,
-                quantidadePadrao: Number(card.querySelector('.fi-qp').value) || 0,
-                numeroImagem: card.querySelector('.fi-num').value.trim(),
-                quantidade: Math.max(1, Number(card.querySelector('.fi-qtd').value) || 1)
+                ativo: tr.querySelector('.fi-at').checked,
+                quantidadePadrao: Number(tr.querySelector('.fi-qp').value) || 0,
+                numeroImagem: tr.querySelector('.fi-num').value.trim(),
+                quantidade: Math.max(1, Number(tr.querySelector('.fi-qtd').value) || 1)
               }).then(function (r) {
                 if (fndErro(r, 'Falha ao salvar a peça.')) return;
                 var p = sec.pecas.find(function (x) { return x.id === pecaId; });
                 if (p) {
-                  p.ativo = card.querySelector('.fi-at').checked;
-                  p.quantidadePadrao = Number(card.querySelector('.fi-qp').value) || 0;
-                  p.numeroImagem = card.querySelector('.fi-num').value.trim();
-                  p.quantidade = Math.max(1, Number(card.querySelector('.fi-qtd').value) || 1);
+                  p.ativo = tr.querySelector('.fi-at').checked;
+                  p.quantidadePadrao = Number(tr.querySelector('.fi-qp').value) || 0;
+                  p.numeroImagem = tr.querySelector('.fi-num').value.trim();
+                  p.quantidade = Math.max(1, Number(tr.querySelector('.fi-qtd').value) || 1);
                 }
                 FG.toast('Peça atualizada.');
-                linhasPecas(); // redesenha (nº do card e opacidade acompanham)
               });
             });
           });
         });
-        Array.prototype.forEach.call(listaPecas.querySelectorAll('[data-mv]'), function (b) {
+        Array.prototype.forEach.call(tbody.querySelectorAll('[data-mv]'), function (b) {
           b.addEventListener('click', function () {
             var i = Number(b.getAttribute('data-i'));
             var j = i + Number(b.getAttribute('data-mv'));
             if (j < 0 || j >= sec.pecas.length) return;
-            var t2 = sec.pecas[i]; sec.pecas[i] = sec.pecas[j]; sec.pecas[j] = t2;
+            var t = sec.pecas[i]; sec.pecas[i] = sec.pecas[j]; sec.pecas[j] = t;
             FG.finderOrdemPecas(sec.id, sec.pecas.map(function (p) { return p.id; })).then(function (r) {
               if (fndErro(r, 'Falha ao reordenar.')) return;
               linhasPecas();
             });
           });
         });
-        Array.prototype.forEach.call(listaPecas.querySelectorAll('[data-rm]'), function (b) {
+        Array.prototype.forEach.call(tbody.querySelectorAll('[data-rm]'), function (b) {
           b.addEventListener('click', function () {
             var pecaId = Number(b.getAttribute('data-rm'));
             var p = sec.pecas.find(function (x) { return x.id === pecaId; });
@@ -1077,11 +1058,6 @@
         });
       }
       linhasPecas();
-
-      document.getElementById('fp-filtro').addEventListener('input', function () {
-        filtroPecas = this.value.trim();
-        linhasPecas();
-      });
 
       document.getElementById('fp-add').addEventListener('click', function () {
         var sku = document.getElementById('fp-sku').value.trim().toUpperCase();

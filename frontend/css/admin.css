@@ -147,42 +147,20 @@ span.fnd-thumb.vazio { display: inline-flex; align-items: center; justify-conten
 .ha-row .ha-x { background: #4a4542; color: #fff; border: none; width: 26px; height: 24px; cursor: pointer; font-size: 11px; font-weight: 700; }
 .ha-row .ha-x:hover { background: #b91c1c; }
 
-/* ------- editor de seção estilo "exemplar" (docs/Finder/EXEMPLAR) -------
-   Duas colunas: cards de peças à esquerda, diagrama + áreas à direita. */
-.fnde-layout { display: grid; grid-template-columns: 420px 1fr; gap: 16px; align-items: start; }
-@media (max-width: 1200px) { .fnde-layout { grid-template-columns: 1fr; } }
-.fnde-filtro {
-  width: 100%; border: 1px solid #ccc; padding: 8px 10px; font-size: 13px;
-  margin: 10px 0; background: #fff;
-}
-.fnde-list { max-height: 72vh; overflow: auto; display: flex; flex-direction: column; gap: 10px; padding-right: 4px; }
-.fnde-card { border: 1px solid var(--adm-line); border-radius: 8px; background: #fff; padding: 10px 12px; }
-.fnde-card.off { opacity: .55; background: #fafafa; }
-.fnde-head { display: flex; gap: 10px; align-items: center; min-width: 0; }
-.fnde-num {
-  min-width: 26px; height: 26px; padding: 0 4px; border: 1.5px solid #444; border-radius: 50%;
-  display: inline-flex; align-items: center; justify-content: center;
-  font-size: 12px; font-weight: 700; background: #fff; flex: none;
-}
-.fnde-tit { flex: 1; min-width: 0; }
-.fnde-tit b { display: block; font-size: 13px; line-height: 1.25; }
-.fnde-tit .sku { color: #888; font-size: 11px; }
-.fnde-preco { font-weight: 700; font-size: 13px; white-space: nowrap; }
-.fnde-status { font-size: 11px; font-weight: 700; margin: 7px 0 8px; }
+/* Status de compra da peça na tabela do finder (mesmo princípio de cores da
+   loja: verde em estoque, amarelo pré-venda, vermelho indisponível). */
+.fnde-status { font-size: 11px; font-weight: 700; white-space: nowrap; }
 .fnde-status.ok { color: #15803d; }
 .fnde-status.pre { color: #b45309; }
 .fnde-status.out { color: #b91c1c; }
-.fnde-controls {
-  display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
-  border-top: 1px dashed #eee; padding-top: 8px; font-size: 11px; color: #666;
-}
-.fnde-controls label { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
-.fnde-controls .grow { flex: 1; }
-.fnde-controls input[type="number"], .fnde-controls input[type="text"] {
-  width: 58px; border: 1px solid #ccc; padding: 4px 6px; font-size: 12px; background: #fff;
-}
-.fnde-controls .fi-num { width: 66px; }
-.fnde-card .fnd-thumb { width: 44px; height: 44px; flex: none; }
+
+/* Diagrama à ESQUERDA + lista de áreas clicáveis à DIREITA, com rolagem
+   própria — espelho invertido do layout que o cliente vê no finder. */
+.ha-2col { display: grid; grid-template-columns: 1fr 400px; gap: 14px; align-items: start; }
+@media (max-width: 1100px) { .ha-2col { grid-template-columns: 1fr; } }
+.ha-side { border: 1px solid var(--adm-line); background: #fff; }
+.ha-side .ha-list-head { padding: 8px 10px 6px; }
+.ha-scroll { max-height: 560px; overflow: auto; padding: 0 10px 10px; }
 
 @media (max-width: 760px) {
   .adm-side { width: 64px; }

@@ -383,8 +383,9 @@
     document.body.appendChild(back);
 
     function fechar() { back.remove(); }
+    // Só o X fecha o formulário — clicar no fundo escuro NÃO fecha, para o
+    // cliente não perder o que preencheu por um clique fora sem querer.
     back.querySelector('.x').addEventListener('click', fechar);
-    back.addEventListener('click', function (e) { if (e.target === back) fechar(); });
 
     // Consultor de peças: resolve o que foi digitado para um SKU do catálogo.
     // Retorna '' (vazio), o SKU (válido) ou null (digitado mas não encontrado).
