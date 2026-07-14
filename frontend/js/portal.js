@@ -359,13 +359,13 @@
       '</select></div>' +
       '<div class="field"><label>Peça(s) defeituosa(s) *</label>' +
       '<div class="peca-add">' +
-      '<input id="nc-peca" list="nc-peca-list" autocomplete="off" placeholder="Código ou nome da peça">' +
+      // Autocomplete PRÓPRIO (dropdown estilizado) — o datalist nativo herdava
+      // o visual do sistema operacional e destoava do resto do portal.
+      '<div class="ac-wrap"><input id="nc-peca" autocomplete="off" placeholder="Digite o código ou o nome da peça">' +
+      '<div class="ac-list hidden" id="nc-peca-ac"></div></div>' +
       '<input id="nc-peca-qtd" type="number" min="1" step="1" value="1" title="Quantidade">' +
       '<button type="button" class="btn" id="nc-peca-add">Adicionar</button>' +
       '</div>' +
-      '<datalist id="nc-peca-list">' +
-      FG.all('products').map(function (p) { return '<option value="' + esc(p.artigo + ' — ' + p.nome) + '"></option>'; }).join('') +
-      '</datalist>' +
       '<div id="nc-peca-info" class="muted" style="font-size:11px;margin-top:4px;"></div>' +
       '<div id="nc-pecas-list" class="pecas-list"></div></div>' +
       '<div class="form-grid">' +
@@ -399,8 +399,9 @@
     }
     // Feedback ao vivo: mostra a peça cadastrada conforme o cliente digita.
     var pecaInfo = document.getElementById('nc-peca-info');
-    document.getElementById('nc-peca').addEventListener('input', function () {
-      var v = this.value.trim();
+    var inpPeca = document.getElementById('nc-peca');
+    function atualizarInfo() {
+      var v = inpPeca.value.trim();
       if (!v) { pecaInfo.textContent = ''; pecaInfo.style.color = ''; return; }
       var sku = resolverPeca();
       if (sku) {
@@ -411,7 +412,56 @@
         pecaInfo.style.color = '';
         pecaInfo.textContent = 'Selecione uma peça da lista (código cadastrado).';
       }
+    }
+
+    // --- Autocomplete próprio: dropdown com até 8 sugestões (código OU nome).
+    // Setas navegam, Enter escolhe, Esc fecha; clicar também escolhe.
+    var ac = document.getElementById('nc-peca-ac');
+    var acItens = [], acIdx = -1;
+    function acFechar() { ac.classList.add('hidden'); ac.innerHTML = ''; acItens = []; acIdx = -1; }
+    function acMarcar(n) {
+      acIdx = n;
+      Array.prototype.forEach.call(ac.querySelectorAll('.ac-item'), function (el, i) {
+        el.classList.toggle('on', i === acIdx);
+        if (i === acIdx) el.scrollIntoView({ block: 'nearest' });
+      });
+    }
+    function acEscolher(i) {
+      var p = acItens[i]; if (!p) return;
+      inpPeca.value = p.artigo + ' — ' + p.nome;
+      acFechar(); atualizarInfo();
+      document.getElementById('nc-peca-qtd').focus();
+    }
+    function acAbrir() {
+      var t = inpPeca.value.trim().toLowerCase();
+      if (t.length < 2) { acFechar(); return; }
+      acItens = FG.all('products').filter(function (p) {
+        return p.artigo.toLowerCase().indexOf(t) >= 0 || p.nome.toLowerCase().indexOf(t) >= 0;
+      }).slice(0, 8);
+      if (!acItens.length) { acFechar(); return; }
+      acIdx = -1;
+      ac.innerHTML = acItens.map(function (p, i) {
+        return '<div class="ac-item" data-i="' + i + '"><b>' + esc(p.artigo) + '</b><span class="ac-nome">' +
+          esc(p.nome) + '</span><span class="ac-preco">' + FG.fmtMoney(p.preco) + '</span></div>';
+      }).join('');
+      ac.classList.remove('hidden');
+      Array.prototype.forEach.call(ac.querySelectorAll('.ac-item'), function (el) {
+        // mousedown (não click): dispara antes do blur do input fechar a lista.
+        el.addEventListener('mousedown', function (e) {
+          e.preventDefault();
+          acEscolher(Number(el.getAttribute('data-i')));
+        });
+      });
+    }
+    inpPeca.addEventListener('input', function () { acAbrir(); atualizarInfo(); });
+    inpPeca.addEventListener('keydown', function (e) {
+      if (ac.classList.contains('hidden')) return;
+      if (e.key === 'ArrowDown') { e.preventDefault(); acMarcar(Math.min(acItens.length - 1, acIdx + 1)); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); acMarcar(Math.max(0, acIdx - 1)); }
+      else if (e.key === 'Enter') { e.preventDefault(); acEscolher(acIdx >= 0 ? acIdx : 0); }
+      else if (e.key === 'Escape') acFechar();
     });
+    inpPeca.addEventListener('blur', function () { setTimeout(acFechar, 150); });
 
     // --- Peças defeituosas: lista dinâmica (código + quantidade) ---
     var pecas = [];
@@ -512,9 +562,20 @@
     }
 
     // ENVIAR: cria (novo/rascunho) ou atualiza+reenvia (editar). Sobe as fotos.
+    // Durante o envio, uma cortina cobre o modal com um carregamento breve e,
+    // no sucesso, a confirmação de que a garantia será avaliada pela equipe.
     document.getElementById('nc-env').addEventListener('click', async function () {
       var d = coletar();
       if (!validarEnvio(d)) return;
+
+      var cortina = document.createElement('div');
+      cortina.className = 'claim-envio';
+      cortina.innerHTML = '<div class="fg-spinner"></div><p><b>Enviando sua garantia…</b></p>';
+      back.querySelector('.modal').appendChild(cortina);
+
+      // Espera mínima de ~0,9s: sem ela a cortina "pisca" e o cliente não
+      // percebe que o envio aconteceu.
+      var minimo = new Promise(function (r) { setTimeout(r, 900); });
       var c;
       if (modo === 'editar') {
         c = await FG.updateClaim(ctx.claim.id, d);
@@ -523,16 +584,24 @@
         d.criador = sess.empresa;
         c = await FG.createClaim(d);
       }
-      if (!c) return;   // a API já avisou o erro
+      if (!c) { cortina.remove(); return; }   // a API já avisou o erro; o form fica intacto
       if (inpFotos.files && inpFotos.files.length) {
         var up = await FG.uploadClaimFotos(c.id, inpFotos.files);
         if (!up.ok) FG.toast(up.msg || 'Salvo, mas falhou o envio das fotos.', 'erro');
       }
+      await minimo;
       if (modo === 'rascunho' && ctx.rasc) excluirRascunho(ctx.rasc.localId);
-      fechar();
-      claimFiltro = 'Em processo';
-      FG.toast(modo === 'editar' ? 'Reivindicação atualizada e reenviada.' : 'Reivindicação registrada.');
-      renderClaims();
+
+      cortina.innerHTML =
+        '<div class="claim-ok">✔</div>' +
+        '<h3 style="margin:0;">Garantia enviada!</h3>' +
+        '<p class="muted" style="max-width:340px;">Sua reivindicação <b>' + esc(c.id) + '</b> foi registrada ' +
+        'e será avaliada por nossos representantes. Acompanhe o andamento na aba Reivindicações.</p>';
+      setTimeout(function () {
+        fechar();
+        claimFiltro = 'Em processo';
+        renderClaims();
+      }, 2600);
     });
 
     // SALVAR COMO ESBOÇO: grava no navegador (não vai ao banco). Some ao editar
@@ -581,7 +650,8 @@
       '<div class="modal"><header><h3>Reivindicação ' + esc(c.id) + '</h3><button class="x">×</button></header>' +
       '<div class="modal-body">' +
       (c.sentBack ? '<div class="devolvida-aviso">↩ Devolvida — falta: ' + esc(c.faltaInformacao || 'informações') + '</div>' : '') +
-      (c.status === 'Aprovada' && c.valorGarantia ? '<div class="det-credito">✔ Garantia aprovada — crédito de ' + FG.fmtMoney(c.valorGarantia) + ' descontado da sua fatura.</div>' : '') +
+      (c.status === 'Aprovada' ? '<div class="det-credito">✔ Garantia aprovada — as peças serão repostas sem cobrança ' +
+        'por um pedido de garantia. Acompanhe na área de pedidos.</div>' : '') +
       '<div class="det-grid">' +
       linha('N° da reivindicação', '<b class="cl-num">' + esc(c.id) + '</b>') +
       linha('Status', esc(c.status)) +

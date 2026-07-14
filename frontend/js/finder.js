@@ -247,10 +247,20 @@
       var cabecalho = '<div class="part-head">' +
         '<span></span><span></span>' +
         '<span>SKU</span><span>Descrição</span>' +
-        '<span>Quantidade</span><span></span></div>';
+        '<span>Status</span><span>Quantidade</span><span></span></div>';
+
+      // Status de compra da peça — mesmo princípio de cores da loja:
+      // verde = em estoque, amarelo = pré-venda (com previsão), vermelho =
+      // indisponível (não pode ser comprada; o campo de quantidade trava).
+      function statusPeca(p) {
+        if (p.estoque > 0) return '<span class="pt-status ok">● Em estoque</span>';
+        if (p.previsao) return '<span class="pt-status pre">● Pré-venda · ' + esc(p.previsao) + '</span>';
+        return '<span class="pt-status out">● Indisponível</span>';
+      }
 
       var linhas = s.pecas.map(function (p, i) {
         var marcada = p.quantidadePadrao > 0;
+        var indisp = !(p.estoque > 0) && !p.previsao;
         // Ver a peça na loja abre em NOVA aba: o cliente não perde o finder.
         var link = 'loja.html#/produto/' + encodeURIComponent(p.sku);
         return '<div class="part-row' + (marcada ? ' sel' : '') + '" data-row="' + i + '" data-num="' + esc(p.numeroImagem) + '">' +
@@ -258,7 +268,9 @@
           '<span>' + (i + 1) + '</span>' +
           '<a href="' + link + '" target="_blank" rel="noopener">' + esc(p.sku) + '</a>' +
           '<b><a href="' + link + '" target="_blank" rel="noopener">' + esc(p.nome) + '</a></b>' +
-          '<input class="qn" type="number" min="0" value="' + p.quantidadePadrao + '" data-art="' + esc(p.sku) + '">' +
+          statusPeca(p) +
+          '<input class="qn" type="number" min="0" value="' + (indisp ? 0 : p.quantidadePadrao) + '"' +
+          ' data-art="' + esc(p.sku) + '"' + (indisp ? ' disabled title="Peça indisponível para compra"' : '') + '>' +
           '<span>(' + p.quantidade + ')</span>' +
           '</div>';
       }).join('');

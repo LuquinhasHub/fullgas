@@ -132,7 +132,9 @@ span.fnd-thumb.vazio { display: inline-flex; align-items: center; justify-conten
 .ha-box.sel, .ha-box:hover { border-color: var(--adm-orange); background: rgba(235, 82, 2, .16); }
 
 .ha-list-head, .ha-row {
-  display: grid; grid-template-columns: 28px 170px 1fr 110px 34px;
+  /* 4 colunas: nº · tamanho da área · link number · remover
+     (a coluna "Texto (opcional)" foi removida — nunca é usada) */
+  display: grid; grid-template-columns: 28px 170px 1fr 34px;
   gap: 10px; align-items: center; padding: 4px 2px;
 }
 .ha-list-head { font-size: 11px; color: #888; border-bottom: 1px solid var(--adm-line); padding-bottom: 6px; }
@@ -141,9 +143,46 @@ span.fnd-thumb.vazio { display: inline-flex; align-items: center; justify-conten
 .ha-row input { border: 1px solid #ccc; padding: 5px 7px; font-size: 12px; background: #fff; }
 .ha-row .ha-size { display: inline-flex; align-items: center; gap: 5px; }
 .ha-row .hw, .ha-row .hh { width: 62px; }
-.ha-row .hl { width: 100%; }
+.ha-row .hl { width: 110px; }
 .ha-row .ha-x { background: #4a4542; color: #fff; border: none; width: 26px; height: 24px; cursor: pointer; font-size: 11px; font-weight: 700; }
 .ha-row .ha-x:hover { background: #b91c1c; }
+
+/* ------- editor de seção estilo "exemplar" (docs/Finder/EXEMPLAR) -------
+   Duas colunas: cards de peças à esquerda, diagrama + áreas à direita. */
+.fnde-layout { display: grid; grid-template-columns: 420px 1fr; gap: 16px; align-items: start; }
+@media (max-width: 1200px) { .fnde-layout { grid-template-columns: 1fr; } }
+.fnde-filtro {
+  width: 100%; border: 1px solid #ccc; padding: 8px 10px; font-size: 13px;
+  margin: 10px 0; background: #fff;
+}
+.fnde-list { max-height: 72vh; overflow: auto; display: flex; flex-direction: column; gap: 10px; padding-right: 4px; }
+.fnde-card { border: 1px solid var(--adm-line); border-radius: 8px; background: #fff; padding: 10px 12px; }
+.fnde-card.off { opacity: .55; background: #fafafa; }
+.fnde-head { display: flex; gap: 10px; align-items: center; min-width: 0; }
+.fnde-num {
+  min-width: 26px; height: 26px; padding: 0 4px; border: 1.5px solid #444; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 700; background: #fff; flex: none;
+}
+.fnde-tit { flex: 1; min-width: 0; }
+.fnde-tit b { display: block; font-size: 13px; line-height: 1.25; }
+.fnde-tit .sku { color: #888; font-size: 11px; }
+.fnde-preco { font-weight: 700; font-size: 13px; white-space: nowrap; }
+.fnde-status { font-size: 11px; font-weight: 700; margin: 7px 0 8px; }
+.fnde-status.ok { color: #15803d; }
+.fnde-status.pre { color: #b45309; }
+.fnde-status.out { color: #b91c1c; }
+.fnde-controls {
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+  border-top: 1px dashed #eee; padding-top: 8px; font-size: 11px; color: #666;
+}
+.fnde-controls label { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.fnde-controls .grow { flex: 1; }
+.fnde-controls input[type="number"], .fnde-controls input[type="text"] {
+  width: 58px; border: 1px solid #ccc; padding: 4px 6px; font-size: 12px; background: #fff;
+}
+.fnde-controls .fi-num { width: 66px; }
+.fnde-card .fnd-thumb { width: 44px; height: 44px; flex: none; }
 
 @media (max-width: 760px) {
   .adm-side { width: 64px; }
