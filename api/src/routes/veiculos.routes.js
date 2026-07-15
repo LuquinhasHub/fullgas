@@ -38,11 +38,13 @@ const SELECT_VEIC =
      FROM dbo.Veiculo v
      JOIN dbo.ModeloMoto m ON m.ModeloId = v.ModeloId`;
 
-// Cliente vê veículos da própria empresa ou não atribuídos (EmpresaId NULL);
-// admin vê todos. Devolve o trecho WHERE e os parâmetros conforme o papel.
+// Cliente vê SOMENTE veículos atribuídos à própria empresa; admin vê todos.
+// Todo chassi é inserido/atribuído por um administrador — enquanto um chassi
+// não tiver EmpresaId, ele não aparece para nenhum cliente. Devolve o trecho
+// WHERE e os parâmetros conforme o papel.
 function escopoEmpresa(user) {
   if (user.papel === 'admin') return { where: '', params: {} };
-  return { where: ' (v.EmpresaId = @empresaId OR v.EmpresaId IS NULL)', params: { empresaId: user.empresaId } };
+  return { where: ' v.EmpresaId = @empresaId', params: { empresaId: user.empresaId } };
 }
 
 // GET /api/veiculos/modelos — lista de modelos (alimenta FG.model no front).
