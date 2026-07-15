@@ -988,6 +988,7 @@
             '<div class="ha-wrap">' +
             '<div class="ha-tools">' +
             '<button class="dg-btn" id="ha-reset" type="button" title="Ajustar à tela">⟳</button>' +
+            '<button class="dg-btn" id="ha-nums" type="button" title="Mostrar/ocultar os números das áreas">#</button>' +
             '<span class="grow"></span>' +
             '<input type="range" id="ha-zoom" min="0.1" max="1.6" step="0.05" value="0.6">' +
             '<span class="dg-marks">0.1&nbsp;&nbsp;0.6&nbsp;&nbsp;1.1&nbsp;&nbsp;1.6</span>' +
@@ -995,7 +996,7 @@
             '<div class="ha-view" id="ha-view"><div class="ha-canvas" id="ha-canvas"><img id="ha-img" src="' + esc(sec.imagem) + '" alt="diagrama" draggable="false"></div></div>' +
             '</div>' +
             '<div class="ha-side">' +
-            '<div class="ha-list-head"><span></span><span>Clickable Area (px)</span><span>Link Number</span><span></span></div>' +
+            '<div class="ha-list-head"><span></span><span>#</span><span>Clickable Area (px)</span><span>Link Number</span><span></span></div>' +
             '<div id="ha-list" class="ha-scroll"></div>' +
             '</div></div>'
           : '<p class="muted">Envie a imagem do diagrama explodido para poder marcar as áreas clicáveis.</p>') +
@@ -1120,6 +1121,11 @@
       var hs = sec.hotspots.map(function (h) {
         return { x: h.x, y: h.y, w: h.w, h: h.h, texto: h.texto || '', linkNumero: h.linkNumero || '' };
       });
+      // Preferência do admin (lembrada entre seções): mostrar ou não o número
+      // de POSIÇÃO nas áreas do diagrama. É só um apoio visual da montagem — o
+      // cliente nunca vê esses números.
+      var NUM_KEY = 'fullgas_finder_ha_nums';
+      var mostrarNums = localStorage.getItem(NUM_KEY) !== '0';
 
       // Zoom igual ao finder do cliente: o slider define a largura do canvas
       // (natW*z); a imagem ocupa 100% do canvas e as caixas se posicionam em %,
@@ -1147,20 +1153,29 @@
         b.style.top = (h.y / natH * 100) + '%';
         b.style.width = (h.w / natW * 100) + '%';
         b.style.height = (h.h / natH * 100) + '%';
-        b.innerHTML = '<span>' + esc(h.linkNumero || (i + 1)) + '</span>';
+        // O número da área é a POSIÇÃO na lista (começa em 0), não o Link
+        // Number da peça — reordenar a lista renumera as áreas na hora.
+        b.innerHTML = '<span>' + i + '</span>';
         return b;
       }
 
       function desenharBoxes() {
         Array.prototype.forEach.call(canvas.querySelectorAll('.ha-box'), function (el) { el.remove(); });
+        canvas.classList.toggle('ha-nonum', !mostrarNums);
         hs.forEach(function (h, i) { canvas.appendChild(boxHTML(h, i)); });
       }
 
       // O campo "Texto (opcional)" foi removido da interface (nunca é usado);
       // o valor que existir no banco é preservado em hs[i].texto ao salvar.
+      // A lista pode ser reordenada arrastando pelo "⠿": mover uma linha
+      // reordena o array hs e, como o número da área é a posição, renumera
+      // tudo automaticamente (canvas + lista).
+      var dragLista = null; // índice da linha sendo arrastada
       function desenharLista() {
         lista.innerHTML = hs.map(function (h, i) {
-          return '<div class="ha-row" data-i="' + i + '"><span class="muted">' + i + '</span>' +
+          return '<div class="ha-row" data-i="' + i + '" draggable="false">' +
+            '<span class="ha-grip" title="Arraste para reordenar">⠿</span>' +
+            '<span class="muted ha-idx">' + i + '</span>' +
             '<span class="ha-size"><input class="hw" type="number" min="8" value="' + h.w + '"> × ' +
             '<input class="hh" type="number" min="8" value="' + h.h + '"></span>' +
             '<input class="hl" type="text" maxlength="12" placeholder="nº" value="' + esc(h.linkNumero) + '">' +
@@ -1176,12 +1191,47 @@
             hs.splice(i, 1); desenharBoxes(); desenharLista();
           });
           row.addEventListener('mouseenter', function () {
+            if (dragLista != null) return;
             var b = canvas.querySelector('.ha-box[data-i="' + i + '"]');
             if (b) b.classList.add('sel');
           });
           row.addEventListener('mouseleave', function () {
             var b = canvas.querySelector('.ha-box[data-i="' + i + '"]');
             if (b) b.classList.remove('sel');
+          });
+
+          /* ---- reordenar arrastando (só a partir do "grip") ---- */
+          var grip = row.querySelector('.ha-grip');
+          grip.addEventListener('mousedown', function () { row.draggable = true; });
+          grip.addEventListener('mouseup', function () { row.draggable = false; });
+          row.addEventListener('dragstart', function (e) {
+            dragLista = i;
+            row.classList.add('arrastando');
+            e.dataTransfer.effectAllowed = 'move';
+            try { e.dataTransfer.setData('text/plain', String(i)); } catch (_) {}
+          });
+          row.addEventListener('dragend', function () {
+            row.draggable = false;
+            dragLista = null;
+            Array.prototype.forEach.call(lista.querySelectorAll('.ha-row'), function (r) {
+              r.classList.remove('arrastando', 'drop-alvo');
+            });
+          });
+          row.addEventListener('dragover', function (e) {
+            if (dragLista == null) return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            if (i !== dragLista) row.classList.add('drop-alvo');
+          });
+          row.addEventListener('dragleave', function () { row.classList.remove('drop-alvo'); });
+          row.addEventListener('drop', function (e) {
+            e.preventDefault();
+            var alvo = Number(row.getAttribute('data-i'));
+            if (dragLista == null || alvo === dragLista) return;
+            var movido = hs.splice(dragLista, 1)[0];
+            hs.splice(alvo, 0, movido);
+            dragLista = null;
+            desenharBoxes(); desenharLista();
           });
         });
       }
@@ -1245,6 +1295,15 @@
 
       slider.addEventListener('input', function () { aplicarZoom(Number(slider.value)); });
       document.getElementById('ha-reset').addEventListener('click', function () { aplicarZoom(zoomAjuste()); });
+
+      var btnNums = document.getElementById('ha-nums');
+      btnNums.classList.toggle('on', mostrarNums);
+      btnNums.addEventListener('click', function () {
+        mostrarNums = !mostrarNums;
+        localStorage.setItem(NUM_KEY, mostrarNums ? '1' : '0');
+        btnNums.classList.toggle('on', mostrarNums);
+        canvas.classList.toggle('ha-nonum', !mostrarNums);
+      });
     }, function () {
       view.innerHTML = '<div class="adm-card"><div class="c-body">Seção não encontrada. <a href="#finder">Voltar</a></div></div>';
     });
