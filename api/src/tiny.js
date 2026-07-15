@@ -186,6 +186,40 @@ export async function obterProdutoCompleto(tinyId) {
   };
 }
 
+/* ---------------- contatos (clientes) no Tiny ---------------- */
+
+// Procura um contato pelo CPF/CNPJ exato. O Tiny devolve codigo_erro 20
+// quando a pesquisa não encontra nada — isso não é erro, é "não existe".
+// Devolve { id, nome } do primeiro contato ou null.
+export async function pesquisarContatoPorCpfCnpj(cpfCnpj) {
+  let ret;
+  try {
+    ret = await tinyPost('contatos.pesquisa.php', { cpf_cnpj: cpfCnpj }, { prioritario: true });
+  } catch (e) {
+    if (e instanceof TinyError && e.codigo === '20') return null;
+    throw e;
+  }
+  const c = (ret.contatos || []).map(w => w.contato).filter(Boolean)[0];
+  return c ? { id: String(c.id), nome: c.nome || '' } : null;
+}
+
+// Inclui um contato no Tiny (contato.incluir.php). Recebe o objeto já no
+// formato da API v2 (nome, tipo_pessoa, cpf_cnpj, endereco...) e devolve
+// { id } do contato criado. Mesmo formato de retorno de pedido.incluir.
+export async function incluirContato(contato) {
+  const ret = await tinyPost('contato.incluir.php',
+    { contato: JSON.stringify({ contatos: [{ contato }] }) }, { prioritario: true });
+  const regs = ret.registros;
+  const reg = Array.isArray(regs) ? regs[0]?.registro : (regs?.registro ?? regs);
+  if (String(reg?.status).toLowerCase() === 'erro') {
+    const msg = (reg.erros || []).map(e => e?.erro).filter(Boolean).join('; ')
+      || 'Erro não especificado ao incluir o contato.';
+    throw new TinyError(`Tiny: ${msg}`, reg.codigo_erro);
+  }
+  if (!reg?.id) throw new TinyError('Tiny não devolveu o id do contato incluído.');
+  return { id: String(reg.id) };
+}
+
 /* ---------------- pedidos no Tiny (escrita) ---------------- */
 
 // Saldo atual de um produto no Tiny — usado pela checagem em tempo real do

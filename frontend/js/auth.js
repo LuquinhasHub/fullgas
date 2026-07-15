@@ -47,7 +47,10 @@
 
   /* ---------- máscaras (helpers em store.js — FG.mask*) ---------- */
   FG.bindMask('cd-cnpj', FG.maskCnpj);
+  FG.bindMask('cd-ie', FG.maskIe);
   FG.bindMask('cd-telefone', FG.maskTelefone);
+  FG.bindMask('cd-numero', FG.maskNumero);     // só dígitos
+  FG.bindMask('cd-cidade', FG.maskCidade);     // sem números/caracteres especiais
 
   /* ---------- CEP: busca automática (ViaCEP) ----------
      Ao completar os 8 dígitos, preenche logradouro, bairro, cidade e UF —
@@ -83,6 +86,7 @@
       email: val('cd-email'),
       senha: document.getElementById('cd-senha').value,
       cnpj: val('cd-cnpj'),
+      inscricaoEstadual: val('cd-ie'),
       telefone: val('cd-telefone'),
       endereco: {
         cep: val('cd-cep'),
@@ -107,6 +111,8 @@
     if (!e.logradouro || !e.numero || !e.bairro || !e.cidade || !e.uf) {
       showMsg('Preencha o endereço: logradouro, número, bairro, cidade e UF.'); return;
     }
+    if (!/^\d+$/.test(e.numero)) { showMsg('Número do endereço deve conter apenas dígitos.'); return; }
+    if (/[^A-Za-zÀ-ÖØ-öø-ÿ'. -]/.test(e.cidade)) { showMsg('Cidade não pode conter números ou caracteres especiais.'); return; }
 
     var r = await FG.register(dados);
     if (!r.ok) { showMsg(r.msg); return; }

@@ -34,6 +34,7 @@ import cron from 'node-cron';
 import 'dotenv/config';
 import { sincronizarLote, podarLogCron } from './tiny.js';
 import { processarExportacoes } from './tiny-pedidos.js';
+import { processarContatosPendentes } from './tiny-contatos.js';
 
 // Trava de sobreposição: true enquanto uma rodada está em andamento.
 let rodando = false;
@@ -65,6 +66,10 @@ async function rodada() {
     // quando não há nada na fila; e precisa vir ANTES: enquanto a exportação
     // não chega ao Tiny, o espelho desconta a reserva pendente do saldo.
     await processarExportacoes();
+
+    // Cadastros que ainda não foram atrelados a um contato no Tiny (o Tiny
+    // estava fora na hora do registro, etc.) — barato quando não há pendência.
+    await processarContatosPendentes();
 
     const resultados = await sincronizarLote(null, 'cron');
     // O log do cron só guarda os 3 últimos registros de cada produto — o

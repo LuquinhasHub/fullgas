@@ -141,15 +141,47 @@
           acoes += '<span class="muted">(você)</span>';
         }
         var e = u.endereco;
-        var endTxt = e ? (esc(e.logradouro) + (e.numero ? ', ' + esc(e.numero) : '') +
-          (e.cidade ? ' — ' + esc(e.cidade) + (e.uf ? '/' + esc(e.uf) : '') : '')) : '<span class="muted">—</span>';
+        // Resumo compacto na tabela; os dados completos ficam na linha
+        // expansível abaixo (botão "Expandir ▾"), bem divididos campo a campo.
+        var endTxt = e ? (esc(e.cidade || '') + (e.uf ? '/' + esc(e.uf) : '')) : '<span class="muted">—</span>';
+        function dd(rotulo, valor) {
+          return '<div class="usr-dd"><b>' + rotulo + '</b><span>' +
+            (valor ? esc(valor) : '<i class="muted">—</i>') + '</span></div>';
+        }
+        var det =
+          '<div class="usr-det-sec">Empresa</div><div class="usr-det-grid">' +
+          dd('Razão social', u.empresa) + dd('CNPJ', u.cnpj) +
+          dd('Inscrição estadual', u.inscricaoEstadual) + dd('Telefone', u.telefone) +
+          '<div class="usr-dd"><b>Contato Tiny</b><span>' + (u.tinyContatoId
+            ? 'vinculado <span class="muted">(#' + esc(u.tinyContatoId) + ')</span>'
+            : '<i class="muted">não vinculado</i>') + '</span></div>' +
+          '</div>' +
+          '<div class="usr-det-sec">Endereço</div>' +
+          (e ? '<div class="usr-det-grid">' +
+            dd('CEP', e.cep) + dd('Logradouro', e.logradouro) + dd('Número', e.numero) +
+            dd('Complemento', e.complemento) + dd('Bairro', e.bairro) +
+            dd('Cidade', e.cidade) + dd('UF', e.uf) +
+            '</div>' : '<p class="muted" style="margin:4px 0 0;">Sem endereço cadastrado.</p>');
         return '<tr><td>' + esc(u.nome) +
           (u.gestor === false ? ' <span class="muted" style="font-size:11px;">(interna)</span>' : '') +
           '</td><td>' + esc(u.email) + '</td><td>' + esc(u.empresa) + '</td>' +
           '<td>' + (u.cnpj ? esc(u.cnpj) : '<span class="muted">—</span>') + '</td>' +
-          '<td style="font-size:12px;">' + endTxt + '</td>' +
-          '<td>' + pill(u.papel) + '</td><td>' + pill(u.status) + '</td><td>' + acoes + '</td></tr>';
+          '<td style="font-size:12px;">' + endTxt +
+          ' <button class="btn-line btn-mini usr-exp" data-exp="' + u.id + '">Expandir ▾</button></td>' +
+          '<td>' + pill(u.papel) + '</td><td>' + pill(u.status) + '</td><td>' + acoes + '</td></tr>' +
+          '<tr class="usr-det hidden" data-det="' + u.id + '"><td colspan="8">' + det + '</td></tr>';
       }).join('') + '</tbody></table></div></div>';
+
+    // Expandir/recolher os dados completos do cadastro.
+    Array.prototype.forEach.call(view.querySelectorAll('[data-exp]'), function (b) {
+      b.addEventListener('click', function () {
+        var det = view.querySelector('[data-det="' + b.getAttribute('data-exp') + '"]');
+        if (!det) return;
+        var aberto = !det.classList.contains('hidden');
+        det.classList.toggle('hidden', aberto);
+        b.textContent = aberto ? 'Expandir ▾' : 'Recolher ▴';
+      });
+    });
 
     Array.prototype.forEach.call(view.querySelectorAll('[data-ac]'), function (b) {
       b.addEventListener('click', function () {

@@ -23,7 +23,9 @@ function toUsuario(r) {
     empresa: r.Empresa || '',
     empresaId: r.EmpresaId,
     cnpj: r.Cnpj || '',
+    inscricaoEstadual: r.InscricaoEstadual || '',
     telefone: r.Telefone || '',
+    tinyContatoId: r.TinyContatoId || null,   // contato do Tiny atrelado ao CNPJ
     criadoEm: r.CriadoEm,
     endereco: r.Logradouro ? {
       logradouro: r.Logradouro, numero: r.Numero || '', complemento: r.Complemento || '',
@@ -37,7 +39,7 @@ router.get('/usuarios', requireAuth, requireAdmin, async (_req, res, next) => {
   try {
     const rows = await query(
       `SELECT u.UsuarioId, u.Nome, u.Email, u.Papel, u.Status, u.Gestor, u.CriadoEm, u.EmpresaId,
-              e.RazaoSocial AS Empresa, e.Cnpj, e.Telefone,
+              e.RazaoSocial AS Empresa, e.Cnpj, e.InscricaoEstadual, e.Telefone, e.TinyContatoId,
               en.Logradouro, en.Numero, en.Complemento, en.Bairro, en.Cidade, en.Uf, en.Cep
          FROM dbo.Usuario u
          JOIN dbo.Empresa e ON e.EmpresaId = u.EmpresaId

@@ -550,6 +550,18 @@
     maskCep: function (v) {
       return String(v).replace(/\D/g, '').slice(0, 8).replace(/^(\d{5})(\d)/, '$1-$2');
     },
+    // Número do endereço: só dígitos.
+    maskNumero: function (v) {
+      return String(v).replace(/\D/g, '').slice(0, 10);
+    },
+    // Cidade: só letras (com acento), espaço, apóstrofo, ponto e hífen.
+    maskCidade: function (v) {
+      return String(v).replace(/[^A-Za-zÀ-ÖØ-öø-ÿ'. -]/g, '').replace(/^[^A-Za-zÀ-ÖØ-öø-ÿ]+/, '').slice(0, 80);
+    },
+    // Inscrição estadual: maiúsculas; dígitos, letras, ponto, hífen, barra.
+    maskIe: function (v) {
+      return String(v).toUpperCase().replace(/[^0-9A-Z./ -]/g, '').slice(0, 20);
+    },
     // Liga uma máscara num input; `aoDigitar` (opcional) recebe o valor já
     // formatado a cada tecla — usado p/ disparar a busca de CEP.
     bindMask: function (id, fn, aoDigitar) {

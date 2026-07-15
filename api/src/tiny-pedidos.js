@@ -100,7 +100,8 @@ export async function montarPayload(exp) {
   const ped = (await query(
     `SELECT p.PedidoId, p.NumeroPedido, p.DataPedido, p.EmpresaId, p.Tipo,
             u.Email AS UsuarioEmail,
-            e.RazaoSocial, e.NomeFantasia, e.Cnpj, e.Email AS EmpresaEmail, e.Telefone
+            e.RazaoSocial, e.NomeFantasia, e.Cnpj, e.InscricaoEstadual,
+            e.Email AS EmpresaEmail, e.Telefone
        FROM dbo.Pedido p
        JOIN dbo.Usuario u ON u.UsuarioId = p.UsuarioId
        JOIN dbo.Empresa e ON e.EmpresaId = p.EmpresaId
@@ -140,6 +141,7 @@ export async function montarPayload(exp) {
   };
   if (ped.NomeFantasia) cliente.nome_fantasia = ped.NomeFantasia;
   if (cnpj) cliente.cpf_cnpj = cnpj;
+  if (ped.InscricaoEstadual) cliente.ie = ped.InscricaoEstadual;
   if (ped.Telefone) cliente.fone = ped.Telefone;
   if (end) {
     cliente.endereco = end.Logradouro;

@@ -190,3 +190,16 @@ span.fnd-thumb.vazio { display: inline-flex; align-items: center; justify-conten
   .adm-body { padding: 16px 12px 60px; }
   .fnd-2col { grid-template-columns: 1fr; }
 }
+
+/* ---- administração de usuários: linha expansível com o cadastro completo
+   (empresa + endereço bem divididos campo a campo) ---- */
+.usr-exp { margin-left: 6px; white-space: nowrap; }
+.usr-det > td { background: #faf8f6; border-top: none; padding: 12px 16px 14px; }
+.usr-det-sec { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px;
+  color: #8a7f77; margin: 10px 0 6px; }
+.usr-det-sec:first-child { margin-top: 0; }
+.usr-det-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 8px 14px; }
+.usr-dd { display: flex; flex-direction: column; gap: 2px; background: #fff;
+  border: 1px solid var(--adm-line); border-radius: 3px; padding: 6px 9px; min-width: 0; }
+.usr-dd b { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .3px; color: #8a7f77; }
+.usr-dd span { font-size: 13px; color: #2f2a26; word-break: break-word; }

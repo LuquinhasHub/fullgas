@@ -5,6 +5,8 @@ import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import { query, getPool, sql } from '../db.js';
 import { signToken, parsePermissoes } from '../auth.js';
+import { erroEndereco, limparIe } from '../validacao.js';
+import { vincularContatoTiny } from '../tiny-contatos.js';
 
 const router = Router();
 
@@ -49,11 +51,13 @@ router.post('/login', async (req, res, next) => {
 });
 
 // POST /api/auth/register
-//   { nome, empresa, email, senha, cnpj, telefone,
+//   { nome, empresa, email, senha, cnpj, inscricaoEstadual?, telefone,
 //     endereco: { cep, logradouro, numero, complemento, bairro, cidade, uf } }
 //
 // O CNPJ e o endereço principal já entram no cadastro da EMPRESA — assim o
 // pedido exportado ao Tiny sai com os dados do cliente e o admin vê tudo.
+// Após o commit, o CNPJ é atrelado a um contato no Tiny (tiny-contatos.js):
+// existente → vincula; inexistente → cria lá com os dados do cadastro.
 router.post('/register', async (req, res, next) => {
   try {
     const { nome, empresa, email, senha, cnpj, telefone } = req.body;
@@ -64,8 +68,9 @@ router.post('/register', async (req, res, next) => {
       return res.status(400).json({ erro: 'A senha precisa de ao menos 6 caracteres.' });
     if (!cnpj)
       return res.status(400).json({ erro: 'Informe o CNPJ da empresa.' });
-    if (!end.logradouro || !end.numero || !end.bairro || !end.cidade || !end.uf || !end.cep)
-      return res.status(400).json({ erro: 'Preencha o endereço (CEP, logradouro, número, bairro, cidade e UF).' });
+    const errEnd = erroEndereco(end);
+    if (errEnd) return res.status(400).json({ erro: errEnd });
+    const ie = limparIe(req.body.inscricaoEstadual);
 
     const existe = await query('SELECT 1 FROM dbo.Usuario WHERE Email = @email', { email });
     if (existe.length) return res.status(409).json({ erro: 'Já existe um usuário com este e-mail.' });
@@ -73,6 +78,7 @@ router.post('/register', async (req, res, next) => {
     const hash = await bcrypt.hash(senha, 10);
     const pool = await getPool();
     const tx = new sql.Transaction(pool);
+    let empresaId;
     try {
       await tx.begin();
 
@@ -88,28 +94,32 @@ router.post('/register', async (req, res, next) => {
           .query('SELECT EmpresaId FROM dbo.Empresa WHERE RazaoSocial = @r')).recordset[0];
       }
 
-      let empresaId;
       if (empRow) {
         empresaId = empRow.EmpresaId;
+        // TinyContatoPendente: agenda o vínculo com o Tiny se ainda não há um.
         await new sql.Request(tx)
           .input('id', sql.Int, empresaId)
           .input('cnpj', sql.VarChar(18), cnpj)
+          .input('ie', sql.VarChar(20), ie)
           .input('email', sql.NVarChar(160), email)
           .input('tel', sql.VarChar(30), telefone || null)
           .query(`UPDATE dbo.Empresa
                      SET Cnpj = COALESCE(Cnpj, @cnpj),
+                         InscricaoEstadual = COALESCE(InscricaoEstadual, @ie),
                          Email = COALESCE(Email, @email),
                          Telefone = COALESCE(Telefone, @tel),
+                         TinyContatoPendente = CASE WHEN TinyContatoId IS NULL THEN 1 ELSE TinyContatoPendente END,
                          AtualizadoEm = SYSUTCDATETIME()
                    WHERE EmpresaId = @id`);
       } else {
         empresaId = (await new sql.Request(tx)
           .input('r', sql.NVarChar(160), empresa)
           .input('cnpj', sql.VarChar(18), cnpj)
+          .input('ie', sql.VarChar(20), ie)
           .input('email', sql.NVarChar(160), email)
           .input('tel', sql.VarChar(30), telefone || null)
-          .query(`INSERT INTO dbo.Empresa (RazaoSocial, Cnpj, Email, Telefone)
-                  OUTPUT INSERTED.EmpresaId VALUES (@r, @cnpj, @email, @tel)`)).recordset[0].EmpresaId;
+          .query(`INSERT INTO dbo.Empresa (RazaoSocial, Cnpj, InscricaoEstadual, Email, Telefone, TinyContatoPendente)
+                  OUTPUT INSERTED.EmpresaId VALUES (@r, @cnpj, @ie, @email, @tel, 1)`)).recordset[0].EmpresaId;
       }
 
       // Endereço principal (só grava se a empresa ainda não tiver nenhum).
@@ -147,6 +157,11 @@ router.post('/register', async (req, res, next) => {
       await tx.rollback();
       throw e;
     }
+
+    // Atrela o CNPJ a um contato no Tiny (existente → vincula; não existe →
+    // cria). Fire-and-forget: se o Tiny estiver fora, a empresa fica com
+    // TinyContatoPendente = 1 e o cron re-tenta — o cadastro nunca trava.
+    vincularContatoTiny(empresaId).catch(() => { });
 
     res.status(201).json({ ok: true, msg: 'Cadastro enviado. Aguarde aprovação do administrador.' });
   } catch (e) { next(e); }

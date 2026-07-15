@@ -13,6 +13,7 @@ import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import { query, getPool, sql } from '../db.js';
 import { requireAuth, AREAS, parsePermissoes } from '../auth.js';
+import { erroEndereco, limparIe } from '../validacao.js';
 
 const router = Router();
 
@@ -27,7 +28,7 @@ function requireGestor(req, res, next) {
 router.get('/conta', requireAuth, async (req, res, next) => {
   try {
     const emp = (await query(
-      `SELECT e.EmpresaId, e.RazaoSocial, e.NomeFantasia, e.Cnpj, e.Email, e.Telefone
+      `SELECT e.EmpresaId, e.RazaoSocial, e.NomeFantasia, e.Cnpj, e.InscricaoEstadual, e.Email, e.Telefone
          FROM dbo.Empresa e WHERE e.EmpresaId = @eid`,
       { eid: req.user.empresaId }
     ))[0];
@@ -50,7 +51,8 @@ router.get('/conta', requireAuth, async (req, res, next) => {
     res.json({
       empresa: {
         id: emp.EmpresaId, razaoSocial: emp.RazaoSocial, nomeFantasia: emp.NomeFantasia || '',
-        cnpj: emp.Cnpj || '', email: emp.Email || '', telefone: emp.Telefone || ''
+        cnpj: emp.Cnpj || '', inscricaoEstadual: emp.InscricaoEstadual || '',
+        email: emp.Email || '', telefone: emp.Telefone || ''
       },
       endereco: end ? {
         logradouro: end.Logradouro, numero: end.Numero || '', complemento: end.Complemento || '',
@@ -72,8 +74,9 @@ router.put('/conta/empresa', requireAuth, requireGestor, async (req, res, next) 
     const { cnpj, telefone, email } = req.body;
     const end = req.body.endereco || {};
     if (!cnpj) return res.status(400).json({ erro: 'Informe o CNPJ.' });
-    if (!end.logradouro || !end.numero || !end.bairro || !end.cidade || !end.uf || !end.cep)
-      return res.status(400).json({ erro: 'Preencha o endereço (CEP, logradouro, número, bairro, cidade e UF).' });
+    const errEnd = erroEndereco(end);
+    if (errEnd) return res.status(400).json({ erro: errEnd });
+    const ie = limparIe(req.body.inscricaoEstadual);
 
     const pool = await getPool();
     const tx = new sql.Transaction(pool);
@@ -83,10 +86,11 @@ router.put('/conta/empresa', requireAuth, requireGestor, async (req, res, next) 
       await new sql.Request(tx)
         .input('eid', sql.Int, req.user.empresaId)
         .input('cnpj', sql.VarChar(18), cnpj)
+        .input('ie', sql.VarChar(20), ie)
         .input('email', sql.NVarChar(160), email || null)
         .input('tel', sql.VarChar(30), telefone || null)
         .query(`UPDATE dbo.Empresa
-                   SET Cnpj = @cnpj, Email = @email, Telefone = @tel,
+                   SET Cnpj = @cnpj, InscricaoEstadual = @ie, Email = @email, Telefone = @tel,
                        AtualizadoEm = SYSUTCDATETIME()
                  WHERE EmpresaId = @eid`);
 

@@ -1163,6 +1163,7 @@
         '<div class="conta-grid">' +
         '<div class="field"><label>Razão social</label><input type="text" value="' + esc(c.empresa.razaoSocial) + '" readonly disabled></div>' +
         '<div class="field"><label for="ct-cnpj">CNPJ</label><input id="ct-cnpj" type="text" maxlength="18" value="' + esc(c.empresa.cnpj) + '"' + ro + '></div>' +
+        '<div class="field"><label for="ct-ie">Inscrição estadual (opcional)</label><input id="ct-ie" type="text" maxlength="20" value="' + esc(c.empresa.inscricaoEstadual || '') + '"' + ro + '></div>' +
         '<div class="field"><label for="ct-tel">Telefone</label><input id="ct-tel" type="text" maxlength="15" value="' + esc(c.empresa.telefone) + '"' + ro + '></div>' +
         '<div class="field"><label for="ct-email">E-mail da empresa</label><input id="ct-email" type="email" value="' + esc(c.empresa.email) + '"' + ro + '></div>' +
         '</div>' +
@@ -1223,7 +1224,10 @@
 
       /* máscaras + ViaCEP no cadastro da empresa */
       FG.bindMask('ct-cnpj', FG.maskCnpj);
+      FG.bindMask('ct-ie', FG.maskIe);
       FG.bindMask('ct-tel', FG.maskTelefone);
+      FG.bindMask('ct-num', FG.maskNumero);
+      FG.bindMask('ct-cidade', FG.maskCidade);
       var cepBuscado = (e.cep || '').replace(/\D/g, '');
       FG.bindMask('ct-cep', FG.maskCep, function (valor, el) {
         var dig = valor.replace(/\D/g, '');
@@ -1248,13 +1252,15 @@
       document.getElementById('ct-salvar').addEventListener('click', function () {
         var v = function (id) { return document.getElementById(id).value.trim(); };
         var dados = {
-          cnpj: v('ct-cnpj'), telefone: v('ct-tel'), email: v('ct-email'),
+          cnpj: v('ct-cnpj'), inscricaoEstadual: v('ct-ie'), telefone: v('ct-tel'), email: v('ct-email'),
           endereco: { cep: v('ct-cep'), logradouro: v('ct-log'), numero: v('ct-num'),
             complemento: v('ct-comp'), bairro: v('ct-bairro'), cidade: v('ct-cidade'),
             uf: v('ct-uf').toUpperCase() }
         };
         if (dados.cnpj.replace(/\D/g, '').length !== 14) { FG.toast('CNPJ incompleto — use os 14 dígitos.', 'erro'); return; }
         if (dados.endereco.cep.replace(/\D/g, '').length !== 8) { FG.toast('CEP incompleto.', 'erro'); return; }
+        if (!/^\d+$/.test(dados.endereco.numero)) { FG.toast('Número do endereço deve conter apenas dígitos.', 'erro'); return; }
+        if (/[^A-Za-zÀ-ÖØ-öø-ÿ'. -]/.test(dados.endereco.cidade)) { FG.toast('Cidade não pode conter números ou caracteres especiais.', 'erro'); return; }
         FG.contaSalvarEmpresa(dados).then(function (r) {
           if (!r.ok) { FG.toast(r.msg || 'Não foi possível salvar.', 'erro'); return; }
           FG.toast('Dados da empresa salvos.');
