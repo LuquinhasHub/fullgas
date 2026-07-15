@@ -131,12 +131,16 @@
       '<table class="tbl"><thead><tr><th>Nome</th><th>E-mail</th><th>Empresa</th><th>CNPJ</th><th>Endereço</th><th>Papel</th><th>Status</th><th>Ações</th></tr></thead><tbody>' +
       users.map(function (u) {
         var acoes = '';
-        if (u.status === 'pendente') acoes += '<button class="btn-orange btn-mini" data-ac="aprovar" data-id="' + u.id + '">Aprovar</button> ';
-        if (String(u.id) !== String(sess.id)) {
+        if (u.master) {
+          // Conta suprema: sem ações — não pode ser excluída/bloqueada por ninguém.
+          acoes = '<span class="muted">(protegido)</span>';
+        } else if (String(u.id) !== String(sess.id)) {
+          if (u.status === 'pendente') acoes += '<button class="btn-orange btn-mini" data-ac="aprovar" data-id="' + u.id + '">Aprovar</button> ';
           acoes += '<button class="btn-line btn-mini" data-ac="papel" data-id="' + u.id + '">' +
             (u.papel === 'admin' ? 'Tornar cliente' : 'Tornar admin') + '</button> ';
           acoes += '<button class="btn-line btn-mini" data-ac="bloq" data-id="' + u.id + '">' +
-            (u.status === 'bloqueado' ? 'Desbloquear' : 'Bloquear') + '</button>';
+            (u.status === 'bloqueado' ? 'Desbloquear' : 'Bloquear') + '</button> ';
+          acoes += '<button class="btn-line btn-mini usr-del" data-ac="del" data-id="' + u.id + '">Excluir</button>';
         } else {
           acoes += '<span class="muted">(você)</span>';
         }
@@ -163,6 +167,7 @@
             dd('Cidade', e.cidade) + dd('UF', e.uf) +
             '</div>' : '<p class="muted" style="margin:4px 0 0;">Sem endereço cadastrado.</p>');
         return '<tr><td>' + esc(u.nome) +
+          (u.master ? ' <span class="usr-master" title="Conta suprema — não pode ser excluída nem bloqueada">MASTER</span>' : '') +
           (u.gestor === false ? ' <span class="muted" style="font-size:11px;">(interna)</span>' : '') +
           '</td><td>' + esc(u.email) + '</td><td>' + esc(u.empresa) + '</td>' +
           '<td>' + (u.cnpj ? esc(u.cnpj) : '<span class="muted">—</span>') + '</td>' +
@@ -197,6 +202,15 @@
         } else if (ac === 'bloq') {
           var st = u.status === 'bloqueado' ? 'aprovado' : 'bloqueado';
           patch = { status: st }; msg = st === 'bloqueado' ? 'Usuário bloqueado.' : 'Usuário desbloqueado.';
+        } else if (ac === 'del') {
+          if (!confirm('Excluir o usuário "' + u.nome + '" (' + u.email + ')?\nEsta ação não pode ser desfeita.')) return;
+          b.disabled = true;
+          FG.delUser(id).then(function (r) {
+            if (r && r.ok === false) { FG.toast(r.msg || 'Não foi possível excluir o usuário.', 'erro'); b.disabled = false; return; }
+            FG.toast('Usuário excluído.');
+            refreshBell(); renderUsuarios();
+          });
+          return;
         }
         if (!patch) return;
         b.disabled = true;

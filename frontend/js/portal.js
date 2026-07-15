@@ -1106,14 +1106,14 @@
     area.classList.remove('hidden');
     area.innerHTML =
       '<div style="font-family:Arial,sans-serif;max-width:680px;">' +
-      '<h1 style="color:#d20a11;font-style:italic;">FULLGAS</h1>' +
+      '<h1 style="color:#e5b100;font-style:italic;">FULLGAS</h1>' +
       '<h2>' + esc(i.tipo) + ' n° ' + i.numero + '</h2>' +
       '<p><b>Data:</b> ' + FG.fmtDate(i.data) + '<br><b>Cliente:</b> ' + esc(sess.empresa) + '<br>' +
       (i.referencia ? '<b>Ref. reivindicação:</b> ' + esc(i.referencia) + '<br>' : '') +
       '<b>Moeda:</b> ' + esc(i.moeda) + '</p>' +
       '<table style="width:100%;border-collapse:collapse;margin-top:14px;">' +
-      '<tr><th style="text-align:left;border-bottom:2px solid #d20a11;padding:8px 4px;">Descrição</th>' +
-      '<th style="text-align:right;border-bottom:2px solid #d20a11;padding:8px 4px;">Valor</th></tr>' +
+      '<tr><th style="text-align:left;border-bottom:2px solid #e5b100;padding:8px 4px;">Descrição</th>' +
+      '<th style="text-align:right;border-bottom:2px solid #e5b100;padding:8px 4px;">Valor</th></tr>' +
       '<tr><td style="padding:8px 4px;">Movimentação de peças e acessórios</td>' +
       '<td style="text-align:right;padding:8px 4px;">' + FG.fmtMoney(i.valor) + '</td></tr>' +
       '<tr><td style="padding:14px 4px;font-weight:700;">Total</td>' +

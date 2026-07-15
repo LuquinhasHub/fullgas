@@ -150,6 +150,16 @@
     });
   };
 
+  // Exclui um cliente indesejado/bloqueado (admin). Master e usuários com
+  // histórico são recusados pela API. Devolve Promise<{ ok, msg? }>.
+  FG.delUser = function (id) {
+    return req('DELETE', '/usuarios/' + encodeURIComponent(id)).then(function (r) {
+      if (!r.ok) return r;
+      CACHE.users = CACHE.users.filter(function (x) { return String(x.id) !== String(id); });
+      return r;
+    });
+  };
+
   function recarregarProdutos() {
     return apiGet('/produtos').then(function (l) { if (l) CACHE.products = l; return l; });
   }

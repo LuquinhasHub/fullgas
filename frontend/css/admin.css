@@ -4,7 +4,8 @@
 :root {
   --adm-side: #373330;
   --adm-side-hover: #4a4542;
-  --adm-orange: #eb5202;
+  /* "--adm-orange" é histórico (tema Magento): hoje é o AMARELO da marca. */
+  --adm-orange: #e5b100;
   --adm-blue: #007bdb;
   --adm-bg: #f8f8f8;
   --adm-line: #e3e3e3;
@@ -33,7 +34,7 @@ body.admin { background: var(--adm-bg); color: var(--adm-ink); display: flex; mi
 .adm-top .usr { font-size: 13px; display: flex; align-items: center; gap: 8px; }
 .adm-top .usr button { background: none; border: none; color: var(--adm-blue); cursor: pointer; font-size: 13px; }
 .adm-top .bell { position: relative; font-size: 17px; }
-.adm-top .bell .dot { position: absolute; top: -3px; right: -6px; background: var(--adm-orange); color: #fff; border-radius: 8px; font-size: 9px; padding: 0 4px; }
+.adm-top .bell .dot { position: absolute; top: -3px; right: -6px; background: var(--adm-orange); color: #1c1c1c; border-radius: 8px; font-size: 9px; padding: 0 4px; }
 
 .adm-body { padding: 22px 26px 60px; }
 
@@ -44,8 +45,8 @@ body.admin { background: var(--adm-bg); color: var(--adm-ink); display: flex; mi
 .adm-bar .scope { font-size: 13px; }
 .adm-bar .grow { flex: 1; }
 
-.btn-orange { background: var(--adm-orange); color: #fff; border: none; padding: 10px 20px; font-size: 14px; font-weight: 600; border-radius: 2px; cursor: pointer; }
-.btn-orange:hover { background: #c64a02; }
+.btn-orange { background: var(--adm-orange); color: #1c1c1c; border: none; padding: 10px 20px; font-size: 14px; font-weight: 600; border-radius: 2px; cursor: pointer; }
+.btn-orange:hover { background: #c69a00; }
 .btn-line { background: #fff; border: 1px solid #adadad; color: #514943; padding: 9px 18px; font-size: 13px; border-radius: 2px; cursor: pointer; }
 .btn-line:hover { border-color: #514943; }
 .btn-mini { font-size: 12px; padding: 5px 10px; }
@@ -72,7 +73,7 @@ body.admin { background: var(--adm-bg); color: var(--adm-ink); display: flex; mi
 .chart-tabs button { border: 1px solid #ccc; background: #f1f1f1; padding: 9px 18px; font-size: 13px; cursor: pointer; }
 .chart-tabs button.on { background: #fff; border-bottom-color: #fff; font-weight: 600; }
 .chart { display: flex; align-items: flex-end; gap: 6px; height: 190px; border-bottom: 1px solid #ccc; border-left: 1px solid #ccc; padding: 6px 8px 0; }
-.chart .bar { flex: 1; background: #f8dcc4; border: 1px solid var(--adm-orange); min-height: 2px; position: relative; }
+.chart .bar { flex: 1; background: #faf0cc; border: 1px solid var(--adm-orange); min-height: 2px; position: relative; }
 .chart .bar:hover::after { content: attr(data-v); position: absolute; top: -22px; left: 50%; transform: translateX(-50%); background: #333; color: #fff; font-size: 10px; padding: 2px 6px; white-space: nowrap; }
 .chart-x { display: flex; gap: 6px; padding: 4px 8px 0; }
 .chart-x span { flex: 1; text-align: center; font-size: 10px; color: #888; }
@@ -129,14 +130,14 @@ span.fnd-thumb.vazio { display: inline-flex; align-items: center; justify-conten
 .ha-tools .grow { flex: 1; }
 .ha-tools .dg-btn { background: #fff; border: 1px solid #ccc; width: 28px; height: 24px; cursor: pointer; font-size: 12px; line-height: 1; }
 .ha-tools .dg-btn:hover { border-color: var(--adm-orange); color: var(--adm-orange); }
-.ha-tools .dg-btn.on { background: var(--adm-orange); border-color: var(--adm-orange); color: #fff; }
+.ha-tools .dg-btn.on { background: var(--adm-orange); border-color: var(--adm-orange); color: #1c1c1c; }
 .ha-tools input[type="range"] { width: 150px; accent-color: var(--adm-orange); }
 .ha-tools .dg-marks { font-size: 10px; color: #555; letter-spacing: .02em; }
 .ha-view { overflow: auto; height: 560px; background: #fff; }
 .ha-canvas { position: relative; width: 100%; line-height: 0; }
 .ha-canvas img { display: block; width: 100%; height: auto; user-select: none; }
 .ha-box {
-  position: absolute; border: 2px solid #f5c400; background: rgba(245, 196, 0, .18);
+  position: absolute; border: 2px solid var(--adm-orange); background: rgba(229, 177, 0, .18);
   cursor: move; display: flex; align-items: flex-start; justify-content: flex-end;
   box-sizing: border-box; border-radius: 2px;
 }
@@ -144,7 +145,8 @@ span.fnd-thumb.vazio { display: inline-flex; align-items: center; justify-conten
   font-size: 10px; font-weight: 700; color: #7a6200; background: rgba(255, 255, 255, .85);
   padding: 0 3px; line-height: 1.3; pointer-events: none;
 }
-.ha-box.sel, .ha-box:hover { border-color: var(--adm-orange); background: rgba(235, 82, 2, .16); }
+/* seleção em PRETO: a caixa base já é amarela, o accent amarelo não destaca */
+.ha-box.sel, .ha-box:hover { border-color: #1c1c1c; background: rgba(229, 177, 0, .34); }
 /* Botão "#": oculta o número de posição das áreas do diagrama. */
 .ha-canvas.ha-nonum .ha-box span { display: none; }
 
@@ -167,7 +169,7 @@ span.fnd-thumb.vazio { display: inline-flex; align-items: center; justify-conten
 .ha-row .ha-grip { cursor: grab; color: #bbb; font-size: 14px; text-align: center; user-select: none; }
 .ha-row .ha-grip:hover { color: var(--adm-orange); }
 .ha-row.arrastando { opacity: .5; }
-.ha-row.drop-alvo { box-shadow: inset 0 2px 0 var(--adm-orange); background: #fff3e8; }
+.ha-row.drop-alvo { box-shadow: inset 0 2px 0 var(--adm-orange); background: #fdf6dd; }
 
 /* Status de compra da peça na tabela do finder (mesmo princípio de cores da
    loja: verde em estoque, amarelo pré-venda, vermelho indisponível). */
@@ -203,3 +205,9 @@ span.fnd-thumb.vazio { display: inline-flex; align-items: center; justify-conten
   border: 1px solid var(--adm-line); border-radius: 3px; padding: 6px 9px; min-width: 0; }
 .usr-dd b { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .3px; color: #8a7f77; }
 .usr-dd span { font-size: 13px; color: #2f2a26; word-break: break-word; }
+
+/* Excluir usuário (destrutivo: vermelho semântico) + selo do usuário master. */
+.usr-del { color: #b91c1c; border-color: #d9a5a5; }
+.usr-del:hover { border-color: #b91c1c; background: #fdecec; }
+.usr-master { display: inline-block; background: #1c1c1c; color: var(--adm-orange); font-size: 9px;
+  font-weight: 800; letter-spacing: .6px; padding: 2px 6px; border-radius: 3px; vertical-align: 1px; }

@@ -1,8 +1,11 @@
 // ============================================================
 // Rotas de usuários (gestão de clientes no painel admin)
-//   - GET   /usuarios      lista todos (com empresa, CNPJ e endereço)
-//   - PATCH /usuarios/:id   aprova / bloqueia / muda papel
-// Só administradores.
+//   - GET    /usuarios       lista todos (com empresa, CNPJ e endereço)
+//   - PATCH  /usuarios/:id   aprova / bloqueia / muda papel
+//   - DELETE /usuarios/:id   remove cliente indesejado/bloqueado
+// Só administradores. O usuário MASTER (Usuario.Master = 1) é intocável:
+// não pode ser excluído, bloqueado nem rebaixado por ninguém — nem aqui,
+// nem por SQL direto (trigger TR_Usuario_ProtegeMaster, migração 022).
 // ============================================================
 import { Router } from 'express';
 import { query, getPool, sql } from '../db.js';
@@ -20,6 +23,7 @@ function toUsuario(r) {
     papel: r.Papel,
     status: r.Status,
     gestor: !!r.Gestor,       // false = conta interna criada pelo gestor (sub-dealer)
+    master: !!r.Master,       // true = conta suprema, não pode ser excluída/bloqueada
     empresa: r.Empresa || '',
     empresaId: r.EmpresaId,
     cnpj: r.Cnpj || '',
@@ -38,7 +42,7 @@ function toUsuario(r) {
 router.get('/usuarios', requireAuth, requireAdmin, async (_req, res, next) => {
   try {
     const rows = await query(
-      `SELECT u.UsuarioId, u.Nome, u.Email, u.Papel, u.Status, u.Gestor, u.CriadoEm, u.EmpresaId,
+      `SELECT u.UsuarioId, u.Nome, u.Email, u.Papel, u.Status, u.Gestor, u.Master, u.CriadoEm, u.EmpresaId,
               e.RazaoSocial AS Empresa, e.Cnpj, e.InscricaoEstadual, e.Telefone, e.TinyContatoId,
               en.Logradouro, en.Numero, en.Complemento, en.Bairro, en.Cidade, en.Uf, en.Cep
          FROM dbo.Usuario u
@@ -70,6 +74,11 @@ router.patch('/usuarios/:id', requireAuth, requireAdmin, async (req, res, next) 
     if (papel && !PAPEIS.includes(papel)) return res.status(400).json({ erro: 'Papel inválido.' });
     if (!status && !papel) return res.status(400).json({ erro: 'Nada para atualizar.' });
 
+    // Master é intocável: não pode ser bloqueado nem rebaixado.
+    const alvo = (await query('SELECT Master FROM dbo.Usuario WHERE UsuarioId = @id', { id }))[0];
+    if (!alvo) return res.status(404).json({ erro: 'Usuário não encontrado.' });
+    if (alvo.Master) return res.status(403).json({ erro: 'O usuário master é protegido e não pode ser alterado.' });
+
     const request = (await getPool()).request().input('id', sql.Int, id);
     const sets = [];
     if (status) { sets.push('Status = @status'); request.input('status', sql.VarChar(12), status); }
@@ -78,6 +87,34 @@ router.patch('/usuarios/:id', requireAuth, requireAdmin, async (req, res, next) 
 
     const r = await request.query(`UPDATE dbo.Usuario SET ${sets.join(', ')} WHERE UsuarioId = @id`);
     if (!r.rowsAffected[0]) return res.status(404).json({ erro: 'Usuário não encontrado.' });
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
+// DELETE /api/usuarios/:id — remove um cliente indesejado e/ou bloqueado.
+// Master nunca é excluído (checagem aqui + trigger no banco); o admin também
+// não exclui a si mesmo. Usuário com histórico (pedidos, reivindicações...)
+// é protegido pelas FKs — nesse caso a orientação é bloquear, não excluir.
+router.delete('/usuarios/:id', requireAuth, requireAdmin, async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (!id) return res.status(400).json({ erro: 'ID inválido.' });
+    if (id === req.user.id) return res.status(400).json({ erro: 'Você não pode excluir o próprio usuário.' });
+
+    const alvo = (await query('SELECT Master, Nome FROM dbo.Usuario WHERE UsuarioId = @id', { id }))[0];
+    if (!alvo) return res.status(404).json({ erro: 'Usuário não encontrado.' });
+    if (alvo.Master) return res.status(403).json({ erro: 'O usuário master não pode ser excluído em nenhuma hipótese.' });
+
+    try {
+      await query('DELETE FROM dbo.Usuario WHERE UsuarioId = @id AND Master = 0', { id });
+    } catch (e) {
+      // FK: o usuário tem pedidos/reivindicações/etc. — histórico não se apaga.
+      if (/REFERENCE constraint|conflicted with the REFERENCE|instrução DELETE conflitou/i.test(e.message))
+        return res.status(409).json({
+          erro: 'Este usuário tem histórico (pedidos, reivindicações...) e não pode ser excluído — bloqueie o acesso dele.'
+        });
+      throw e;
+    }
     res.json({ ok: true });
   } catch (e) { next(e); }
 });
