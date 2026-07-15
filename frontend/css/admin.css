@@ -117,8 +117,22 @@ span.fnd-thumb.vazio { display: inline-flex; align-items: center; justify-conten
 .fnd-hab { font-size: 12px; white-space: nowrap; display: inline-flex; align-items: center; gap: 5px; }
 
 /* editor visual de áreas clicáveis (hotspots) */
-.ha-wrap { border: 1px solid #ccc; background: #fff; overflow: auto; max-height: 640px; margin-bottom: 14px; }
-.ha-canvas { position: relative; width: 100%; }
+/* Editor do diagrama com zoom (igual ao finder do cliente): barra de
+   ferramentas em cima, quadro (viewport) com rolagem embaixo. O JS define a
+   largura do canvas (natW*z); a imagem ocupa 100% do canvas e as caixas se
+   posicionam em % — tudo escala junto. */
+.ha-wrap {
+  border: 1px solid #ccc; background: #fafafa; margin-bottom: 14px;
+  display: flex; flex-direction: column;
+}
+.ha-tools { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 1px solid #e3e3e3; background: #fff; }
+.ha-tools .grow { flex: 1; }
+.ha-tools .dg-btn { background: #fff; border: 1px solid #ccc; width: 28px; height: 24px; cursor: pointer; font-size: 12px; line-height: 1; }
+.ha-tools .dg-btn:hover { border-color: var(--adm-orange); color: var(--adm-orange); }
+.ha-tools input[type="range"] { width: 150px; accent-color: var(--adm-orange); }
+.ha-tools .dg-marks { font-size: 10px; color: #555; letter-spacing: .02em; }
+.ha-view { overflow: auto; height: 560px; background: #fff; }
+.ha-canvas { position: relative; width: 100%; line-height: 0; }
 .ha-canvas img { display: block; width: 100%; height: auto; user-select: none; }
 .ha-box {
   position: absolute; border: 2px solid #f5c400; background: rgba(245, 196, 0, .18);

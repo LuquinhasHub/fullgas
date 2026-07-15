@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>FULLGAS B2B — Acesso</title>
-  <link rel="stylesheet" href="css/styles.css?v=20260714">
+  <link rel="stylesheet" href="css/styles.css?v=20260715">
 </head>
 <body>
   <div class="auth-wrap">
@@ -44,6 +44,16 @@
             <label for="cd-empresa">Empresa / Razão social</label>
             <input id="cd-empresa" type="text" placeholder="Nome da concessionária">
           </div>
+          <div class="field-row">
+            <div class="field">
+              <label for="cd-cnpj">CNPJ</label>
+              <input id="cd-cnpj" type="text" inputmode="numeric" maxlength="18" placeholder="00.000.000/0000-00">
+            </div>
+            <div class="field">
+              <label for="cd-telefone">Telefone</label>
+              <input id="cd-telefone" type="text" inputmode="tel" placeholder="(00) 00000-0000">
+            </div>
+          </div>
           <div class="field">
             <label for="cd-email">E-mail</label>
             <input id="cd-email" type="email" placeholder="voce@suaempresa.com.br">
@@ -52,6 +62,43 @@
             <label for="cd-senha">Senha</label>
             <input id="cd-senha" type="password" placeholder="Mínimo 6 caracteres">
           </div>
+
+          <div class="field-title">Endereço da empresa</div>
+          <div class="field-row">
+            <div class="field" style="flex:0 0 40%;">
+              <label for="cd-cep">CEP</label>
+              <input id="cd-cep" type="text" inputmode="numeric" maxlength="9" placeholder="00000-000">
+            </div>
+            <div class="field">
+              <label for="cd-logradouro">Logradouro</label>
+              <input id="cd-logradouro" type="text" placeholder="Rua / Avenida">
+            </div>
+          </div>
+          <div class="field-row">
+            <div class="field" style="flex:0 0 30%;">
+              <label for="cd-numero">Número</label>
+              <input id="cd-numero" type="text" placeholder="123">
+            </div>
+            <div class="field">
+              <label for="cd-complemento">Complemento</label>
+              <input id="cd-complemento" type="text" placeholder="Sala, bloco (opcional)">
+            </div>
+          </div>
+          <div class="field">
+            <label for="cd-bairro">Bairro</label>
+            <input id="cd-bairro" type="text" placeholder="Bairro">
+          </div>
+          <div class="field-row">
+            <div class="field">
+              <label for="cd-cidade">Cidade</label>
+              <input id="cd-cidade" type="text" placeholder="Cidade">
+            </div>
+            <div class="field" style="flex:0 0 90px;">
+              <label for="cd-uf">UF</label>
+              <input id="cd-uf" type="text" maxlength="2" placeholder="SP" style="text-transform:uppercase;">
+            </div>
+          </div>
+
           <button class="btn red" id="btn-cad" type="button" style="width:100%;justify-content:center;">Enviar cadastro para aprovação</button>
           <p class="muted" style="font-size:12px;margin-top:10px;">Novos cadastros entram como <b>cliente</b> e precisam ser aprovados por um administrador antes do primeiro acesso.</p>
         </div>
@@ -66,9 +113,9 @@
     </div>
   </div>
 
-  <script src="js/config.js?v=20260714"></script>
-  <script src="js/store.js?v=20260714"></script>
-  <script src="js/api-adapter.js?v=20260714"></script>
-  <script src="js/auth.js?v=20260714"></script>
+  <script src="js/config.js?v=20260715"></script>
+  <script src="js/store.js?v=20260715"></script>
+  <script src="js/api-adapter.js?v=20260715"></script>
+  <script src="js/auth.js?v=20260715"></script>
 </body>
 </html>

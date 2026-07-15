@@ -380,9 +380,11 @@
           var el = document.createElement('button');
           el.className = 'hotspot';
           el.type = 'button';
+          // data-num continua no elemento (usado para casar com as peças e para
+          // o realce ao passar o mouse), mas o NÚMERO não é exibido: é um dado
+          // interno do administrador — o cliente vê só a área clicável.
           el.setAttribute('data-num', h.linkNumero || '');
-          el.title = (h.texto ? h.texto + ' — ' : '') + (h.linkNumero ? 'nº ' + h.linkNumero + ' na imagem' : '');
-          if (h.linkNumero) el.innerHTML = '<span class="hs-n">' + esc(h.linkNumero) + '</span>';
+          el.title = h.texto || 'Selecionar peça(s) desta área';
           el.style.left = (h.x / natW * 100) + '%';
           el.style.top = (h.y / natH * 100) + '%';
           el.style.width = (h.w / natW * 100) + '%';

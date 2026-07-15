@@ -67,7 +67,8 @@
       apiGet('/veiculos'),
       apiGet('/faturas'),
       apiGet('/prevenda'),
-      apiGet('/reivindicacoes')
+      apiGet('/reivindicacoes'),
+      apiGet('/usuarios') // só admin recebe; cliente resolve null (apiGet nunca rejeita)
     ]).then(function (r) {
       if (r[0]) CACHE.products = r[0];
       if (r[1]) CACHE.categories = r[1];
@@ -77,6 +78,7 @@
       if (r[5]) CACHE.invoices = r[5];
       if (r[6]) CACHE.prevenda = r[6];
       if (r[7]) CACHE.claims = r[7];
+      if (r[8]) CACHE.users = r[8];
       return CACHE;
       // (demais coleções entram nas próximas rotas: notificações, etc.)
     });
@@ -107,6 +109,22 @@
     return apiGet('/pedidos').then(function (l) { if (l) CACHE.orders = l; return l; });
   }
   FG.recarregarPedidos = recarregarPedidos;
+
+  function recarregarUsuarios() {
+    return apiGet('/usuarios').then(function (l) { if (l) CACHE.users = l; return l; });
+  }
+  FG.recarregarUsuarios = recarregarUsuarios;
+
+  // Gestão de usuários (admin): aprova / bloqueia / muda papel. Devolve
+  // Promise<{ ok, msg? }>. Atualiza o cache no sucesso para o re-render refletir.
+  FG.setUser = function (id, patch) {
+    return req('PATCH', '/usuarios/' + encodeURIComponent(id), patch).then(function (r) {
+      if (!r.ok) return r;
+      var u = CACHE.users.find(function (x) { return String(x.id) === String(id); });
+      if (u) Object.keys(patch).forEach(function (k) { u[k] = patch[k]; });
+      return r;
+    });
+  };
 
   function recarregarProdutos() {
     return apiGet('/produtos').then(function (l) { if (l) CACHE.products = l; return l; });

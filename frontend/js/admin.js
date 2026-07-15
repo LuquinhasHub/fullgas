@@ -128,11 +128,11 @@
     var users = FG.all('users');
     view.innerHTML =
       '<div class="adm-card"><div class="c-head">Usuários cadastrados (' + users.length + ')</div><div class="c-body">' +
-      '<table class="tbl"><thead><tr><th>Nome</th><th>E-mail</th><th>Empresa</th><th>Papel</th><th>Status</th><th>Ações</th></tr></thead><tbody>' +
+      '<table class="tbl"><thead><tr><th>Nome</th><th>E-mail</th><th>Empresa</th><th>CNPJ</th><th>Endereço</th><th>Papel</th><th>Status</th><th>Ações</th></tr></thead><tbody>' +
       users.map(function (u) {
         var acoes = '';
         if (u.status === 'pendente') acoes += '<button class="btn-orange btn-mini" data-ac="aprovar" data-id="' + u.id + '">Aprovar</button> ';
-        if (u.id !== sess.id) {
+        if (String(u.id) !== String(sess.id)) {
           acoes += '<button class="btn-line btn-mini" data-ac="papel" data-id="' + u.id + '">' +
             (u.papel === 'admin' ? 'Tornar cliente' : 'Tornar admin') + '</button> ';
           acoes += '<button class="btn-line btn-mini" data-ac="bloq" data-id="' + u.id + '">' +
@@ -140,26 +140,37 @@
         } else {
           acoes += '<span class="muted">(você)</span>';
         }
+        var e = u.endereco;
+        var endTxt = e ? (esc(e.logradouro) + (e.numero ? ', ' + esc(e.numero) : '') +
+          (e.cidade ? ' — ' + esc(e.cidade) + (e.uf ? '/' + esc(e.uf) : '') : '')) : '<span class="muted">—</span>';
         return '<tr><td>' + esc(u.nome) + '</td><td>' + esc(u.email) + '</td><td>' + esc(u.empresa) + '</td>' +
+          '<td>' + (u.cnpj ? esc(u.cnpj) : '<span class="muted">—</span>') + '</td>' +
+          '<td style="font-size:12px;">' + endTxt + '</td>' +
           '<td>' + pill(u.papel) + '</td><td>' + pill(u.status) + '</td><td>' + acoes + '</td></tr>';
       }).join('') + '</tbody></table></div></div>';
 
     Array.prototype.forEach.call(view.querySelectorAll('[data-ac]'), function (b) {
       b.addEventListener('click', function () {
         var id = b.getAttribute('data-id');
-        var u = FG.all('users').find(function (x) { return x.id === id; });
+        var u = FG.all('users').find(function (x) { return String(x.id) === String(id); });
         if (!u) return;
         var ac = b.getAttribute('data-ac');
-        if (ac === 'aprovar') { FG.setUser(id, { status: 'aprovado' }); FG.toast('Usuário aprovado.'); }
-        if (ac === 'papel') {
+        var patch = null, msg = '';
+        if (ac === 'aprovar') { patch = { status: 'aprovado' }; msg = 'Usuário aprovado.'; }
+        else if (ac === 'papel') {
           var novo = u.papel === 'admin' ? 'cliente' : 'admin';
-          FG.setUser(id, { papel: novo }); FG.toast('Papel alterado para ' + novo + '.');
-        }
-        if (ac === 'bloq') {
+          patch = { papel: novo }; msg = 'Papel alterado para ' + novo + '.';
+        } else if (ac === 'bloq') {
           var st = u.status === 'bloqueado' ? 'aprovado' : 'bloqueado';
-          FG.setUser(id, { status: st }); FG.toast(st === 'bloqueado' ? 'Usuário bloqueado.' : 'Usuário desbloqueado.');
+          patch = { status: st }; msg = st === 'bloqueado' ? 'Usuário bloqueado.' : 'Usuário desbloqueado.';
         }
-        refreshBell(); renderUsuarios();
+        if (!patch) return;
+        b.disabled = true;
+        FG.setUser(id, patch).then(function (r) {
+          if (r && r.ok === false) { FG.toast(r.msg || 'Não foi possível atualizar o usuário.', 'erro'); b.disabled = false; return; }
+          FG.toast(msg);
+          refreshBell(); renderUsuarios();
+        });
       });
     });
   }
@@ -972,7 +983,15 @@
           ? '<p class="muted" style="font-size:12px;margin:8px 0;">Clique na imagem para criar uma área; arraste para posicionar. ' +
             'O <b>Link Number</b> deve casar com o "Number on Image" das peças — clicar na área seleciona essas peças no finder do cliente.</p>' +
             '<div class="ha-2col">' +
-            '<div class="ha-wrap"><div class="ha-canvas" id="ha-canvas"><img id="ha-img" src="' + esc(sec.imagem) + '" alt="diagrama" draggable="false"></div></div>' +
+            '<div class="ha-wrap">' +
+            '<div class="ha-tools">' +
+            '<button class="dg-btn" id="ha-reset" type="button" title="Ajustar à tela">⟳</button>' +
+            '<span class="grow"></span>' +
+            '<input type="range" id="ha-zoom" min="0.1" max="1.6" step="0.05" value="0.6">' +
+            '<span class="dg-marks">0.1&nbsp;&nbsp;0.6&nbsp;&nbsp;1.1&nbsp;&nbsp;1.6</span>' +
+            '</div>' +
+            '<div class="ha-view" id="ha-view"><div class="ha-canvas" id="ha-canvas"><img id="ha-img" src="' + esc(sec.imagem) + '" alt="diagrama" draggable="false"></div></div>' +
+            '</div>' +
             '<div class="ha-side">' +
             '<div class="ha-list-head"><span></span><span>Clickable Area (px)</span><span>Link Number</span><span></span></div>' +
             '<div id="ha-list" class="ha-scroll"></div>' +
@@ -1093,12 +1112,30 @@
       var canvas = document.getElementById('ha-canvas');
       var img = document.getElementById('ha-img');
       var lista = document.getElementById('ha-list');
+      var viewport = document.getElementById('ha-view');
+      var slider = document.getElementById('ha-zoom');
       var natW = 0, natH = 0;
       var hs = sec.hotspots.map(function (h) {
         return { x: h.x, y: h.y, w: h.w, h: h.h, texto: h.texto || '', linkNumero: h.linkNumero || '' };
       });
 
+      // Zoom igual ao finder do cliente: o slider define a largura do canvas
+      // (natW*z); a imagem ocupa 100% do canvas e as caixas se posicionam em %,
+      // então tudo escala junto. escala() usa img.clientWidth (que já reflete o
+      // zoom), logo os cliques/arrastos continuam corretos em qualquer nível.
       function escala() { return natW / (img.clientWidth || 1); }
+
+      function aplicarZoom(z) {
+        if (!natW) return;
+        slider.value = z;
+        canvas.style.width = Math.round(natW * z) + 'px';
+      }
+      function zoomAjuste() {
+        if (!natW) return 0.6;
+        var fit = Math.min((viewport.clientWidth - 2) / natW,
+                           (viewport.clientHeight - 2) / natH);
+        return Math.max(0.1, Math.min(1.6, Math.floor(fit * 20) / 20));
+      }
 
       function boxHTML(h, i) {
         var b = document.createElement('div');
@@ -1194,10 +1231,14 @@
 
       function prontoImg() {
         natW = img.naturalWidth || 1; natH = img.naturalHeight || 1;
+        aplicarZoom(zoomAjuste());
         desenharBoxes(); desenharLista();
       }
       if (img.complete && img.naturalWidth) prontoImg();
       else img.addEventListener('load', prontoImg);
+
+      slider.addEventListener('input', function () { aplicarZoom(Number(slider.value)); });
+      document.getElementById('ha-reset').addEventListener('click', function () { aplicarZoom(zoomAjuste()); });
     }, function () {
       view.innerHTML = '<div class="adm-card"><div class="c-body">Seção não encontrada. <a href="#finder">Voltar</a></div></div>';
     });

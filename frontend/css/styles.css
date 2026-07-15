@@ -73,6 +73,14 @@ h1, h2, h3 { margin: 0 0 .5em; }
 .btn:focus-visible, a:focus-visible {
   outline: 2px solid var(--red); outline-offset: 1px;
 }
+/* Duas colunas de campos lado a lado (ex.: CNPJ + Telefone, Cidade + UF). */
+.field-row { display: flex; gap: 12px; }
+.field-row .field { flex: 1; }
+/* Subtítulo separador dentro de um formulário (ex.: "Endereço da empresa"). */
+.field-title {
+  font-size: 12px; font-weight: 700; color: var(--red); text-transform: uppercase;
+  letter-spacing: .04em; margin: 6px 0 10px; padding-top: 10px; border-top: 1px solid var(--line);
+}
 
 /* ---------- tabelas ---------- */
 .table { width: 100%; border-collapse: collapse; background: #fff; }
@@ -542,9 +550,9 @@ main.finder { padding: 8px 28px 70px; }
 .diag-vazio { display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 10px; padding: 20px; min-height: 420px; }
 
 /* hotspot: área clicável SEMPRE visível (quadrado amarelo, como no editor do
-   admin) com o nº da peça no canto; "acende" em vermelho no hover/seleção */
+   admin); "acende" em vermelho no hover/seleção. O número da peça NÃO é
+   exibido ao cliente — é um dado interno do administrador. */
 .hotspot { position: absolute; background: rgba(245, 196, 0, .14); border: 2px solid #f5c400; cursor: pointer; padding: 0; border-radius: 3px; }
-.hotspot .hs-n { position: absolute; top: 0; right: 0; font-size: 10px; font-weight: 700; color: #7a6200; background: rgba(255, 255, 255, .85); padding: 0 3px; line-height: 1.3; pointer-events: none; }
 .hotspot:hover, .hotspot.hover { border-color: var(--red); background: rgba(210, 10, 17, .10); }
 .hotspot.on { border-color: var(--red); background: rgba(210, 10, 17, .18); box-shadow: 0 0 0 1px rgba(210, 10, 17, .35); }
 
@@ -621,21 +629,33 @@ main.finder { padding: 8px 28px 70px; }
 .ac-item .ac-preco { color: #999; font-size: 11px; white-space: nowrap; }
 .ac-item:hover, .ac-item.on { background: #fdeeee; }
 
-/* cortina de envio da garantia: carregamento breve + confirmação */
+/* cortina de envio da garantia: cobre o overlay inteiro (não o .modal, que
+   rola) para a mensagem ficar sempre centralizada na tela. */
 .claim-envio {
-  position: absolute; inset: 0; z-index: 10; background: rgba(255, 255, 255, .97);
-  display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: 12px; text-align: center; padding: 24px;
+  position: fixed; inset: 0; z-index: 95; background: rgba(0, 0, 0, .5);
+  display: flex; align-items: center; justify-content: center; padding: 24px;
+  animation: claim-fade .2s ease;
 }
+@keyframes claim-fade { from { opacity: 0; } to { opacity: 1; } }
+.claim-envio-card {
+  background: #fff; border-radius: 12px; padding: 32px 28px; text-align: center;
+  max-width: 400px; width: 100%; box-shadow: 0 18px 50px rgba(0, 0, 0, .3);
+  display: flex; flex-direction: column; align-items: center; gap: 14px;
+}
+.claim-envio-card p { margin: 0; color: #555; font-size: 14px; line-height: 1.5; }
+.claim-envio-card.ok { animation: claim-pop .28s ease; }
+@keyframes claim-pop { from { transform: scale(.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+.claim-envio-card h3 { margin: 0; font-size: 19px; }
+.claim-envio-card .btn { margin-top: 4px; }
 .fg-spinner {
-  width: 44px; height: 44px; border-radius: 50%;
+  width: 46px; height: 46px; border-radius: 50%;
   border: 4px solid #eee; border-top-color: var(--red);
   animation: fg-girar .8s linear infinite;
 }
 @keyframes fg-girar { to { transform: rotate(360deg); } }
 .claim-ok {
-  width: 54px; height: 54px; border-radius: 50%; background: var(--green, #16a34a);
-  color: #fff; font-size: 28px; display: flex; align-items: center; justify-content: center;
+  width: 60px; height: 60px; border-radius: 50%; background: var(--green, #16a34a);
+  color: #fff; font-size: 32px; display: flex; align-items: center; justify-content: center;
 }
 .pecas-list { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
 .peca-row {

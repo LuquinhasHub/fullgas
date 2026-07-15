@@ -569,14 +569,18 @@
       var d = coletar();
       if (!validarEnvio(d)) return;
 
+      // A cortina cobre o overlay INTEIRO (não o .modal, que rola): assim a
+      // mensagem fica sempre centralizada na tela, mesmo com o formulário longo
+      // rolado. Um card branco no centro dá destaque à confirmação.
       var cortina = document.createElement('div');
       cortina.className = 'claim-envio';
-      cortina.innerHTML = '<div class="fg-spinner"></div><p><b>Enviando sua garantia…</b></p>';
-      back.querySelector('.modal').appendChild(cortina);
+      cortina.innerHTML = '<div class="claim-envio-card"><div class="fg-spinner"></div>' +
+        '<p><b>Enviando sua garantia…</b></p></div>';
+      back.appendChild(cortina);
 
-      // Espera mínima de ~0,9s: sem ela a cortina "pisca" e o cliente não
+      // Espera mínima de ~1,1s: sem ela a cortina "pisca" e o cliente não
       // percebe que o envio aconteceu.
-      var minimo = new Promise(function (r) { setTimeout(r, 900); });
+      var minimo = new Promise(function (r) { setTimeout(r, 1100); });
       var c;
       if (modo === 'editar') {
         c = await FG.updateClaim(ctx.claim.id, d);
@@ -594,15 +598,22 @@
       if (modo === 'rascunho' && ctx.rasc) excluirRascunho(ctx.rasc.localId);
 
       cortina.innerHTML =
+        '<div class="claim-envio-card ok">' +
         '<div class="claim-ok">✔</div>' +
-        '<h3 style="margin:0;">Garantia enviada!</h3>' +
-        '<p class="muted" style="max-width:340px;">Sua reivindicação <b>' + esc(c.id) + '</b> foi registrada ' +
-        'e será avaliada por nossos representantes. Acompanhe o andamento na aba Reivindicações.</p>';
-      setTimeout(function () {
+        '<h3>Garantia enviada!</h3>' +
+        '<p>Sua reivindicação <b>' + esc(c.id) + '</b> foi registrada e será avaliada por ' +
+        'nossos representantes. Acompanhe o andamento na aba Reivindicações.</p>' +
+        '<button class="btn red" id="nc-ok-fechar">Entendi</button>' +
+        '</div>';
+      // Fica visível por ~5s (tempo de sobra p/ ler) ou até clicar em "Entendi".
+      function concluir() {
+        if (!back.parentNode) return;
         fechar();
         claimFiltro = 'Em processo';
         renderClaims();
-      }, 2600);
+      }
+      document.getElementById('nc-ok-fechar').addEventListener('click', concluir);
+      setTimeout(concluir, 5000);
     });
 
     // SALVAR COMO ESBOÇO: grava no navegador (não vai ao banco). Some ao editar

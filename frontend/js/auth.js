@@ -43,18 +43,36 @@
   formLogin.addEventListener('keydown', function (e) { if (e.key === 'Enter') doLogin(); });
 
   /* ---------- cadastro ---------- */
+  function val(id) { var el = document.getElementById(id); return el ? el.value.trim() : ''; }
+
   async function doRegister() {
     var dados = {
-      nome: document.getElementById('cd-nome').value.trim(),
-      empresa: document.getElementById('cd-empresa').value.trim(),
-      email: document.getElementById('cd-email').value.trim(),
-      senha: document.getElementById('cd-senha').value
+      nome: val('cd-nome'),
+      empresa: val('cd-empresa'),
+      email: val('cd-email'),
+      senha: document.getElementById('cd-senha').value,
+      cnpj: val('cd-cnpj'),
+      telefone: val('cd-telefone'),
+      endereco: {
+        cep: val('cd-cep'),
+        logradouro: val('cd-logradouro'),
+        numero: val('cd-numero'),
+        complemento: val('cd-complemento'),
+        bairro: val('cd-bairro'),
+        cidade: val('cd-cidade'),
+        uf: val('cd-uf').toUpperCase()
+      }
     };
     if (!dados.nome || !dados.empresa || !dados.email || !dados.senha) {
-      showMsg('Preencha todos os campos.'); return;
+      showMsg('Preencha nome, empresa, e-mail e senha.'); return;
     }
     if (dados.senha.length < 6) { showMsg('A senha precisa de ao menos 6 caracteres.'); return; }
     if (!/^\S+@\S+\.\S+$/.test(dados.email)) { showMsg('E-mail inválido.'); return; }
+    if (!dados.cnpj) { showMsg('Informe o CNPJ da empresa.'); return; }
+    var e = dados.endereco;
+    if (!e.cep || !e.logradouro || !e.numero || !e.bairro || !e.cidade || !e.uf) {
+      showMsg('Preencha o endereço: CEP, logradouro, número, bairro, cidade e UF.'); return;
+    }
 
     var r = await FG.register(dados);
     if (!r.ok) { showMsg(r.msg); return; }

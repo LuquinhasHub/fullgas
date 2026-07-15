@@ -9,6 +9,7 @@ import 'dotenv/config';
 
 import { getPool } from './db.js';
 import authRoutes from './routes/auth.routes.js';
+import usuariosRoutes from './routes/usuarios.routes.js';
 import produtosRoutes from './routes/produtos.routes.js';
 import pedidosRoutes from './routes/pedidos.routes.js';
 import veiculosRoutes from './routes/veiculos.routes.js';
@@ -56,6 +57,7 @@ app.get('/api/health', (_req, res) => res.json({ ok: true, ts: new Date().toISOS
 
 // Rotas
 app.use('/api/auth', authRoutes);
+app.use('/api', usuariosRoutes);
 app.use('/api', produtosRoutes);
 app.use('/api', pedidosRoutes);
 app.use('/api', veiculosRoutes);
