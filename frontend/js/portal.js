@@ -24,6 +24,29 @@
 
   if (sess.papel === 'admin') document.getElementById('tab-admin').classList.remove('hidden');
 
+  /* ---------- permissões por área (contas internas / sub-dealers) ----------
+     O gestor restringe as áreas de cada conta interna no painel "Minha
+     conta". Aqui as abas bloqueadas somem; o roteador (abaixo) também barra
+     acesso direto pelo hash. Admin/gestor têm sempre acesso total. */
+  var GATE_TABS = [
+    ['loja', '.tabs a[href="loja.html"]'],
+    ['finder', '.tabs a[href="finder.html"]'],
+    ['finder', '.topbar .pf-link'],
+    ['pedidos', '.tabs a[data-rota="pedidos"]'],
+    ['financeiro', '#tab-fin'],
+    ['reivindicacoes', '.tabs a[data-rota="reivindicacoes"]'],
+    ['estoque', '.tabs a[data-rota="estoque"]'],
+    ['acoes', '.tabs a[data-rota="acoes"]']
+  ];
+  GATE_TABS.forEach(function (par) {
+    if (FG.temArea(sess, par[0])) return;
+    var el = document.querySelector(par[1]);
+    if (el) el.classList.add('hidden');
+  });
+  // Rotas do portal barradas para quem não tem a área (acesso direto por hash).
+  var GATE_ROTAS = { pedidos: 'pedidos', pedido: 'pedidos', financeiro: 'financeiro',
+    reivindicacoes: 'reivindicacoes', estoque: 'estoque', acoes: 'acoes' };
+
   function refreshPill() {
     var n = FG.unreadCount();
     var pill = document.getElementById('notif-pill');
@@ -1101,6 +1124,228 @@
   }
 
   /* =========================================================
+     MINHA CONTA — cadastro da empresa + contas internas
+     ---------------------------------------------------------
+     O GESTOR (conta que se cadastrou) edita os dados da empresa
+     e gerencia as contas internas (sub-dealers): cria contas
+     para funcionários da concessionária e restringe as áreas
+     que cada uma acessa (loja, finder, pedidos, financeiro...).
+     Conta interna vê tudo somente-leitura.
+     ========================================================= */
+  var AREA_LABELS = {
+    loja: 'Loja', finder: 'Parts Finder', pedidos: 'Pedidos',
+    financeiro: 'Conta financeira', reivindicacoes: 'Reivindicações',
+    estoque: 'Estoque do revendedor', acoes: 'Ações do veículo'
+  };
+
+  function permTexto(permissoes) {
+    if (!Array.isArray(permissoes)) return '<span class="stock-ok">Acesso total</span>';
+    if (!permissoes.length) return '<span class="muted">Só o portal básico</span>';
+    return esc(permissoes.map(function (a) { return AREA_LABELS[a] || a; }).join(', '));
+  }
+
+  function renderConta() {
+    setCrumb(['Minha conta']); setTabOn('conta');
+    view.innerHTML = '<h2>Minha conta</h2><p class="muted">Carregando…</p>';
+
+    FG.conta().then(function (c) {
+      if (!c) { view.innerHTML = '<h2>Minha conta</h2><p class="muted">Não foi possível carregar os dados. Tente de novo.</p>'; return; }
+      var gestor = !!(sess.gestor || sess.papel === 'admin');
+      var e = c.endereco || {};
+      var ro = gestor ? '' : ' readonly disabled';
+
+      var html =
+        '<h2>Minha conta</h2>' +
+        (gestor ? '' : '<p class="muted">Somente o gestor da concessionária pode alterar o cadastro.</p>') +
+
+        /* ---- dados da empresa ---- */
+        '<h3 class="sec-title">Dados da empresa</h3>' +
+        '<div class="conta-grid">' +
+        '<div class="field"><label>Razão social</label><input type="text" value="' + esc(c.empresa.razaoSocial) + '" readonly disabled></div>' +
+        '<div class="field"><label for="ct-cnpj">CNPJ</label><input id="ct-cnpj" type="text" maxlength="18" value="' + esc(c.empresa.cnpj) + '"' + ro + '></div>' +
+        '<div class="field"><label for="ct-tel">Telefone</label><input id="ct-tel" type="text" maxlength="15" value="' + esc(c.empresa.telefone) + '"' + ro + '></div>' +
+        '<div class="field"><label for="ct-email">E-mail da empresa</label><input id="ct-email" type="email" value="' + esc(c.empresa.email) + '"' + ro + '></div>' +
+        '</div>' +
+
+        '<h3 class="sec-title">Endereço</h3>' +
+        '<div class="conta-grid">' +
+        '<div class="field"><label for="ct-cep">CEP</label><input id="ct-cep" type="text" maxlength="9" value="' + esc(e.cep || '') + '"' + ro + '></div>' +
+        '<div class="field"><label for="ct-log">Logradouro</label><input id="ct-log" type="text" value="' + esc(e.logradouro || '') + '"' + ro + '></div>' +
+        '<div class="field"><label for="ct-num">Número</label><input id="ct-num" type="text" value="' + esc(e.numero || '') + '"' + ro + '></div>' +
+        '<div class="field"><label for="ct-comp">Complemento</label><input id="ct-comp" type="text" value="' + esc(e.complemento || '') + '"' + ro + '></div>' +
+        '<div class="field"><label for="ct-bairro">Bairro</label><input id="ct-bairro" type="text" value="' + esc(e.bairro || '') + '"' + ro + '></div>' +
+        '<div class="field"><label for="ct-cidade">Cidade</label><input id="ct-cidade" type="text" value="' + esc(e.cidade || '') + '"' + ro + '></div>' +
+        '<div class="field"><label for="ct-uf">UF</label><input id="ct-uf" type="text" maxlength="2" value="' + esc(e.uf || '') + '"' + ro + ' style="text-transform:uppercase;"></div>' +
+        '</div>' +
+        (gestor ? '<button class="btn red" id="ct-salvar" type="button">Salvar dados da empresa</button>' : '');
+
+      /* ---- contas internas ---- */
+      html += '<h3 class="sec-title">Contas internas (sub-dealers)</h3>' +
+        '<p class="muted" style="font-size:12px;">Contas para os usuários internos da concessionária. ' +
+        'O gestor escolhe as áreas do site que cada conta pode acessar.</p>';
+
+      var internas = (c.usuarios || []).filter(function (u) { return !u.gestor; });
+      html += '<table class="table"><thead><tr><th>Nome</th><th>E-mail</th><th>Acesso</th><th>Status</th>' +
+        (gestor ? '<th>Ações</th>' : '') + '</tr></thead><tbody>' +
+        (internas.length ? internas.map(function (u) {
+          return '<tr><td>' + esc(u.nome) + '</td><td>' + esc(u.email) + '</td>' +
+            '<td style="font-size:12px;">' + permTexto(u.permissoes) + '</td>' +
+            '<td><span class="pill-status ' + esc(u.status) + '">' + esc(u.status) + '</span></td>' +
+            (gestor
+              ? '<td class="nowrap">' +
+                '<button class="tool" data-ed="' + u.id + '">Permissões</button> ' +
+                '<button class="tool" data-bl="' + u.id + '" data-st="' + u.status + '">' + (u.status === 'bloqueado' ? 'Desbloquear' : 'Bloquear') + '</button> ' +
+                '<button class="tool" data-sn="' + u.id + '">Redefinir senha</button></td>'
+              : '') + '</tr>';
+        }).join('') : '<tr><td colspan="' + (gestor ? 5 : 4) + '" class="muted">Nenhuma conta interna ainda.</td></tr>') +
+        '</tbody></table>';
+
+      /* form de nova conta interna (só gestor) */
+      if (gestor) {
+        html += '<div class="conta-nova" id="ct-nova">' +
+          '<h3 class="sec-title">Nova conta interna</h3>' +
+          '<div class="conta-grid">' +
+          '<div class="field"><label for="sd-nome">Nome</label><input id="sd-nome" type="text" placeholder="Nome do funcionário"></div>' +
+          '<div class="field"><label for="sd-email">E-mail</label><input id="sd-email" type="email" placeholder="email@suaempresa.com.br"></div>' +
+          '<div class="field"><label for="sd-senha">Senha</label><input id="sd-senha" type="password" placeholder="Mínimo 6 caracteres"></div>' +
+          '</div>' +
+          '<div class="field"><label>Áreas permitidas</label><div class="perm-list" id="sd-perms">' +
+          c.areas.map(function (a) {
+            return '<label class="perm-chk"><input type="checkbox" value="' + a + '" checked> ' + (AREA_LABELS[a] || a) + '</label>';
+          }).join('') +
+          '</div></div>' +
+          '<button class="btn red" id="sd-criar" type="button">Criar conta interna</button>' +
+          '</div>';
+      }
+
+      view.innerHTML = html;
+      if (!gestor) return;
+
+      /* máscaras + ViaCEP no cadastro da empresa */
+      FG.bindMask('ct-cnpj', FG.maskCnpj);
+      FG.bindMask('ct-tel', FG.maskTelefone);
+      var cepBuscado = (e.cep || '').replace(/\D/g, '');
+      FG.bindMask('ct-cep', FG.maskCep, function (valor, el) {
+        var dig = valor.replace(/\D/g, '');
+        if (dig.length !== 8 || dig === cepBuscado) return;
+        cepBuscado = dig;
+        el.classList.add('buscando');
+        fetch('https://viacep.com.br/ws/' + dig + '/json/')
+          .then(function (r) { return r.json(); })
+          .then(function (d) {
+            if (d.erro) { FG.toast('CEP não encontrado — preencha o endereço manualmente.', 'erro'); return; }
+            if (d.logradouro) document.getElementById('ct-log').value = d.logradouro;
+            if (d.bairro) document.getElementById('ct-bairro').value = d.bairro;
+            if (d.localidade) document.getElementById('ct-cidade').value = d.localidade;
+            if (d.uf) document.getElementById('ct-uf').value = d.uf;
+            document.getElementById('ct-num').focus();
+          })
+          .catch(function () { })
+          .then(function () { el.classList.remove('buscando'); });
+      });
+
+      /* salvar dados da empresa */
+      document.getElementById('ct-salvar').addEventListener('click', function () {
+        var v = function (id) { return document.getElementById(id).value.trim(); };
+        var dados = {
+          cnpj: v('ct-cnpj'), telefone: v('ct-tel'), email: v('ct-email'),
+          endereco: { cep: v('ct-cep'), logradouro: v('ct-log'), numero: v('ct-num'),
+            complemento: v('ct-comp'), bairro: v('ct-bairro'), cidade: v('ct-cidade'),
+            uf: v('ct-uf').toUpperCase() }
+        };
+        if (dados.cnpj.replace(/\D/g, '').length !== 14) { FG.toast('CNPJ incompleto — use os 14 dígitos.', 'erro'); return; }
+        if (dados.endereco.cep.replace(/\D/g, '').length !== 8) { FG.toast('CEP incompleto.', 'erro'); return; }
+        FG.contaSalvarEmpresa(dados).then(function (r) {
+          if (!r.ok) { FG.toast(r.msg || 'Não foi possível salvar.', 'erro'); return; }
+          FG.toast('Dados da empresa salvos.');
+        });
+      });
+
+      /* criar conta interna */
+      document.getElementById('sd-criar').addEventListener('click', function () {
+        var perms = [];
+        Array.prototype.forEach.call(document.querySelectorAll('#sd-perms input:checked'), function (i) { perms.push(i.value); });
+        var dados = {
+          nome: document.getElementById('sd-nome').value.trim(),
+          email: document.getElementById('sd-email').value.trim(),
+          senha: document.getElementById('sd-senha').value,
+          permissoes: perms
+        };
+        if (!dados.nome || !dados.email || !dados.senha) { FG.toast('Preencha nome, e-mail e senha.', 'erro'); return; }
+        if (dados.senha.length < 6) { FG.toast('A senha precisa de ao menos 6 caracteres.', 'erro'); return; }
+        FG.subdealerCriar(dados).then(function (r) {
+          if (!r.ok) { FG.toast(r.msg || 'Não foi possível criar a conta.', 'erro'); return; }
+          FG.toast('Conta interna criada — já pode entrar no portal.');
+          renderConta();
+        });
+      });
+
+      /* ações das contas internas */
+      Array.prototype.forEach.call(view.querySelectorAll('[data-bl]'), function (b) {
+        b.addEventListener('click', function () {
+          var novo = b.getAttribute('data-st') === 'bloqueado' ? 'aprovado' : 'bloqueado';
+          FG.subdealerEditar(b.getAttribute('data-bl'), { status: novo }).then(function (r) {
+            if (!r.ok) { FG.toast(r.msg || 'Falhou.', 'erro'); return; }
+            FG.toast(novo === 'bloqueado' ? 'Conta bloqueada.' : 'Conta desbloqueada.');
+            renderConta();
+          });
+        });
+      });
+      Array.prototype.forEach.call(view.querySelectorAll('[data-sn]'), function (b) {
+        b.addEventListener('click', function () {
+          var senha = prompt('Nova senha para esta conta (mínimo 6 caracteres):');
+          if (senha == null) return;
+          if (senha.length < 6) { FG.toast('A senha precisa de ao menos 6 caracteres.', 'erro'); return; }
+          FG.subdealerEditar(b.getAttribute('data-sn'), { senha: senha }).then(function (r) {
+            if (!r.ok) { FG.toast(r.msg || 'Falhou.', 'erro'); return; }
+            FG.toast('Senha redefinida.');
+          });
+        });
+      });
+      Array.prototype.forEach.call(view.querySelectorAll('[data-ed]'), function (b) {
+        b.addEventListener('click', function () {
+          var id = Number(b.getAttribute('data-ed'));
+          var u = internas.find(function (x) { return x.id === id; });
+          if (!u) return;
+          abrirPermissoes(u, c.areas);
+        });
+      });
+
+      /* modal simples p/ editar permissões de uma conta interna */
+      function abrirPermissoes(u, areas) {
+        var atual = Array.isArray(u.permissoes) ? u.permissoes : areas.slice();
+        var back = document.createElement('div');
+        back.className = 'modal-back';
+        back.innerHTML = '<div class="modal" style="max-width:440px;">' +
+          '<header><h3>Permissões — ' + esc(u.nome) + '</h3><button class="x" type="button" aria-label="Fechar">×</button></header>' +
+          '<div class="modal-body">' +
+          '<p class="muted" style="font-size:12px;margin-top:0;">Marque as áreas que esta conta pode acessar. ' +
+          'A mudança vale a partir do próximo login da conta.</p>' +
+          '<div class="perm-list" id="pm-list">' +
+          areas.map(function (a) {
+            return '<label class="perm-chk"><input type="checkbox" value="' + a + '"' +
+              (atual.indexOf(a) !== -1 ? ' checked' : '') + '> ' + (AREA_LABELS[a] || a) + '</label>';
+          }).join('') +
+          '</div>' +
+          '<button class="btn red" id="pm-salvar" type="button" style="margin-top:14px;">Salvar permissões</button>' +
+          '</div></div>';
+        document.body.appendChild(back);
+        function fechar() { back.remove(); }
+        back.querySelector('.x').addEventListener('click', fechar);
+        document.getElementById('pm-salvar').addEventListener('click', function () {
+          var perms = [];
+          Array.prototype.forEach.call(back.querySelectorAll('#pm-list input:checked'), function (i) { perms.push(i.value); });
+          FG.subdealerEditar(u.id, { permissoes: perms }).then(function (r) {
+            if (!r.ok) { FG.toast(r.msg || 'Falhou.', 'erro'); return; }
+            FG.toast('Permissões salvas — valem a partir do próximo login.');
+            fechar(); renderConta();
+          });
+        });
+      }
+    });
+  }
+
+  /* =========================================================
      BUSCA GLOBAL
      ========================================================= */
   function renderBusca(q) {
@@ -1144,6 +1389,12 @@
     var h = (location.hash || '#home').slice(1);
     var partes = h.split('/');
     var rota = partes[0] || 'home';
+    // Conta interna sem a área não entra nem por hash direto.
+    if (GATE_ROTAS[rota] && !FG.temArea(sess, GATE_ROTAS[rota])) {
+      FG.toast('Sua conta não tem acesso a esta área. Fale com o gestor da concessionária.', 'erro');
+      location.hash = '#home';
+      return;
+    }
     switch (rota) {
       case 'home': renderHome(); break;
       case 'notificacoes': renderNotifs(); break;
@@ -1153,6 +1404,7 @@
       case 'acoes': renderAcoes(partes[1]); break;
       case 'estoque': renderEstoque(); break;
       case 'financeiro': renderFinanceiro(); break;
+      case 'conta': renderConta(); break;
       case 'busca': renderBusca(partes.slice(1).join('/')); break;
       default: renderHome();
     }

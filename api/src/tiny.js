@@ -252,6 +252,24 @@ export async function registrarLog(tinyId, sku, evento, status, mensagem) {
   ).catch(e => console.error('TinySyncLog falhou:', e.message));
 }
 
+// Mantém no TinySyncLog apenas os 3 registros de 'cron' mais recentes de cada
+// produto — o cron roda o dia todo e o log do editor de produto ficava
+// gigante sem dizer nada de novo. Eventos manuais ('lote', 'importacao') não
+// são tocados. Chamada ao fim de cada rodada do cron (tiny-cron.js).
+export async function podarLogCron(manterPorProduto = 3) {
+  await query(
+    `WITH ranqueado AS (
+       SELECT LogId,
+              ROW_NUMBER() OVER (PARTITION BY COALESCE(Sku, TinyId)
+                                 ORDER BY LogId DESC) AS rn
+         FROM dbo.TinySyncLog
+        WHERE Evento = 'cron'
+     )
+     DELETE FROM ranqueado WHERE rn > @n`,
+    { n: Math.max(1, manterPorProduto) }
+  ).catch(e => console.error('Poda do TinySyncLog falhou:', e.message));
+}
+
 // Aplica no produto local os campos espelhados do Tiny. Só grava o que veio
 // definido em `dados` (um campo ausente não apaga o valor atual).
 export async function aplicarAtualizacao(tinyId, dados, evento) {

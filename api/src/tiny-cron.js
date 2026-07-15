@@ -32,7 +32,7 @@
 // ============================================================
 import cron from 'node-cron';
 import 'dotenv/config';
-import { sincronizarLote } from './tiny.js';
+import { sincronizarLote, podarLogCron } from './tiny.js';
 import { processarExportacoes } from './tiny-pedidos.js';
 
 // Trava de sobreposição: true enquanto uma rodada está em andamento.
@@ -67,6 +67,9 @@ async function rodada() {
     await processarExportacoes();
 
     const resultados = await sincronizarLote(null, 'cron');
+    // O log do cron só guarda os 3 últimos registros de cada produto — o
+    // histórico completo dos eventos manuais (lote/importação) permanece.
+    await podarLogCron(3);
     const ok = resultados.filter(r => r.status === 'ok').length;
     const erros = resultados.filter(r => r.status === 'erro').length;
     const seg = Math.round((Date.now() - inicio) / 1000);

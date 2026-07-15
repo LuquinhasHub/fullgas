@@ -11,6 +11,12 @@
   var sess = FG.guard();
   if (!sess) return;
 
+  // Conta interna (sub-dealer) sem a área "finder" volta ao portal.
+  if (!FG.temArea(sess, 'finder')) {
+    alert('Sua conta não tem acesso ao Parts Finder. Fale com o gestor da concessionária.');
+    location.href = 'portal.html'; return;
+  }
+
   // Espera o cache (produtos p/ cesta) antes de montar a tela.
   FG.pronto.then(function () {
 

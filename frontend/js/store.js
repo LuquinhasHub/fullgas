@@ -531,6 +531,36 @@
     /* ---- util ---- */
     fmtMoney: fmtMoney, fmtDate: fmtDate, fmtDateTime: fmtDateTime, esc: esc, uid: uid, pad: pad,
 
+    /* ---- máscaras de formulário (formatam enquanto digita) ---- */
+    maskCnpj: function (v) {
+      v = String(v).replace(/\D/g, '').slice(0, 14);
+      return v
+        .replace(/^(\d{2})(\d)/, '$1.$2')
+        .replace(/^(\d{2})\.(\d{3})(\d)/, '$1.$2.$3')
+        .replace(/\.(\d{3})(\d)/, '.$1/$2')
+        .replace(/(\d{4})(\d)/, '$1-$2');
+    },
+    maskTelefone: function (v) {
+      v = String(v).replace(/\D/g, '').slice(0, 11);
+      if (v.length > 10) return v.replace(/^(\d{2})(\d{5})(\d*)/, '($1) $2-$3'); // celular 9 dígitos
+      return v
+        .replace(/^(\d{2})(\d)/, '($1) $2')
+        .replace(/^(\(\d{2}\) \d{4})(\d)/, '$1-$2');                             // fixo 8 dígitos
+    },
+    maskCep: function (v) {
+      return String(v).replace(/\D/g, '').slice(0, 8).replace(/^(\d{5})(\d)/, '$1-$2');
+    },
+    // Liga uma máscara num input; `aoDigitar` (opcional) recebe o valor já
+    // formatado a cada tecla — usado p/ disparar a busca de CEP.
+    bindMask: function (id, fn, aoDigitar) {
+      var el = document.getElementById(id);
+      if (!el) return;
+      el.addEventListener('input', function () {
+        el.value = fn(el.value);
+        if (aoDigitar) aoDigitar(el.value, el);
+      });
+    },
+
     exportCSV: function (nome, linhas) {
       var csv = linhas.map(function (l) {
         return l.map(function (c) { return '"' + String(c == null ? '' : c).replace(/"/g, '""') + '"'; }).join(';');

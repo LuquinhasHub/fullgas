@@ -45,6 +45,37 @@
   /* ---------- cadastro ---------- */
   function val(id) { var el = document.getElementById(id); return el ? el.value.trim() : ''; }
 
+  /* ---------- máscaras (helpers em store.js — FG.mask*) ---------- */
+  FG.bindMask('cd-cnpj', FG.maskCnpj);
+  FG.bindMask('cd-telefone', FG.maskTelefone);
+
+  /* ---------- CEP: busca automática (ViaCEP) ----------
+     Ao completar os 8 dígitos, preenche logradouro, bairro, cidade e UF —
+     sobra só número e complemento para o cliente digitar. Os campos seguem
+     editáveis (nem todo CEP devolve logradouro, ex.: cidades com CEP único). */
+  var cepBuscado = '';
+  function buscarCep(valor) {
+    var dig = valor.replace(/\D/g, '');
+    if (dig.length !== 8 || dig === cepBuscado) return;
+    cepBuscado = dig;
+    var cepEl = document.getElementById('cd-cep');
+    cepEl.classList.add('buscando');
+    fetch('https://viacep.com.br/ws/' + dig + '/json/')
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (d.erro) { showMsg('CEP não encontrado — confira ou preencha o endereço manualmente.'); return; }
+        if (d.logradouro) document.getElementById('cd-logradouro').value = d.logradouro;
+        if (d.bairro) document.getElementById('cd-bairro').value = d.bairro;
+        if (d.localidade) document.getElementById('cd-cidade').value = d.localidade;
+        if (d.uf) document.getElementById('cd-uf').value = d.uf;
+        showMsg('');
+        document.getElementById('cd-numero').focus();
+      })
+      .catch(function () { /* sem internet p/ ViaCEP — segue manual */ })
+      .then(function () { cepEl.classList.remove('buscando'); });
+  }
+  FG.bindMask('cd-cep', FG.maskCep, buscarCep);
+
   async function doRegister() {
     var dados = {
       nome: val('cd-nome'),
@@ -68,10 +99,13 @@
     }
     if (dados.senha.length < 6) { showMsg('A senha precisa de ao menos 6 caracteres.'); return; }
     if (!/^\S+@\S+\.\S+$/.test(dados.email)) { showMsg('E-mail inválido.'); return; }
-    if (!dados.cnpj) { showMsg('Informe o CNPJ da empresa.'); return; }
+    if (dados.cnpj.replace(/\D/g, '').length !== 14) { showMsg('CNPJ incompleto — use os 14 dígitos.'); return; }
+    var telDig = dados.telefone.replace(/\D/g, '');
+    if (telDig && (telDig.length < 10 || telDig.length > 11)) { showMsg('Telefone incompleto — informe DDD + número.'); return; }
     var e = dados.endereco;
-    if (!e.cep || !e.logradouro || !e.numero || !e.bairro || !e.cidade || !e.uf) {
-      showMsg('Preencha o endereço: CEP, logradouro, número, bairro, cidade e UF.'); return;
+    if (e.cep.replace(/\D/g, '').length !== 8) { showMsg('CEP incompleto — use os 8 dígitos.'); return; }
+    if (!e.logradouro || !e.numero || !e.bairro || !e.cidade || !e.uf) {
+      showMsg('Preencha o endereço: logradouro, número, bairro, cidade e UF.'); return;
     }
 
     var r = await FG.register(dados);

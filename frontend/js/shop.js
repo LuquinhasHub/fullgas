@@ -7,6 +7,12 @@
   var sess = FG.guard();
   if (!sess) return;
 
+  // Conta interna (sub-dealer) sem a área "loja" volta ao portal.
+  if (!FG.temArea(sess, 'loja')) {
+    alert('Sua conta não tem acesso à Loja. Fale com o gestor da concessionária.');
+    location.href = 'portal.html'; return;
+  }
+
   // Espera o cache (carregado de forma assíncrona via fetch) antes de montar a
   // tela — nada de renderizar com dados vazios.
   FG.pronto.then(function () {

@@ -4,7 +4,7 @@
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import { query, getPool, sql } from '../db.js';
-import { signToken } from '../auth.js';
+import { signToken, parsePermissoes } from '../auth.js';
 
 const router = Router();
 
@@ -16,7 +16,7 @@ router.post('/login', async (req, res, next) => {
 
     const rows = await query(
       `SELECT u.UsuarioId, u.Nome, u.Email, u.SenhaHash, u.Papel, u.Status,
-              u.EmpresaId, e.RazaoSocial AS Empresa
+              u.EmpresaId, u.Gestor, u.Permissoes, e.RazaoSocial AS Empresa
          FROM dbo.Usuario u
          JOIN dbo.Empresa e ON e.EmpresaId = u.EmpresaId
         WHERE u.Email = @email`,
@@ -40,7 +40,9 @@ router.post('/login', async (req, res, next) => {
       token,
       usuario: {
         id: u.UsuarioId, nome: u.Nome, email: u.Email,
-        papel: u.Papel, empresa: u.Empresa, empresaId: u.EmpresaId
+        papel: u.Papel, empresa: u.Empresa, empresaId: u.EmpresaId,
+        gestor: !!u.Gestor,
+        permissoes: parsePermissoes(u.Permissoes)   // null = acesso total
       }
     });
   } catch (e) { next(e); }
@@ -129,14 +131,16 @@ router.post('/register', async (req, res, next) => {
                   VALUES (@id, 'Entrega', @log, @num, @comp, @bairro, @cidade, @uf, @cep, 1)`);
       }
 
-      // Usuário (hash gravado como bytes — coluna VARBINARY).
+      // Usuário (hash gravado como bytes — coluna VARBINARY). Quem se
+      // cadastra é a conta GESTORA da empresa: gerencia as contas internas
+      // (sub-dealers) criadas depois no painel "Minha conta".
       await new sql.Request(tx)
         .input('empresaId', sql.Int, empresaId)
         .input('nome', sql.NVarChar(120), nome)
         .input('email', sql.NVarChar(160), email)
         .input('hash', sql.VarBinary(256), Buffer.from(hash, 'utf8'))
-        .query(`INSERT INTO dbo.Usuario (EmpresaId, Nome, Email, SenhaHash, Papel, Status)
-                VALUES (@empresaId, @nome, @email, @hash, 'cliente', 'pendente')`);
+        .query(`INSERT INTO dbo.Usuario (EmpresaId, Nome, Email, SenhaHash, Papel, Status, Gestor)
+                VALUES (@empresaId, @nome, @email, @hash, 'cliente', 'pendente', 1)`);
 
       await tx.commit();
     } catch (e) {

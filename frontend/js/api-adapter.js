@@ -115,6 +115,30 @@
   }
   FG.recarregarUsuarios = recarregarUsuarios;
 
+  /* ---------- Minha conta (concessionário) ---------- */
+  // Visão da própria empresa: cadastro, endereço e contas internas.
+  // Devolve Promise<{empresa, endereco, areas, usuarios} | null>.
+  FG.conta = function () { return apiGet('/conta'); };
+
+  // Gestor atualiza o cadastro da empresa (CNPJ, telefone, e-mail, endereço).
+  FG.contaSalvarEmpresa = function (dados) { return req('PUT', '/conta/empresa', dados); };
+
+  // Gestor cria conta interna (sub-dealer): { nome, email, senha, permissoes }.
+  FG.subdealerCriar = function (dados) { return req('POST', '/conta/subdealers', dados); };
+
+  // Gestor edita conta interna: { permissoes?, status?, senha? }.
+  FG.subdealerEditar = function (id, patch) {
+    return req('PATCH', '/conta/subdealers/' + encodeURIComponent(id), patch);
+  };
+
+  // Sub-dealer tem acesso à área? (null/ausente = acesso total; admin e
+  // gestor nunca são restringidos). Usada p/ esconder abas e travar páginas.
+  FG.temArea = function (sess, area) {
+    if (!sess) return false;
+    if (sess.papel === 'admin' || sess.gestor || !Array.isArray(sess.permissoes)) return true;
+    return sess.permissoes.indexOf(area) !== -1;
+  };
+
   // Gestão de usuários (admin): aprova / bloqueia / muda papel. Devolve
   // Promise<{ ok, msg? }>. Atualiza o cache no sucesso para o re-render refletir.
   FG.setUser = function (id, patch) {
@@ -157,7 +181,9 @@
         localStorage.setItem(TOKEN_KEY, data.token);
         localStorage.setItem('fullgas_session_v1', JSON.stringify({
           id: data.usuario.id, nome: data.usuario.nome, email: data.usuario.email,
-          papel: data.usuario.papel, empresa: data.usuario.empresa, empresaId: data.usuario.empresaId
+          papel: data.usuario.papel, empresa: data.usuario.empresa, empresaId: data.usuario.empresaId,
+          gestor: !!data.usuario.gestor,
+          permissoes: data.usuario.permissoes || null  // null = acesso total
         }));
         return { ok: true };
       }, function (e) {

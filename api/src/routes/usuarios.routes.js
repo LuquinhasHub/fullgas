@@ -19,6 +19,7 @@ function toUsuario(r) {
     email: r.Email,
     papel: r.Papel,
     status: r.Status,
+    gestor: !!r.Gestor,       // false = conta interna criada pelo gestor (sub-dealer)
     empresa: r.Empresa || '',
     empresaId: r.EmpresaId,
     cnpj: r.Cnpj || '',
@@ -35,7 +36,7 @@ function toUsuario(r) {
 router.get('/usuarios', requireAuth, requireAdmin, async (_req, res, next) => {
   try {
     const rows = await query(
-      `SELECT u.UsuarioId, u.Nome, u.Email, u.Papel, u.Status, u.CriadoEm, u.EmpresaId,
+      `SELECT u.UsuarioId, u.Nome, u.Email, u.Papel, u.Status, u.Gestor, u.CriadoEm, u.EmpresaId,
               e.RazaoSocial AS Empresa, e.Cnpj, e.Telefone,
               en.Logradouro, en.Numero, en.Complemento, en.Bairro, en.Cidade, en.Uf, en.Cep
          FROM dbo.Usuario u

@@ -143,7 +143,9 @@
         var e = u.endereco;
         var endTxt = e ? (esc(e.logradouro) + (e.numero ? ', ' + esc(e.numero) : '') +
           (e.cidade ? ' — ' + esc(e.cidade) + (e.uf ? '/' + esc(e.uf) : '') : '')) : '<span class="muted">—</span>';
-        return '<tr><td>' + esc(u.nome) + '</td><td>' + esc(u.email) + '</td><td>' + esc(u.empresa) + '</td>' +
+        return '<tr><td>' + esc(u.nome) +
+          (u.gestor === false ? ' <span class="muted" style="font-size:11px;">(interna)</span>' : '') +
+          '</td><td>' + esc(u.email) + '</td><td>' + esc(u.empresa) + '</td>' +
           '<td>' + (u.cnpj ? esc(u.cnpj) : '<span class="muted">—</span>') + '</td>' +
           '<td style="font-size:12px;">' + endTxt + '</td>' +
           '<td>' + pill(u.papel) + '</td><td>' + pill(u.status) + '</td><td>' + acoes + '</td></tr>';
@@ -1215,7 +1217,11 @@
         var k = escala();
         var cx = Math.round((e.clientX - r.left) * k);
         var cy = Math.round((e.clientY - r.top) * k);
-        var nova = { x: Math.max(0, cx - 16), y: Math.max(0, cy - 16), w: 32, h: 32, texto: '', linkNumero: '' };
+        // A nova área herda o tamanho da última já criada (fica prático manter
+        // todas com as mesmas dimensões); 32×32 só quando é a primeira.
+        var ult = hs[hs.length - 1];
+        var nw = ult ? ult.w : 32, nh = ult ? ult.h : 32;
+        var nova = { x: Math.max(0, cx - Math.round(nw / 2)), y: Math.max(0, cy - Math.round(nh / 2)), w: nw, h: nh, texto: '', linkNumero: '' };
         hs.push(nova);
         desenharBoxes(); desenharLista();
         var ultima = lista.querySelector('.ha-row[data-i="' + (hs.length - 1) + '"] .hl');

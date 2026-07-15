@@ -6,12 +6,13 @@
 // ============================================================
 import { Router } from 'express';
 import { query } from '../db.js';
-import { requireAuth } from '../auth.js';
+import { requireAuth, requireArea } from '../auth.js';
 
 const router = Router();
 
 // GET /api/faturas — cliente vê as da própria empresa; admin vê todas.
-router.get('/faturas', requireAuth, async (req, res, next) => {
+// Conta interna (sub-dealer) sem a área 'financeiro' recebe 403.
+router.get('/faturas', requireAuth, requireArea('financeiro'), async (req, res, next) => {
   try {
     const eid = req.user.papel === 'admin' ? null : req.user.empresaId;
     const faturas = await query(
