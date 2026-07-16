@@ -214,3 +214,12 @@ span.fnd-thumb.vazio { display: inline-flex; align-items: center; justify-conten
 .ch-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px 14px; align-items: end; }
 .ch-form .field { margin: 0; }
 .ch-livre { color: #92600a; font-weight: 600; font-size: 12px; }
+
+/* Textos amarelos do admin: negrito + contorno preto (mesma regra do
+   styles.css — ver o bloco "TEXTOS AMARELOS" lá). */
+.kpi .k-val, .chart-stats .s .v, .adm-side .logo-cell .g-badge {
+  font-weight: 700;
+  text-shadow:
+    -1px 0 #000, 1px 0 #000, 0 -1px #000, 0 1px #000,
+    -1px -1px #000, 1px -1px #000, -1px 1px #000, 1px 1px #000;
+}

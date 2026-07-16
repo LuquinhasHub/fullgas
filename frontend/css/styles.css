@@ -539,15 +539,17 @@ main.finder { padding: 8px 28px 70px; }
 .model-tree .leaf:hover { color: var(--red); }
 
 .finder-model-name { color: var(--red); font-weight: 600; margin: 6px 0 10px; }
-.finder-links { display: flex; gap: 28px; margin-bottom: 20px; font-size: 13px; flex-wrap: wrap; }
-.finder-links a, .finder-links button { color: var(--red); background: none; border: none; cursor: pointer; font-size: 13px; padding: 0; }
-.finder-links a:hover, .finder-links button:hover { text-decoration: underline; }
+.finder-links { display: flex; gap: 28px; margin-bottom: 20px; font-size: 13px; flex-wrap: wrap; align-items: center; }
+/* :not(.btn-voltar): o botão VOLTAR tem estilo próprio (pílula preta) e não
+   pode herdar o visual de link destas regras. */
+.finder-links a:not(.btn-voltar), .finder-links button:not(.btn-voltar) { color: var(--red); background: none; border: none; cursor: pointer; font-size: 13px; padding: 0; }
+.finder-links a:not(.btn-voltar):hover, .finder-links button:not(.btn-voltar):hover { text-decoration: underline; }
 
 .finder-layout { display: grid; grid-template-columns: 430px 1fr; gap: 40px; align-items: start; }
 @media (max-width: 980px) { .finder-layout { grid-template-columns: 1fr; } }
 .sec-list .sec-item { display: flex; align-items: center; gap: 16px; width: 100%; background: #fff; border: none; border-bottom: 1px solid #e6e6e6; padding: 15px 14px; cursor: pointer; font-size: 13px; text-align: left; }
 .sec-list .sec-item:nth-child(even) { background: #f4f4f4; }
-.sec-list .sec-item:hover { background: #fdeeee; }
+.sec-list .sec-item:hover { background: #fdf3d3; } /* hover no amarelo da marca (tom suave) */
 .sec-list .sec-item .n { width: 26px; color: #555; }
 .sec-list .sec-item .chev { margin-left: auto; color: var(--red); font-weight: 800; }
 .thumb-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
@@ -768,3 +770,23 @@ main.finder { padding: 8px 28px 70px; }
 /* Seleção de reivindicações para exportar */
 .cl-selall { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--ink); cursor: pointer; }
 .cl-check { cursor: pointer; }
+
+/* =========================================================
+   TEXTOS AMARELOS: sempre em NEGRITO com CONTORNO PRETO
+   (pedido do dono — o amarelo da marca some em fundo claro).
+   Agrupa os seletores que usam o amarelo como cor de TEXTO;
+   toda UI nova com texto amarelo deve entrar nesta lista.
+   ========================================================= */
+.brand, .brand .g-badge, .field-title, .topbar .logo span, .pf-link:hover,
+.crumb a, .card-title, .cl-num, .row-claim .chev, .fin-card .v, .pdf-ico,
+.page-band .bc a, .table td a, .shop-side .cat-link.on, .pager button.on,
+.prod-name, .prod-name a, .search-panel .sp-title, .model-tree .leaf:hover,
+.finder-model-name, .finder-links a:not(.btn-voltar),
+.finder-links button:not(.btn-voltar), .sec-list .sec-item .chev,
+.thumb .tn, .part-row b a:hover, .finder-crumb, .finder-crumb a,
+.finder-crumb .crumb-print, .btn.ghost, .link-action, .veh-card h3 {
+  font-weight: 700;
+  text-shadow:
+    -1px 0 #000, 1px 0 #000, 0 -1px #000, 0 1px #000,
+    -1px -1px #000, 1px -1px #000, -1px 1px #000, 1px 1px #000;
+}

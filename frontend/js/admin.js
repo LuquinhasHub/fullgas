@@ -459,7 +459,7 @@
     function fechar() { back.remove(); }
     back.querySelector('.x').addEventListener('click', fechar);
     document.getElementById('mp-canc').addEventListener('click', fechar);
-    back.addEventListener('click', function (e) { if (e.target === back) fechar(); });
+    // Clicar fora NÃO fecha — pop-ups só fecham no X (pedido do dono).
 
     var mpFotoDel = document.getElementById('mp-foto-del');
     if (mpFotoDel) mpFotoDel.addEventListener('click', function () {
@@ -737,7 +737,7 @@
     function fechar() { back.remove(); }
     back.querySelector('.x').addEventListener('click', fechar);
     document.getElementById('ad-fechar').addEventListener('click', fechar);
-    back.addEventListener('click', function (e) { if (e.target === back) fechar(); });
+    // Clicar fora NÃO fecha — pop-ups só fecham no X (pedido do dono).
 
     if (!term) {
       document.getElementById('ad-aplicar').addEventListener('click', async function () {
@@ -775,7 +775,7 @@
     function fechar() { back.remove(); }
     back.querySelector('.x').addEventListener('click', fechar);
     document.getElementById('dv-canc').addEventListener('click', fechar);
-    back.addEventListener('click', function (e) { if (e.target === back) fechar(); });
+    // Clicar fora NÃO fecha — pop-ups só fecham no X (pedido do dono).
     document.getElementById('dv-ok').addEventListener('click', async function () {
       var falta = document.getElementById('dv-falta').value.trim();
       if (!falta) { FG.toast('Descreva o que falta antes de devolver.', 'erro'); return; }
@@ -959,7 +959,7 @@
     function fechar() { back.remove(); }
     back.querySelector('.x').addEventListener('click', fechar);
     document.getElementById('fm-canc').addEventListener('click', fechar);
-    back.addEventListener('click', function (e) { if (e.target === back) fechar(); });
+    // Clicar fora NÃO fecha — pop-ups só fecham no X (pedido do dono).
 
     var btnDel = document.getElementById('fm-foto-del');
     if (btnDel) btnDel.addEventListener('click', function () {
@@ -1098,7 +1098,7 @@
     function fechar() { back.remove(); }
     back.querySelector('.x').addEventListener('click', fechar);
     document.getElementById('se-canc').addEventListener('click', fechar);
-    back.addEventListener('click', function (e) { if (e.target === back) fechar(); });
+    // Clicar fora NÃO fecha — pop-ups só fecham no X (pedido do dono).
 
     document.getElementById('se-ok').addEventListener('click', function () {
       var dados = {

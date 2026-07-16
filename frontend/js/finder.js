@@ -156,7 +156,7 @@
       '</div></div>';
     document.body.appendChild(back);
     back.querySelector('.x').addEventListener('click', function () { back.remove(); });
-    back.addEventListener('click', function (e) { if (e.target === back) back.remove(); });
+    // Clicar fora NÃO fecha — pop-ups só fecham no X (pedido do dono).
     Array.prototype.forEach.call(back.querySelectorAll('a'), function (a) {
       a.addEventListener('click', function () { back.remove(); });
     });
@@ -220,7 +220,7 @@
           '<img src="' + esc(m.imagem) + '" alt="' + esc(m.label) + '"></div></div>';
         document.body.appendChild(back);
         back.querySelector('.x').addEventListener('click', function () { back.remove(); });
-        back.addEventListener('click', function (e) { if (e.target === back) back.remove(); });
+        // Clicar fora NÃO fecha — pop-ups só fecham no X (pedido do dono).
       });
       document.getElementById('fl-doc').addEventListener('click', function () {
         if (m.docTecnica) window.open(m.docTecnica, '_blank', 'noopener');
@@ -267,6 +267,10 @@
       var linhas = s.pecas.map(function (p, i) {
         var marcada = p.quantidadePadrao > 0;
         var indisp = !(p.estoque > 0) && !p.previsao;
+        // Em estoque: quantidade limitada ao saldo (mesma regra do carrinho
+        // da loja). Pré-venda não limita aqui — vai para o backorder.
+        var max = p.estoque > 0 ? p.estoque : null;
+        var vIni = indisp ? 0 : (max ? Math.min(p.quantidadePadrao, max) : p.quantidadePadrao);
         // Ver a peça na loja abre em NOVA aba: o cliente não perde o finder.
         var link = 'loja.html#/produto/' + encodeURIComponent(p.sku);
         return '<div class="part-row' + (marcada ? ' sel' : '') + '" data-row="' + i + '" data-num="' + esc(p.numeroImagem) + '">' +
@@ -275,7 +279,7 @@
           '<a href="' + link + '" target="_blank" rel="noopener">' + esc(p.sku) + '</a>' +
           '<b><a href="' + link + '" target="_blank" rel="noopener">' + esc(p.nome) + '</a></b>' +
           statusPeca(p) +
-          '<input class="qn" type="number" min="0" value="' + (indisp ? 0 : p.quantidadePadrao) + '"' +
+          '<input class="qn" type="number" min="0"' + (max ? ' max="' + max + '"' : '') + ' value="' + vIni + '"' +
           ' data-art="' + esc(p.sku) + '"' + (indisp ? ' disabled title="Peça indisponível para compra"' : '') + '>' +
           '<span>(' + p.quantidade + ')</span>' +
           '</div>';
@@ -343,16 +347,34 @@
         });
       });
 
-      /* adicionar selecionados à cesta da loja */
+      /* Quantidade limitada ao estoque enquanto digita (peças em estoque). */
+      Array.prototype.forEach.call(fdView.querySelectorAll('.qn[max]'), function (qn) {
+        qn.addEventListener('input', function () {
+          var max = Number(qn.getAttribute('max'));
+          if (Number(qn.value) > max) { qn.value = max; FG.toast('Estoque disponível: ' + max + ' un.', 'erro'); }
+        });
+      });
+
+      /* adicionar selecionados à cesta da loja — mesma regra do carrinho:
+         nunca passa do estoque disponível (contando o que JÁ está na cesta) */
       document.getElementById('fa-cart').addEventListener('click', function () {
-        var add = 0, recusadas = 0;
+        var add = 0, recusadas = 0, ajustadas = 0;
         Array.prototype.forEach.call(fdView.querySelectorAll('.part-row.sel .qn'), function (qn) {
           var qtd = Math.max(0, Number(qn.value) || 0);
           if (qtd <= 0) return;
-          if (FG.cartAdd(qn.getAttribute('data-art'), qtd)) add += qtd;
-          else recusadas++;
+          var art = qn.getAttribute('data-art');
+          var lim = FG.limiteCompra(art);
+          var ja = (FG.cart().find(function (c) { return c.artigo === art; }) || {}).qtd || 0;
+          if (!FG.cartAdd(art, qtd)) { recusadas++; return; }
+          var cabia = Math.max(0, Math.min(qtd, lim - ja));
+          if (cabia < qtd) ajustadas++;
+          add += cabia;
         });
-        if (add) FG.toast(add + ' item(ns) enviados à cesta da loja.' + (recusadas ? ' ' + recusadas + ' indisponível(is).' : ''));
+        if (add) FG.toast(add + ' item(ns) enviados à cesta da loja.' +
+          (ajustadas ? ' ' + ajustadas + ' ajustado(s) ao estoque disponível.' : '') +
+          (recusadas ? ' ' + recusadas + ' indisponível(is).' : ''),
+          (ajustadas || recusadas) ? 'erro' : undefined);
+        else if (ajustadas) FG.toast('A cesta já tem todo o estoque disponível dessa(s) peça(s).', 'erro');
         else if (recusadas) FG.toast('Peça(s) indisponível(is) no momento — sem estoque e sem previsão.', 'erro');
         else FG.toast('Marque ao menos uma peça com quantidade.');
         refreshCart();

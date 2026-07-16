@@ -110,7 +110,7 @@
       '<img src="' + esc(img.src) + '" alt="' + esc(img.alt || '') + '"></div></div>';
     document.body.appendChild(back);
     back.querySelector('.x').addEventListener('click', function () { back.remove(); });
-    back.addEventListener('click', function (ev) { if (ev.target === back) back.remove(); });
+    // Clicar fora NÃO fecha — pop-ups só fecham no X (pedido do dono).
   });
 
   /* =========================================================

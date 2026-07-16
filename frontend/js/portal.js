@@ -717,7 +717,7 @@
     function fechar() { back.remove(); }
     back.querySelector('.x').addEventListener('click', fechar);
     document.getElementById('det-fechar').addEventListener('click', fechar);
-    back.addEventListener('click', function (e) { if (e.target === back) fechar(); });
+    // Clicar fora NÃO fecha — pop-ups só fecham no X (pedido do dono).
     var ed = document.getElementById('det-editar');
     if (ed) ed.addEventListener('click', function () { fechar(); modalClaim(c.tipo, { modo: 'editar', claim: c }); });
   }
@@ -891,7 +891,7 @@
     function fechar() { back.remove(); }
     back.querySelector('.x').addEventListener('click', fechar);
     back.querySelector('#vd-canc').addEventListener('click', fechar);
-    back.addEventListener('click', function (e) { if (e.target === back) fechar(); });
+    // Clicar fora NÃO fecha — pop-ups só fecham no X (pedido do dono).
     document.getElementById('vd-nome').focus();
 
     // Máscara leve de CPF enquanto digita (000.000.000-00).
@@ -942,7 +942,7 @@
     function fechar() { back.remove(); }
     back.querySelector('.x').addEventListener('click', fechar);
     back.querySelector('#tf-canc').addEventListener('click', fechar);
-    back.addEventListener('click', function (e) { if (e.target === back) fechar(); });
+    // Clicar fora NÃO fecha — pop-ups só fecham no X (pedido do dono).
     document.getElementById('tf-emp').focus();
 
     // Sugestões enquanto digita (front próprio — nada de datalist nativo).
