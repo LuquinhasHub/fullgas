@@ -77,9 +77,18 @@
 
   /* ---------- util ---------- */
   function setCrumb(partes) {
-    var html = '<a href="#home">Página inicial</a>';
+    // Fora da home, o botão VOLTAR abre a trilha (bem visível — volta um
+    // passo na navegação; sem histórico, cai na página inicial).
+    var html = (partes || []).length
+      ? '<button class="btn-voltar" id="crumb-voltar" type="button">Voltar</button>'
+      : '';
+    html += '<a href="#home">Página inicial</a>';
     (partes || []).forEach(function (p) { html += ' &rsaquo; <span>' + esc(p) + '</span>'; });
     crumb.innerHTML = html;
+    var bv = document.getElementById('crumb-voltar');
+    if (bv) bv.addEventListener('click', function () {
+      if (history.length > 1) history.back(); else location.hash = '#home';
+    });
   }
   function setTabOn(rota) {
     Array.prototype.forEach.call(document.querySelectorAll('.tabs a[data-rota]'), function (a) {
@@ -921,9 +930,10 @@
       '<div class="modal"><header><h3>Transferir revendedor — ' + esc(v.niv) + '</h3><button class="x">×</button></header>' +
       '<div class="modal-body">' +
       '<p class="muted" style="margin-top:0;">O chassi passa a pertencer à concessionária informada. ' +
-      'Digite a razão social (ou nome fantasia) exata.</p>' +
+      'Comece a digitar e escolha na lista.</p>' +
       '<div class="field"><label>Concessionária de destino *</label>' +
-      '<input id="tf-emp" type="text" placeholder="Ex.: POWER MOTOS LTDA" autocomplete="off"></div>' +
+      '<div class="ac-wrap"><input id="tf-emp" type="text" placeholder="Digite o nome da concessionária" autocomplete="off">' +
+      '<div class="ac-list hidden" id="tf-emp-ac"></div></div></div>' +
       '</div>' +
       '<div class="modal-foot"><button class="btn-line" id="tf-canc">Cancelar</button>' +
       '<button class="btn red" id="tf-ok">Transferir</button></div></div>';
@@ -935,10 +945,25 @@
     back.addEventListener('click', function (e) { if (e.target === back) fechar(); });
     document.getElementById('tf-emp').focus();
 
+    // Sugestões enquanto digita (front próprio — nada de datalist nativo).
+    FG.bindAutocomplete('tf-emp', function (termo) {
+      return FG.empresas().then(function (emps) {
+        var t = termo.toLowerCase();
+        return emps.filter(function (e2) {
+          return e2.nome.toLowerCase().indexOf(t) !== -1 ||
+            (e2.fantasia && e2.fantasia.toLowerCase().indexOf(t) !== -1);
+        }).map(function (e2) {
+          return { id: e2.id, label: e2.nome, sub: e2.fantasia || '' };
+        });
+      });
+    });
+
     document.getElementById('tf-ok').addEventListener('click', async function () {
-      var nome = document.getElementById('tf-emp').value.trim();
+      var el = document.getElementById('tf-emp');
+      var nome = el.value.trim();
+      var idSel = el.getAttribute('data-ac-id');
       if (!nome) { FG.toast('Informe o nome da concessionária.'); return; }
-      var r = await FG.transferirVeiculo(v.niv, nome);
+      var r = await FG.transferirVeiculo(v.niv, idSel ? { empresaId: Number(idSel) } : nome);
       if (!r.ok) { FG.toast(r.msg || 'Não foi possível transferir.', 'erro'); return; }
       fechar();
       FG.toast('Veículo transferido para ' + esc(r.empresa || nome) + '.');

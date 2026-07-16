@@ -186,7 +186,7 @@
       fdView.innerHTML =
         '<div class="finder-model-name">' + esc(m.label) + '</div>' +
         '<div class="finder-links">' +
-        '<button id="fl-back">‹ Voltar</button>' +
+        '<button class="btn-voltar" id="fl-back">Voltar</button>' +
         '<button id="fl-img">🖼 Show Image</button>' +
         '<a href="#/modelo/' + esc(m.id) + '/' + outro + '">Switch To ' + (outro === 'engine' ? 'Engine' : 'Frame') + '</a>' +
         '<button id="fl-doc">📘 Technical documentation</button>' +
@@ -286,7 +286,7 @@
         ' <span class="chev">›</span> ' + esc(s.nome) +
         '<button class="link-action crumb-print" id="fa-print">🖨 Print</button></div>' +
         '<div class="fnd-actions">' +
-        '<a class="btn" href="#/modelo/' + esc(s.modelo.id) + '/' + s.lado + '">‹ VOLTAR</a>' +
+        '<a class="btn-voltar" href="#/modelo/' + esc(s.modelo.id) + '/' + s.lado + '">Voltar</a>' +
         '<button class="btn" id="fa-next"' + (s.vizinhos.proxima ? '' : ' disabled') + '>NEXT CATEGORY</button>' +
         '<a class="btn" href="#/modelo/' + esc(s.modelo.id) + '/' + outro + '">SWITCH TO ' + (outro === 'engine' ? 'ENGINE' : 'FRAME') + '</a>' +
         '</div>' +

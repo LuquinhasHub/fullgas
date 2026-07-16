@@ -292,10 +292,29 @@
     });
   };
 
-  // Transfere o chassi para outra concessionária, pelo nome (SÓ ADMIN).
-  // Recarrega o cache de veículos no sucesso.
-  FG.transferirVeiculo = function (niv, empresa) {
-    return req('PUT', '/veiculos/' + encodeURIComponent(niv) + '/transferir', { empresa: empresa }).then(function (r) {
+  // Lista de concessionárias ativas (SÓ ADMIN) — alimenta o autocomplete de
+  // atribuição/transferência de chassi. Cacheada após a primeira chamada.
+  var _empresas = null;
+  FG.empresas = function () {
+    if (_empresas) return Promise.resolve(_empresas);
+    return apiGet('/empresas').then(function (l) { _empresas = l || []; return _empresas; });
+  };
+
+  // Cadastra um chassi novo (SÓ ADMIN): { niv, modeloId, cor?, numeroMotor?,
+  // empresaId? }. Recarrega o cache de veículos no sucesso.
+  FG.criarVeiculo = function (dados) {
+    return req('POST', '/veiculos', dados).then(function (r) {
+      if (!r.ok) return r;
+      return recarregarVeiculos().then(function () { return r; });
+    });
+  };
+
+  // Transfere o chassi para outra concessionária (SÓ ADMIN). `destino` pode
+  // ser o NOME (string) ou { empresaId } vindo do autocomplete. Recarrega o
+  // cache de veículos no sucesso.
+  FG.transferirVeiculo = function (niv, destino) {
+    var body = typeof destino === 'object' ? destino : { empresa: destino };
+    return req('PUT', '/veiculos/' + encodeURIComponent(niv) + '/transferir', body).then(function (r) {
       if (!r.ok) return r;
       return recarregarVeiculos().then(function () { return r; });
     });

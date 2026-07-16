@@ -34,6 +34,19 @@ input, select, textarea { font-family: inherit; font-size: 14px; }
 h1, h2, h3 { margin: 0 0 .5em; }
 .hidden { display: none !important; }
 .muted { color: var(--gray); }
+
+/* Botão "Voltar" padrão da aplicação — sempre visível, no início da trilha
+   de navegação (loja, portal e finder usam o mesmo estilo). */
+.btn-voltar {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: var(--ink); color: #fff; border: none; border-radius: 18px;
+  padding: 7px 16px 7px 12px; font-size: 12px; font-weight: 700;
+  letter-spacing: .5px; cursor: pointer; text-decoration: none;
+  text-transform: uppercase; transition: background .12s, transform .1s;
+}
+.btn-voltar::before { content: "←"; font-size: 14px; line-height: 1; }
+.btn-voltar:hover { background: #000; text-decoration: none; transform: translateX(-2px); }
+.btn-voltar + * { margin-left: 6px; }
 .right { text-align: right; }
 .nowrap { white-space: nowrap; }
 
@@ -49,7 +62,7 @@ h1, h2, h3 { margin: 0 0 .5em; }
   font-style: italic; font-weight: 900; font-size: 17px; color: var(--red);
 }
 .brand.big { font-size: 26px; }
-.brand.white, .brand.white .g-badge { color: #fff; border-color: #fff; }
+.brand.white, .brand.white .g-badge { color: var(--ink); border-color: var(--ink); }
 
 /* ---------- botões ---------- */
 .btn {
@@ -278,7 +291,7 @@ h1, h2, h3 { margin: 0 0 .5em; }
 .tabs .drop .menu a { display: block; background: none; padding: 9px 16px; color: var(--ink); font-size: 13px; }
 .tabs .drop .menu a:hover { background: #f4f4f4; }
 
-.crumb { padding: 6px 22px 14px; font-size: 13px; }
+.crumb { padding: 6px 22px 14px; font-size: 13px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .crumb a { color: var(--red); }
 .crumb span { color: var(--ink); }
 
@@ -374,14 +387,24 @@ main.portal { padding: 0 22px 60px; }
 .shop-head .sh-title { font-weight: 800; font-size: 19px; }
 .shop-head .sh-user { font-size: 11px; opacity: .95; }
 .shop-head a { color: #fff; }
-.shop-head .menu-btn { background: none; border: none; color: #fff; font-weight: 700; cursor: pointer; font-size: 14px; letter-spacing: 1px; display: flex; align-items: center; gap: 8px; }
-.shop-head .sh-search { display: flex; align-items: center; border-bottom: 1px solid #fff; }
-.shop-head .sh-search input { background: transparent; border: none; color: #fff; padding: 6px 4px; width: 200px; }
-.shop-head .sh-search input::placeholder { color: #ffd9d9; }
-.shop-head .sh-search button { background: none; border: none; color: #fff; cursor: pointer; }
-.shop-head .sh-icons { display: flex; align-items: center; gap: 20px; margin-left: auto; }
-.shop-head .sh-icons a, .shop-head .sh-icons button { background: none; border: none; color: #fff; cursor: pointer; font-size: 17px; position: relative; }
-.shop-head .cart-n { position: absolute; top: -7px; right: -10px; background: var(--ink); color: var(--red); border-radius: 9px; font-size: 10px; font-weight: 800; padding: 0 5px; }
+.shop-head .menu-btn { background: none; border: none; color: var(--ink); font-weight: 700; cursor: pointer; font-size: 14px; letter-spacing: 1px; display: flex; align-items: center; gap: 8px; }
+.shop-head .sh-search { display: flex; align-items: center; border-bottom: 1px solid var(--ink); }
+.shop-head .sh-search input { background: transparent; border: none; color: var(--ink); padding: 6px 4px; width: 200px; }
+.shop-head .sh-search input::placeholder { color: rgba(28, 28, 28, .55); }
+.shop-head .sh-search button { background: none; border: none; color: var(--ink); cursor: pointer; }
+.shop-head .sh-icons { display: flex; align-items: center; gap: 12px; margin-left: auto; }
+/* Ícones do cabeçalho em CÍRCULOS PRETOS — sobre o amarelo eles sumiam;
+   o que era preto/escuro dentro do círculo vira branco. */
+.shop-head .sh-icons a, .shop-head .sh-icons button {
+  background: var(--ink); border: none; color: #fff; cursor: pointer; font-size: 16px;
+  position: relative; width: 38px; height: 38px; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center; text-decoration: none;
+  transition: transform .1s;
+}
+.shop-head .sh-icons a:hover, .shop-head .sh-icons button:hover { transform: scale(1.08); text-decoration: none; }
+.shop-head .sh-icons a.sh-brand { width: auto; background: none; border-radius: 0; }
+.shop-head .sh-icons a.sh-brand:hover { transform: none; }
+.shop-head .cart-n { position: absolute; top: -4px; right: -4px; background: var(--red); color: var(--ink); border: 1px solid var(--ink); border-radius: 9px; font-size: 10px; font-weight: 800; padding: 0 5px; }
 .shop-mega { position: absolute; top: 100%; left: 0; background: #fff; color: var(--ink); width: 330px; box-shadow: var(--shadow); z-index: 60; display: none; }
 .shop-mega.open { display: block; }
 .shop-mega a { display: flex; justify-content: space-between; padding: 13px 16px; color: var(--ink); border-bottom: 1px solid #eee; font-size: 12px; font-weight: 700; text-transform: uppercase; }
@@ -389,7 +412,7 @@ main.portal { padding: 0 22px 60px; }
 .shop-mega a span { color: #999; }
 
 .page-band { display: flex; justify-content: space-between; align-items: stretch; margin-bottom: 22px; }
-.page-band .bc { padding: 14px 18px; font-size: 11px; font-weight: 700; letter-spacing: .5px; }
+.page-band .bc { padding: 14px 18px; font-size: 11px; font-weight: 700; letter-spacing: .5px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .page-band .bc a { color: var(--red); }
 .page-band .title { background: #111; color: #fff; font-size: 21px; font-weight: 800; letter-spacing: 1px; padding: 12px 60px 12px 40px; clip-path: polygon(22px 0, 100% 0, 100% 100%, 0 100%); text-transform: uppercase; }
 
@@ -397,10 +420,20 @@ main.shop { padding: 0 18px 70px; }
 
 .cat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 40px 26px; max-width: 1180px; margin: 50px auto; }
 .cat-tile { text-align: center; cursor: pointer; background: none; border: none; padding: 10px; }
-.cat-tile:hover .cat-name { color: var(--red); }
+.cat-tile:hover .cat-name { color: var(--red-dark); }
+.cat-tile:hover .cat-ico { transform: scale(1.05); }
 .cat-tile .cat-name { margin-top: 16px; font-size: 13px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; color: var(--ink); }
 .cat-ico { stroke: #9a9a9a; fill: none; stroke-width: 2.4; }
 .cat-ico .acc { stroke: var(--red); }
+/* Na grade de categorias o ícone ganha CÍRCULO PRETO para destacar (os
+   traços cinza sumiam no fundo branco): dentro do círculo o traço é branco
+   e o acento fica amarelo. Os placeholders de produto (mesma classe, fora
+   do tile) continuam discretos. */
+.cat-tile .cat-ico {
+  stroke: #fff; background: var(--ink); border-radius: 50%; padding: 22px;
+  width: 120px; height: 120px; box-sizing: border-box;
+  transition: transform .12s;
+}
 
 .shop-layout { display: grid; grid-template-columns: 280px 1fr; gap: 34px; align-items: start; }
 @media (max-width: 940px) { .shop-layout { grid-template-columns: 1fr; } }
@@ -655,7 +688,7 @@ main.finder { padding: 8px 28px 70px; }
 .ac-item b { white-space: nowrap; }
 .ac-item .ac-nome { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #555; }
 .ac-item .ac-preco { color: #999; font-size: 11px; white-space: nowrap; }
-.ac-item:hover, .ac-item.on { background: #fdeeee; }
+.ac-item:hover, .ac-item.on { background: #fdf6dd; }
 
 /* cortina de envio da garantia: cobre o overlay inteiro (não o .modal, que
    rola) para a mensagem ficar sempre centralizada na tela. */

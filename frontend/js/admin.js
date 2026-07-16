@@ -131,10 +131,7 @@
       '<table class="tbl"><thead><tr><th>Nome</th><th>E-mail</th><th>Empresa</th><th>CNPJ</th><th>Endereço</th><th>Papel</th><th>Status</th><th>Ações</th></tr></thead><tbody>' +
       users.map(function (u) {
         var acoes = '';
-        if (u.master) {
-          // Conta suprema: sem ações — não pode ser excluída/bloqueada por ninguém.
-          acoes = '<span class="muted">(protegido)</span>';
-        } else if (String(u.id) !== String(sess.id)) {
+        if (String(u.id) !== String(sess.id)) {
           if (u.status === 'pendente') acoes += '<button class="btn-orange btn-mini" data-ac="aprovar" data-id="' + u.id + '">Aprovar</button> ';
           acoes += '<button class="btn-line btn-mini" data-ac="papel" data-id="' + u.id + '">' +
             (u.papel === 'admin' ? 'Tornar cliente' : 'Tornar admin') + '</button> ';
@@ -167,7 +164,6 @@
             dd('Cidade', e.cidade) + dd('UF', e.uf) +
             '</div>' : '<p class="muted" style="margin:4px 0 0;">Sem endereço cadastrado.</p>');
         return '<tr><td>' + esc(u.nome) +
-          (u.master ? ' <span class="usr-master" title="Conta suprema — não pode ser excluída nem bloqueada">MASTER</span>' : '') +
           (u.gestor === false ? ' <span class="muted" style="font-size:11px;">(interna)</span>' : '') +
           '</td><td>' + esc(u.email) + '</td><td>' + esc(u.empresa) + '</td>' +
           '<td>' + (u.cnpj ? esc(u.cnpj) : '<span class="muted">—</span>') + '</td>' +
@@ -219,6 +215,138 @@
           FG.toast(msg);
           refreshBell(); renderUsuarios();
         });
+      });
+    });
+  }
+
+  /* =========================================================
+     CHASSIS (VINs) — cadastro e atribuição a concessionárias
+     ========================================================= */
+
+  // Autocomplete de concessionária (front próprio, estilo .ac-wrap).
+  function bindAcEmpresas(inputId) {
+    FG.bindAutocomplete(inputId, function (termo) {
+      return FG.empresas().then(function (emps) {
+        var t = termo.toLowerCase();
+        return emps.filter(function (e2) {
+          return e2.nome.toLowerCase().indexOf(t) !== -1 ||
+            (e2.fantasia && e2.fantasia.toLowerCase().indexOf(t) !== -1);
+        }).map(function (e2) { return { id: e2.id, label: e2.nome, sub: e2.fantasia || '' }; });
+      });
+    });
+  }
+
+  // Modal para atribuir/transferir um chassi a uma concessionária.
+  function modalAtribuir(v) {
+    var back = document.createElement('div');
+    back.className = 'modal-back';
+    back.innerHTML =
+      '<div class="modal"><header><h3>' + (v.empresa ? 'Transferir' : 'Atribuir') + ' chassi — ' + esc(v.niv) + '</h3>' +
+      '<button class="x">×</button></header>' +
+      '<div class="modal-body">' +
+      (v.empresa ? '<p class="muted" style="margin-top:0;">Hoje pertence a <b>' + esc(v.empresa) + '</b>.</p>' : '') +
+      '<div class="field"><label>Concessionária de destino *</label>' +
+      '<div class="ac-wrap"><input id="ch-emp" type="text" placeholder="Digite o nome da concessionária" autocomplete="off">' +
+      '<div class="ac-list hidden" id="ch-emp-ac"></div></div></div>' +
+      '</div>' +
+      '<div class="modal-foot"><button class="btn-line" id="ch-canc">Cancelar</button>' +
+      '<button class="btn-orange" id="ch-ok">Confirmar</button></div></div>';
+    document.body.appendChild(back);
+
+    function fechar() { back.remove(); }
+    back.querySelector('.x').addEventListener('click', fechar);
+    back.querySelector('#ch-canc').addEventListener('click', fechar);
+    document.getElementById('ch-emp').focus();
+    bindAcEmpresas('ch-emp');
+
+    document.getElementById('ch-ok').addEventListener('click', function () {
+      var el = document.getElementById('ch-emp');
+      var idSel = el.getAttribute('data-ac-id');
+      var nome = el.value.trim();
+      if (!nome) { FG.toast('Informe a concessionária.', 'erro'); return; }
+      FG.transferirVeiculo(v.niv, idSel ? { empresaId: Number(idSel) } : nome).then(function (r) {
+        if (!r.ok) { FG.toast(r.msg || 'Não foi possível atribuir.', 'erro'); return; }
+        fechar();
+        FG.toast('Chassi ' + v.niv + ' atribuído a ' + (r.empresa || nome) + '.');
+        renderChassis();
+      });
+    });
+  }
+
+  function renderChassis() {
+    h1.textContent = 'Chassis (VINs)'; setOn('chassis');
+    var vehs = FG.all('vehicles');
+    var modelos = FG.all('models');
+
+    view.innerHTML =
+      /* ---- cadastro de chassi novo ---- */
+      '<div class="adm-card"><div class="c-head">Cadastrar novo chassi</div><div class="c-body">' +
+      '<div class="ch-form">' +
+      '<div class="field"><label for="ch-niv">NIV (chassi) *</label>' +
+      '<input id="ch-niv" type="text" maxlength="17" placeholder="Ex.: VBFGA125XSM160872" style="text-transform:uppercase;"></div>' +
+      '<div class="field"><label for="ch-modelo">Modelo *</label><select id="ch-modelo">' +
+      '<option value="">— escolha o modelo —</option>' +
+      modelos.map(function (m) { return '<option value="' + esc(m.id) + '">' + esc(m.label) + '</option>'; }).join('') +
+      '</select></div>' +
+      '<div class="field"><label for="ch-cor">Cor</label><input id="ch-cor" type="text" maxlength="40" placeholder="Ex.: Vermelho"></div>' +
+      '<div class="field"><label for="ch-motor">Nº do motor</label><input id="ch-motor" type="text" maxlength="40" placeholder="opcional"></div>' +
+      '<div class="field"><label for="ch-nova-emp">Concessionária (opcional)</label>' +
+      '<div class="ac-wrap"><input id="ch-nova-emp" type="text" placeholder="Deixe vazio p/ cadastrar sem atribuir" autocomplete="off">' +
+      '<div class="ac-list hidden" id="ch-nova-emp-ac"></div></div></div>' +
+      '<div class="field" style="align-self:end;"><button class="btn-orange" id="ch-criar">Cadastrar chassi</button></div>' +
+      '</div>' +
+      '<p class="muted" style="font-size:12px;margin:8px 0 0;">Sem concessionária, o chassi fica <b>não atribuído</b> ' +
+      '— nenhum cliente o vê até você atribuir. A atribuição pode ser feita (ou trocada) a qualquer momento na tabela abaixo.</p>' +
+      '</div></div>' +
+
+      /* ---- lista ---- */
+      '<div class="adm-card"><div class="c-head">Chassis cadastrados (' + vehs.length + ')</div><div class="c-body">' +
+      '<table class="tbl"><thead><tr><th>NIV</th><th>Modelo</th><th>Cor</th><th>Nº motor</th>' +
+      '<th>Status</th><th>Concessionária</th><th>Entrada</th><th>Ações</th></tr></thead><tbody>' +
+      (vehs.length ? vehs.map(function (v) {
+        var m = FG.model(v.modeloId);
+        return '<tr><td>' + esc(v.niv) + '</td><td>' + esc(m ? m.label : v.modeloId) + '</td>' +
+          '<td>' + (v.cor ? esc(v.cor) : '<span class="muted">—</span>') + '</td>' +
+          '<td>' + (v.numeroMotor ? esc(v.numeroMotor) : '<span class="muted">—</span>') + '</td>' +
+          '<td>' + pill(v.status) + '</td>' +
+          '<td>' + (v.empresa ? esc(v.empresa) : '<span class="ch-livre">não atribuído</span>') + '</td>' +
+          '<td>' + FG.fmtDate(v.entrada) + '</td>' +
+          '<td><button class="btn-line btn-mini" data-atr="' + esc(v.niv) + '">' +
+          (v.empresa ? 'Transferir' : 'Atribuir') + '</button></td></tr>';
+      }).join('') : '<tr><td colspan="8" class="muted">Nenhum chassi cadastrado ainda.</td></tr>') +
+      '</tbody></table></div></div>';
+
+    bindAcEmpresas('ch-nova-emp');
+
+    /* cadastrar */
+    document.getElementById('ch-criar').addEventListener('click', function () {
+      var empEl = document.getElementById('ch-nova-emp');
+      var idSel = empEl.getAttribute('data-ac-id');
+      var dados = {
+        niv: document.getElementById('ch-niv').value.trim().toUpperCase(),
+        modeloId: document.getElementById('ch-modelo').value,
+        cor: document.getElementById('ch-cor').value.trim(),
+        numeroMotor: document.getElementById('ch-motor').value.trim(),
+        empresaId: idSel ? Number(idSel) : null
+      };
+      if (!/^[A-Z0-9]{11,17}$/.test(dados.niv)) { FG.toast('NIV inválido — use 11 a 17 letras/números.', 'erro'); return; }
+      if (!dados.modeloId) { FG.toast('Escolha o modelo da moto.', 'erro'); return; }
+      if (empEl.value.trim() && !idSel) { FG.toast('Escolha a concessionária na lista de sugestões (ou deixe vazio).', 'erro'); return; }
+      var b = document.getElementById('ch-criar');
+      b.disabled = true;
+      FG.criarVeiculo(dados).then(function (r) {
+        b.disabled = false;
+        if (r && r.ok === false) { FG.toast(r.msg || 'Não foi possível cadastrar o chassi.', 'erro'); return; }
+        FG.toast('Chassi ' + dados.niv + ' cadastrado.');
+        renderChassis();
+      });
+    });
+
+    /* atribuir / transferir */
+    Array.prototype.forEach.call(view.querySelectorAll('[data-atr]'), function (b) {
+      b.addEventListener('click', function () {
+        var v = FG.all('vehicles').find(function (x) { return x.niv === b.getAttribute('data-atr'); });
+        if (v) modalAtribuir(v);
       });
     });
   }
@@ -1558,6 +1686,7 @@
     switch (seg[0]) {
       case 'dashboard': renderDash(); break;
       case 'usuarios': renderUsuarios(); break;
+      case 'chassis': renderChassis(); break;
       case 'produtos': renderProdutos(); break;
       case 'pedidos': renderPedidos(); break;
       case 'prevenda': renderPreVenda(); break;

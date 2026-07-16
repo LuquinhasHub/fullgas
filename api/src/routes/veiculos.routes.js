@@ -16,7 +16,9 @@ function toVeiculo(r) {
     cor: r.Cor || '',
     status: r.Status,
     entrada: r.EntradaEstoque,
-    numeroMotor: r.NumeroMotor || null
+    numeroMotor: r.NumeroMotor || null,
+    empresaId: r.EmpresaId || null,
+    empresa: r.EmpresaNome || null    // concessionária dona do chassi (null = não atribuído)
   };
   if (r.VendaData) v.venda = {
     data: r.VendaData,
@@ -34,9 +36,10 @@ const SELECT_VEIC =
   `SELECT v.VeiculoId, v.Niv, v.Cor, v.Status, v.EntradaEstoque, v.VendaData,
           v.VendaCliente, v.ClienteCpf, v.ClienteEmail, v.ClienteTelefone,
           v.ClienteEndereco, v.GarantiaAtivaEm, v.NumeroMotor, v.EmpresaId,
-          m.Codigo AS ModeloCodigo
+          m.Codigo AS ModeloCodigo, e.RazaoSocial AS EmpresaNome
      FROM dbo.Veiculo v
-     JOIN dbo.ModeloMoto m ON m.ModeloId = v.ModeloId`;
+     JOIN dbo.ModeloMoto m ON m.ModeloId = v.ModeloId
+     LEFT JOIN dbo.Empresa e ON e.EmpresaId = v.EmpresaId`;
 
 // Cliente vê SOMENTE veículos atribuídos à própria empresa; admin vê todos.
 // Todo chassi é inserido/atribuído por um administrador — enquanto um chassi
@@ -56,6 +59,60 @@ router.get('/veiculos/modelos', requireAuth, async (_req, res, next) => {
          FROM dbo.ModeloMoto WHERE Ativo = 1 ORDER BY Nome, Ano`
     );
     res.json(rows.map(r => ({ id: r.id, nome: r.nome, ano: r.ano, label: r.label || (r.nome + ' ' + r.ano) })));
+  } catch (e) { next(e); }
+});
+
+// GET /api/empresas — lista de concessionárias ativas (SÓ ADMIN). Alimenta o
+// autocomplete de atribuição/transferência de chassi no front.
+router.get('/empresas', requireAuth, requireAdmin, async (_req, res, next) => {
+  try {
+    const rows = await query(
+      `SELECT EmpresaId, RazaoSocial, NomeFantasia FROM dbo.Empresa
+        WHERE Ativo = 1 ORDER BY RazaoSocial`
+    );
+    res.json(rows.map(r => ({
+      id: r.EmpresaId, nome: r.RazaoSocial, fantasia: r.NomeFantasia || ''
+    })));
+  } catch (e) { next(e); }
+});
+
+// POST /api/veiculos (SÓ ADMIN) — cadastra um chassi novo.
+//   { niv, modeloId (código do modelo), cor?, numeroMotor?, empresaId? }
+// empresaId opcional: já nasce atribuído àquela concessionária; sem ele o
+// chassi fica "não atribuído" (nenhum cliente vê até o admin atribuir).
+router.post('/veiculos', requireAuth, requireAdmin, async (req, res, next) => {
+  try {
+    const niv = String(req.body?.niv || '').trim().toUpperCase();
+    const modeloCod = String(req.body?.modeloId || '').trim();
+    const cor = String(req.body?.cor || '').trim();
+    const numeroMotor = String(req.body?.numeroMotor || '').trim();
+    const empresaId = req.body?.empresaId ? Number(req.body.empresaId) : null;
+
+    if (!/^[A-Z0-9]{11,17}$/.test(niv))
+      return res.status(400).json({ erro: 'NIV inválido — use 11 a 17 letras/números (sem espaços).' });
+    if (!modeloCod) return res.status(400).json({ erro: 'Informe o modelo da moto.' });
+
+    const mod = (await query(
+      'SELECT ModeloId FROM dbo.ModeloMoto WHERE Codigo = @cod', { cod: modeloCod }))[0];
+    if (!mod) return res.status(400).json({ erro: 'Modelo não encontrado.' });
+
+    if (empresaId) {
+      const emp = (await query(
+        'SELECT 1 FROM dbo.Empresa WHERE EmpresaId = @eid AND Ativo = 1', { eid: empresaId })).length;
+      if (!emp) return res.status(400).json({ erro: 'Concessionária não encontrada.' });
+    }
+
+    const jaExiste = (await query('SELECT 1 FROM dbo.Veiculo WHERE Niv = @niv', { niv })).length;
+    if (jaExiste) return res.status(409).json({ erro: 'Já existe um chassi cadastrado com este NIV.' });
+
+    await query(
+      `INSERT INTO dbo.Veiculo (Niv, ModeloId, Cor, Status, EntradaEstoque, NumeroMotor, EmpresaId)
+       VALUES (@niv, @mid, @cor, 'Disponível', SYSUTCDATETIME(), @motor, @eid)`,
+      { niv, mid: mod.ModeloId, cor: cor || null, motor: numeroMotor || null, eid: empresaId }
+    );
+
+    const rows = await query(SELECT_VEIC + ' WHERE v.Niv = @niv', { niv });
+    res.status(201).json(toVeiculo(rows[0]));
   } catch (e) { next(e); }
 });
 
@@ -141,21 +198,26 @@ router.post('/veiculos/:niv/venda', requireAuth, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// PUT /api/veiculos/:niv/transferir (SÓ ADMIN) — { empresa } transfere o
-// chassi para outra concessionária, pelo NOME (razão social ou fantasia; a
-// comparação é case-insensitive pela collation do banco). Nome ambíguo ou
-// inexistente devolve erro com sugestões parecidas.
+// PUT /api/veiculos/:niv/transferir (SÓ ADMIN) — transfere o chassi para
+// outra concessionária. Aceita { empresaId } (vindo do autocomplete do front)
+// ou { empresa } com o NOME (razão social ou fantasia; case-insensitive pela
+// collation). Nome ambíguo ou inexistente devolve erro com sugestões.
 router.put('/veiculos/:niv/transferir', requireAuth, requireAdmin, async (req, res, next) => {
   try {
+    const empresaId = req.body?.empresaId ? Number(req.body.empresaId) : null;
     const nome = String(req.body?.empresa || '').trim();
-    if (!nome) return res.status(400).json({ erro: 'Informe o nome da concessionária de destino.' });
+    if (!empresaId && !nome) return res.status(400).json({ erro: 'Informe a concessionária de destino.' });
 
     const veic = await acharVeiculo(req.params.niv, req.user);
     if (!veic) return res.status(404).json({ erro: 'Veículo não encontrado.' });
 
-    const emp = await query(
-      `SELECT EmpresaId, RazaoSocial FROM dbo.Empresa
-        WHERE Ativo = 1 AND (RazaoSocial = @n OR NomeFantasia = @n)`, { n: nome });
+    const emp = await (empresaId
+      ? query('SELECT EmpresaId, RazaoSocial FROM dbo.Empresa WHERE Ativo = 1 AND EmpresaId = @eid', { eid: empresaId })
+      : query(
+        `SELECT EmpresaId, RazaoSocial FROM dbo.Empresa
+          WHERE Ativo = 1 AND (RazaoSocial = @n OR NomeFantasia = @n)`, { n: nome }));
+    if (!emp.length && empresaId)
+      return res.status(404).json({ erro: 'Concessionária não encontrada.' });
     if (!emp.length) {
       const parecidas = await query(
         `SELECT TOP 5 RazaoSocial FROM dbo.Empresa

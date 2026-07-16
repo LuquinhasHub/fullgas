@@ -66,11 +66,21 @@
 
   function setBand(titulo, trilha) {
     document.getElementById('page-title').textContent = titulo.toUpperCase();
-    var bc = '<a href="#/">LOJA</a>';
+    // Botão VOLTAR sempre visível no início da trilha: na home leva ao
+    // portal; nas demais telas volta um passo na navegação.
+    var home = !(trilha || []).length;
+    var bc = home
+      ? '<a class="btn-voltar" href="portal.html">Portal</a>'
+      : '<button class="btn-voltar" id="bt-voltar" type="button">Voltar</button>';
+    bc += '<a href="#/">LOJA</a>';
     (trilha || []).forEach(function (t) {
       bc += ' › ' + (t.href ? '<a href="' + t.href + '">' + esc(t.nome).toUpperCase() + '</a>' : '<span>' + esc(t.nome).toUpperCase() + '</span>');
     });
     document.getElementById('page-bc').innerHTML = bc;
+    var bv = document.getElementById('bt-voltar');
+    if (bv) bv.addEventListener('click', function () {
+      if (history.length > 1) history.back(); else location.hash = '#/';
+    });
   }
 
   function stockHTML(p) {

@@ -562,6 +562,48 @@
     maskIe: function (v) {
       return String(v).toUpperCase().replace(/[^0-9A-Z./ -]/g, '').slice(0, 20);
     },
+    // Autocomplete PRÓPRIO (visual .ac-wrap/.ac-list — nada de datalist
+    // nativo do navegador). Requer o markup:
+    //   <div class="ac-wrap"><input id="X"><div class="ac-list hidden" id="X-ac"></div></div>
+    // `itens(termo)` devolve (ou resolve) os itens filtrados
+    // [{ id, label, sub? }]; ao escolher, o input recebe data-ac-id com o id
+    // (limpo quando o texto muda) e `aoEscolher(item)` é chamado.
+    bindAutocomplete: function (inputId, itens, aoEscolher) {
+      var el = document.getElementById(inputId);
+      var list = document.getElementById(inputId + '-ac');
+      if (!el || !list) return;
+      function fechar() { list.classList.add('hidden'); list.innerHTML = ''; }
+      function abrir(arr) {
+        arr = arr || [];
+        if (!arr.length) { fechar(); return; }
+        list.innerHTML = arr.slice(0, 8).map(function (i, ix) {
+          return '<button type="button" class="ac-item" data-ix="' + ix + '">' +
+            '<span class="ac-nome">' + esc(i.label) + '</span>' +
+            (i.sub ? '<span class="ac-preco">' + esc(i.sub) + '</span>' : '') + '</button>';
+        }).join('');
+        list.classList.remove('hidden');
+        Array.prototype.forEach.call(list.querySelectorAll('.ac-item'), function (b) {
+          // mousedown (não click): dispara ANTES do blur do input.
+          b.addEventListener('mousedown', function (e) {
+            e.preventDefault();
+            var i = arr[Number(b.getAttribute('data-ix'))];
+            el.value = i.label;
+            el.setAttribute('data-ac-id', i.id);
+            fechar();
+            if (aoEscolher) aoEscolher(i);
+          });
+        });
+      }
+      function buscar() {
+        var t = el.value.trim();
+        if (!t) { fechar(); return; }
+        Promise.resolve(itens(t)).then(abrir);
+      }
+      el.addEventListener('input', function () { el.removeAttribute('data-ac-id'); buscar(); });
+      el.addEventListener('focus', buscar);
+      el.addEventListener('blur', function () { setTimeout(fechar, 150); });
+    },
+
     // Liga uma máscara num input; `aoDigitar` (opcional) recebe o valor já
     // formatado a cada tecla — usado p/ disparar a busca de CEP.
     bindMask: function (id, fn, aoDigitar) {
