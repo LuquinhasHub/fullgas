@@ -45,7 +45,7 @@ Internet ──HTTPS──> Cloudflare ──HTTPS──> Nginx (VPS :443)
 Você já usa a Cloudflare, então o fluxo é o mesmo dos outros domínios.
 
 ### 1.1 Adicionar o domínio na Cloudflare
-1. No painel Cloudflare → **Add a site** → digite seu domínio (ex.: `fullgas.com.br`).
+1. No painel Cloudflare → **Add a site** → digite seu domínio (ex.: `fullgas.app.br`).
 2. Escolha o plano **Free**.
 3. A Cloudflare mostra **dois nameservers** (ex.: `xxx.ns.cloudflare.com` e
    `yyy.ns.cloudflare.com`). **Anote os dois.**
@@ -65,11 +65,11 @@ Na Cloudflare, aba **DNS** → **Add record**:
 
 | Type | Name | Content (IPv4) | Proxy status |
 |---|---|---|---|
-| A | `@`   | IP_DO_SEU_VPS | Proxied (nuvem laranja) |
-| A | `www` | IP_DO_SEU_VPS | Proxied (nuvem laranja) |
+| A | `@`   | 143.95.221.45 | Proxied (nuvem laranja) |
+| A | `www` | 143.95.221.45 | Proxied (nuvem laranja) |
 
-- `@` = domínio raiz (`fullgas.com.br`). Se preferir um subdomínio (ex.:
-  `portal.fullgas.com.br`), crie um A com Name = `portal`.
+- `@` = domínio raiz (`fullgas.app.br`). Se preferir um subdomínio (ex.:
+  `portal.fullgas.app.br`), crie um A com Name = `portal`.
 - **Proxy ON (laranja)** = a Cloudflare cuida do HTTPS público e esconde o IP.
 
 ### 1.4 SSL/TLS na Cloudflare
@@ -132,20 +132,20 @@ ufw enable
 > Repare que **não** liberamos a porta 1433 (banco) nem a 3000 (API). Elas ficam
 > só no localhost — ninguém acessa de fora. Só o Nginx (80/443) fica exposto.
 
-### 2.3 Instalar Docker (para o SQL Server)
+### 2.4 Instalar Docker (para o SQL Server)
 ```bash
 apt install -y docker.io docker-compose-plugin
 systemctl enable --now docker
 ```
 
-### 2.4 Instalar Node.js 20+
+### 2.5 Instalar Node.js 20+
 ```bash
 curl -fsSL https://deb.nodesource.com/setup_20.x | sudo bash -
 apt install -y nodejs
 node --version   # deve mostrar v20.x ou superior
 ```
 
-### 2.5 Instalar Nginx e Git
+### 2.6 Instalar Nginx e Git
 ```bash
 apt install -y nginx git
 ```
@@ -208,7 +208,7 @@ fgsql -Q "SELECT @@VERSION"
 ### 3.3 Enviar os scripts do projeto pro VPS
 Do **seu PC** (não do VPS), copie a pasta `database/`:
 ```bash
-scp -r database fullgas@IP_DO_SEU_VPS:/home/fullgas/database
+scp -r database fullgas@143.95.221.45:/home/fullgas/database
 ```
 
 ### 3.4 Criar o banco, tabelas, seeds e o usuário da aplicação
@@ -240,11 +240,27 @@ for f in $(ls migrations/*.sql | sort); do
 done
 
 fgsql -i criar_usuario_app.sql        # cria o usuário fullgas_app
+
+# Parts Finder: modelos e seções (estrutura + diagramas), sem os produtos.
+fgsql -d FullgasB2B -i seed_partsfinder.sql
 ```
 
 > **Seeds:** `fullgas_seeds.sql` traz dados de demonstração (empresas e
-> reivindicações de exemplo). Em produção, **pule** — a menos que queira o
-> usuário admin inicial; nesse caso rode e depois apague o que for demo.
+> reivindicações de exemplo). Em produção, **pule** — o admin inicial é criado
+> no passo 4.4, sem lixo junto.
+
+### 3.5 Copiar os diagramas do Parts Finder
+O `seed_partsfinder.sql` grava o **caminho** das imagens, não as imagens. Sem os
+arquivos, as seções aparecem sem diagrama. Do **seu PC**:
+
+```bash
+scp -P 22022 -r api/uploads/finder fullgas@143.95.221.45:/var/www/fullgas-app/api/uploads/
+```
+
+> São ~3,6 MB (19 arquivos). As outras pastas de `uploads/` (reivindicações,
+> produtos, notificações) são dados de teste — **não** precisam ir.
+>
+> Confira depois: `ls /var/www/fullgas-app/api/uploads/finder | wc -l` → 19.
 
 > **`|| break`:** sem isso o laço segue adiante depois de uma falha e você
 > termina com um banco pela metade sem perceber. As migrações são idempotentes,
@@ -266,7 +282,7 @@ conforme sua necessidade.
 ```bash
 sudo mkdir -p /var/www && sudo chown fullgas:fullgas /var/www
 cd /var/www
-git clone SEU_REPOSITORIO_GIT fullgas-app
+git clone https://github.com/LuquinhasHub/fullgas.git fullgas-app
 cd fullgas-app/api
 npm install --omit=dev
 ```
@@ -288,7 +304,7 @@ DB_TRUST_CERT=true
 
 # API
 PORT=3000
-CORS_ORIGIN=https://SEU_DOMINIO           # ex.: https://fullgas.com.br
+CORS_ORIGIN=https://fullgas.app.br           # ex.: https://fullgas.app.br
 JWT_SECRET=COLE_UMA_CHAVE_LONGA_AQUI
 JWT_EXPIRES=8h
 
@@ -309,7 +325,7 @@ SMTP_FROM=Fullgas B2B <fullgasbrasil.oficial@gmail.com>
 # OBRIGATÓRIO em produção: é a base do link enviado por e-mail.
 # Deixar vazio aqui faz o link seguir a origem da requisição — aceitável em
 # desenvolvimento, mas em produção o valor tem de ser fixo e explícito.
-APP_URL=https://SEU_DOMINIO
+APP_URL=https://fullgas.app.br
 ```
 
 > **Sem `SMTP_HOST` a API não envia nada** — ela imprime o e-mail no log e
@@ -354,6 +370,26 @@ sudo systemctl enable --now fullgas-api
 sudo systemctl status fullgas-api          # deve estar "active (running)"
 curl http://localhost:3000/api/health      # deve responder {"ok":true}
 ```
+
+### 4.4 Criar o primeiro administrador — **não pule**
+Banco novo (sem os seeds) não tem usuário **nenhum**. E o cadastro pela tela
+nasce como `pendente`, esperando aprovação de um admin — que também não existe.
+Sem este passo o portal fica trancado por fora.
+
+```bash
+cd /var/www/fullgas-app/api
+node scripts/criar-admin.mjs "Seu Nome" "voce@fullgas.com.br" "UmaSenhaForte123"
+```
+
+O script cria a empresa matriz se ela ainda não existir, grava o hash bcrypt da
+senha (a senha em si não fica em lugar nenhum) e já marca a conta como
+`admin` + `aprovado`. Rodar de novo com o mesmo e-mail **atualiza a senha** em
+vez de duplicar — serve como "esqueci a senha do admin".
+
+> A senha vai como argumento e fica no histórico do shell. Para apagar:
+> ```bash
+> history -d $(history 1)
+> ```
 Logs quando precisar:
 ```bash
 journalctl -u fullgas-api -f
@@ -386,7 +422,7 @@ sudo nano /etc/nginx/sites-available/fullgas
 ```nginx
 server {
     listen 80;
-    server_name SEU_DOMINIO www.SEU_DOMINIO;   # ex.: fullgas.com.br www.fullgas.com.br
+    server_name fullgas.app.br www.fullgas.app.br;   # ex.: fullgas.app.br
 
     root /var/www/fullgas;
     index index.html;
@@ -423,7 +459,7 @@ sudo nginx -t          # testa a config
 sudo systemctl reload nginx
 ```
 
-Neste ponto, acessando `http://SEU_DOMINIO` já deve abrir o site (a Cloudflare
+Neste ponto, acessando `http://fullgas.app.br` já deve abrir o site (a Cloudflare
 força HTTPS na frente). Falta o certificado de origem pro modo Full (strict).
 
 ---
@@ -434,7 +470,7 @@ Como o domínio está **proxied** na Cloudflare, o jeito mais simples é usar um
 **Origin Certificate** da própria Cloudflare (vale 15 anos, sem renovação).
 
 1. Cloudflare → **SSL/TLS** → **Origin Server** → **Create Certificate**.
-2. Deixe o padrão (RSA, `*.SEU_DOMINIO` e `SEU_DOMINIO`) → **Create**.
+2. Deixe o padrão (RSA, `*.fullgas.app.br` e `fullgas.app.br`) → **Create**.
 3. Copie os dois blocos exibidos.
 
 No VPS:
@@ -453,13 +489,13 @@ Troque a primeira linha `listen 80;` por um bloco HTTPS e um redirect:
 ```nginx
 server {
     listen 80;
-    server_name SEU_DOMINIO www.SEU_DOMINIO;
+    server_name fullgas.app.br www.fullgas.app.br;
     return 301 https://$host$request_uri;      # tudo vai pra HTTPS
 }
 
 server {
     listen 443 ssl;
-    server_name SEU_DOMINIO www.SEU_DOMINIO;
+    server_name fullgas.app.br www.fullgas.app.br;
 
     ssl_certificate     /etc/nginx/ssl/fullgas.pem;
     ssl_certificate_key /etc/nginx/ssl/fullgas.key;
@@ -487,8 +523,8 @@ server {
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
-Pronto: `https://SEU_DOMINIO` abre com cadeado. Login inicial:
-`admin@fullgas.com.br` / `admin123` (troque a senha depois).
+Pronto: `https://fullgas.app.br` abre com cadeado. Login inicial:
+o e-mail e a senha que você definiu no passo 4.4.
 
 ---
 

@@ -22,8 +22,11 @@
   var ehLanIp = /^(192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.)/.test(host);
   var ehLocal = host === 'localhost' || host === '127.0.0.1' || host === '' || ehLanIp;
 
-  // >>> AJUSTE AQUI a URL pública da sua API depois do deploy <<<
-  var API_PRODUCAO = 'https://agency-amulet-roundness.ngrok-free.dev/api';
+  // Em produção o Nginx serve o site e faz proxy de /api para a Node no MESMO
+  // domínio (fullgas.app.br), então o caminho relativo é o mais robusto: não
+  // depende de domínio fixo, funciona igual em www/sem-www e não esbarra em
+  // CORS. Não troque por URL absoluta sem necessidade.
+  var API_PRODUCAO = '/api';
   // API no MESMO host que serviu a página, na porta 3000 (sem IP fixo): funciona
   // tanto em localhost quanto acessado pelo IPv4 de outro dispositivo na rede.
   var API_LOCAL = 'http://' + (host || 'localhost') + ':3000/api';
