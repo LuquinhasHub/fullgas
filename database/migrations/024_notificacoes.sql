@@ -24,9 +24,16 @@ IF OBJECT_ID('dbo.Notificacao', 'U') IS NOT NULL
 BEGIN
   -- NotificacaoLida desta própria migração (vazia), apontando p/ a tabela
   -- antiga: sai para ser recriada contra a nova.
+  --
+  -- O SELECT vai dentro de EXEC de propósito. O SQL Server compila o LOTE
+  -- INTEIRO antes de executar, então uma referência direta a
+  -- dbo.NotificacaoLida derruba o lote com "nome de objeto inválido" quando a
+  -- tabela ainda não existe — mesmo protegida pelo IF, que nunca chega a ser
+  -- avaliado. Em banco novo (servidor recém-provisionado) era exatamente esse
+  -- o caso, e a migração morria aqui: as tabelas de notificação nunca eram
+  -- criadas. Dentro do EXEC o texto só é compilado se a linha rodar.
   IF OBJECT_ID('dbo.NotificacaoLida', 'U') IS NOT NULL
-     AND NOT EXISTS (SELECT 1 FROM dbo.NotificacaoLida)
-    DROP TABLE dbo.NotificacaoLida;
+    EXEC('IF NOT EXISTS (SELECT 1 FROM dbo.NotificacaoLida) DROP TABLE dbo.NotificacaoLida;');
   EXEC sp_rename 'dbo.Notificacao', 'NotificacaoLegado';
 END
 GO

@@ -34,7 +34,14 @@ GO
 
 -- Cria o usuário master (uma única vez) na empresa FULLGAS MOTOS (matriz).
 -- Senha inicial definida pela equipe; trocar depois do primeiro acesso.
-IF NOT EXISTS (SELECT 1 FROM dbo.Usuario WHERE Email = 'master@fullgas.com.br')
+--
+-- O teste da empresa é obrigatório: em banco NOVO (servidor recém-provisionado,
+-- sem os seeds) a subconsulta devolve NULL e o INSERT morre em EmpresaId NOT
+-- NULL, abortando a migração. Sem a matriz cadastrada não há onde pendurar o
+-- master — e a 023 logo abaixo o remove de qualquer forma —, então o certo é
+-- simplesmente pular.
+IF EXISTS (SELECT 1 FROM dbo.Empresa WHERE RazaoSocial = 'FULLGAS MOTOS')
+AND NOT EXISTS (SELECT 1 FROM dbo.Usuario WHERE Email = 'master@fullgas.com.br')
   INSERT INTO dbo.Usuario (EmpresaId, Nome, Email, SenhaHash, Papel, Status, Gestor, Master)
   VALUES (
     (SELECT EmpresaId FROM dbo.Empresa WHERE RazaoSocial = 'FULLGAS MOTOS'),

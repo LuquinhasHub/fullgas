@@ -8,6 +8,16 @@
    Os blocos GO separam lotes — mantenha-os.
    ============================================================================ */
 
+/* OBRIGATÓRIO — não remova.
+   O índice UQ_Empresa_Cnpj é FILTRADO (tem WHERE), e o SQL Server recusa criar
+   índice filtrado com QUOTED_IDENTIFIER desligado. O SSMS liga essa opção
+   sozinho, então rodando por lá o script "funciona"; o sqlcmd entra com ela
+   DESLIGADA e o script quebra no meio — exatamente o que acontece ao provisionar
+   o servidor pela linha de comando. Ligar aqui deixa os dois caminhos iguais. */
+SET QUOTED_IDENTIFIER ON;
+SET ANSI_NULLS ON;
+GO
+
 /* ----------------------------------------------------------------------------
    0) Banco de dados
    ---------------------------------------------------------------------------- */
