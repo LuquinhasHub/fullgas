@@ -22,7 +22,10 @@ export function parsePermissoes(raw) {
 }
 
 // Gera o token a partir dos dados essenciais do usuário.
-export function signToken(usuario) {
+// `extra` acrescenta claims (hoje: a marca de acesso por identidade assumida —
+// `imp` = id do admin que assumiu) e pode encurtar a validade via `expiresIn`.
+export function signToken(usuario, extra) {
+  const { expiresIn, ...claims } = extra || {};
   return jwt.sign(
     {
       id: usuario.UsuarioId,
@@ -30,10 +33,11 @@ export function signToken(usuario) {
       papel: usuario.Papel,
       empresaId: usuario.EmpresaId,
       gestor: !!usuario.Gestor,
-      perm: parsePermissoes(usuario.Permissoes)   // null = acesso total
+      perm: parsePermissoes(usuario.Permissoes),  // null = acesso total
+      ...claims
     },
     SECRET,
-    { expiresIn: EXPIRES }
+    { expiresIn: expiresIn || EXPIRES }
   );
 }
 

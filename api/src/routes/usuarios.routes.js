@@ -7,7 +7,7 @@
 // ============================================================
 import { Router } from 'express';
 import { query, getPool, sql } from '../db.js';
-import { requireAuth, requireAdmin } from '../auth.js';
+import { requireAuth, requireAdmin, signToken, parsePermissoes } from '../auth.js';
 
 const router = Router();
 
@@ -106,6 +106,50 @@ router.delete('/usuarios/:id', requireAuth, requireAdmin, async (req, res, next)
       throw e;
     }
     res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
+// POST /api/usuarios/:id/identidade — ALTERAÇÃO DE IDENTIDADE (só admin).
+// ------------------------------------------------------------
+// Devolve um token do usuário-alvo para o admin entrar na conta dele e ver o
+// portal exatamente como o cliente vê (útil para suporte). Serve tanto para a
+// conta gestora quanto para as contas internas (sub-dealers).
+//
+// Cuidados de propósito:
+//   • o token sai marcado com `imp` = id do admin que assumiu — dá para
+//     auditar depois e o front usa isso para mostrar a tarja de aviso;
+//   • validade curta (1 h), independente do JWT_EXPIRES normal;
+//   • ninguém assume a própria identidade nem a de outro admin (não teria
+//     ganho de suporte e só serviria para confundir a trilha de auditoria).
+router.post('/usuarios/:id/identidade', requireAuth, requireAdmin, async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (!id) return res.status(400).json({ erro: 'ID inválido.' });
+    if (id === req.user.id) return res.status(400).json({ erro: 'Você já está na sua própria conta.' });
+
+    const alvo = (await query(
+      `SELECT u.UsuarioId, u.Nome, u.Email, u.Papel, u.Status, u.EmpresaId, u.Gestor, u.Permissoes,
+              e.RazaoSocial AS Empresa
+         FROM dbo.Usuario u
+         JOIN dbo.Empresa e ON e.EmpresaId = u.EmpresaId
+        WHERE u.UsuarioId = @id`, { id }))[0];
+    if (!alvo) return res.status(404).json({ erro: 'Usuário não encontrado.' });
+    if (alvo.Papel === 'admin')
+      return res.status(400).json({ erro: 'Não é possível assumir a identidade de outro administrador.' });
+
+    console.log(`↪ Identidade assumida: admin #${req.user.id} (${req.user.email}) → ` +
+                `#${alvo.UsuarioId} (${alvo.Email}) da empresa "${alvo.Empresa}".`);
+
+    res.json({
+      token: signToken(alvo, { imp: req.user.id, expiresIn: '1h' }),
+      usuario: {
+        id: alvo.UsuarioId, nome: alvo.Nome, email: alvo.Email,
+        papel: alvo.Papel, empresa: alvo.Empresa, empresaId: alvo.EmpresaId,
+        gestor: !!alvo.Gestor,
+        permissoes: parsePermissoes(alvo.Permissoes),   // null = acesso total
+        status: alvo.Status
+      }
+    });
   } catch (e) { next(e); }
 });
 
