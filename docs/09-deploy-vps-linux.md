@@ -8,8 +8,24 @@ Cenário deste guia:
   para a API Node (localhost:3000). Front e API no mesmo domínio → sem dor de
   cabeça com CORS.
 
-> **Requisito de RAM:** o SQL Server sozinho pede ~2 GB. Some a API + Nginx +
-> sistema e o VPS deve ter **no mínimo 4 GB de RAM** (2 GB é arriscado, trava).
+## Servidor de destino (HostGator — VPS OCI NVMe 4)
+
+| Item | Valor |
+|---|---|
+| IP | `143.95.221.45` (São Paulo) |
+| SSH | usuário `root`, **porta 22022** (não é a 22 padrão) |
+| CPU / RAM | 2 vCPU / **4 GB** |
+| Disco | 100 GB NVMe |
+| Sistema | Ubuntu 22.04 |
+
+> **Sobre os 4 GB:** é exatamente o mínimo. Por isso este guia usa a edição
+> **Express** do SQL Server, que se limita sozinha a ~1,4 GB de buffer — o que
+> aqui é uma vantagem — e manda criar **swap** como rede de segurança. Sem esses
+> dois cuidados o servidor fica sujeito a travar sob carga.
+>
+> A Express também é a edição **legalmente correta** para produção: a Developer
+> Edition usada na máquina de desenvolvimento é gratuita mas proibida fora de
+> teste. O limite da Express é 10 GB por banco — o banco atual tem 144 MB.
 
 Arquitetura final:
 
@@ -64,10 +80,19 @@ Aba **SSL/TLS** → **Overview** → modo **Full (strict)**.
 
 ## Parte 2 — Preparar o VPS
 
-Conecte via SSH (troque pelo IP/usuário do seu VPS):
+Conecte via SSH — **a porta é 22022**, não a 22:
 
 ```bash
-ssh root@IP_DO_SEU_VPS
+ssh -p 22022 root@143.95.221.45
+```
+
+### 2.0 Conferir o terreno antes de instalar qualquer coisa
+```bash
+free -h                 # RAM disponível
+nproc                   # núcleos
+df -h /                 # disco
+lsb_release -a          # deve dizer Ubuntu 22.04
+systemd-detect-virt     # 'kvm' = Docker roda liso; 'openvz'/'lxc' = me avise
 ```
 
 ### 2.1 Atualizar e criar um usuário (não use root pra tudo)
@@ -78,14 +103,32 @@ usermod -aG sudo fullgas
 # opcional: copie sua chave SSH para o novo usuário e passe a usar ele
 ```
 
-### 2.2 Firewall
+### 2.2 Swap — obrigatório neste VPS (4 GB de RAM)
+Com SQL Server + Node + Nginx em 4 GB, um pico de uso sem swap resulta no
+kernel **matando** o processo que mais consome memória — normalmente o banco.
+2 GB de swap custam disco (sobram 100 GB) e evitam isso:
+
+```bash
+fallocate -l 2G /swapfile
+chmod 600 /swapfile
+mkswap /swapfile
+swapon /swapfile
+echo '/swapfile none swap sw 0 0' >> /etc/fstab   # sobrevive ao reboot
+free -h                                            # confira a linha "Swap"
+```
+
+### 2.3 Firewall
 ```bash
 apt install -y ufw
-ufw allow OpenSSH
+ufw allow 22022/tcp        # ATENÇÃO: a porta do SSH aqui é 22022
 ufw allow 80/tcp
 ufw allow 443/tcp
 ufw enable
 ```
+> **Cuidado:** liberar `OpenSSH` (porta 22) em vez de `22022` te tranca para
+> fora do servidor. Confira com `ufw status` **antes** de encerrar a sessão, e
+> mantenha uma segunda janela SSH aberta enquanto testa.
+>
 > Repare que **não** liberamos a porta 1433 (banco) nem a 3000 (API). Elas ficam
 > só no localhost — ninguém acessa de fora. Só o Nginx (80/443) fica exposto.
 
@@ -119,17 +162,31 @@ minúscula, número e símbolo). Guarde bem.
 docker run -d --name fullgas-sql \
   --restart unless-stopped \
   -e "ACCEPT_EULA=Y" \
+  -e "MSSQL_PID=Express" \
   -e "MSSQL_SA_PASSWORD=SUA_SENHA_SA_FORTE" \
+  -e "MSSQL_MEMORY_LIMIT_MB=2048" \
   -p 127.0.0.1:1433:1433 \
   -v fullgas-sqldata:/var/opt/mssql \
   mcr.microsoft.com/mssql/server:2022-latest
 ```
 
 Explicando o importante:
+- `MSSQL_PID=Express` → edição **gratuita e liberada para produção** (limite de
+  10 GB por banco; o nosso tem 144 MB). Sem esta linha o container sobe como
+  Developer/Evaluation, que **não pode** ser usado em produção.
+- `MSSQL_MEMORY_LIMIT_MB=2048` → teto de memória. Em um VPS de 4 GB, deixar o
+  SQL Server à vontade faz ele engolir a RAM e sufocar a API.
 - `-p 127.0.0.1:1433:1433` → o banco só aceita conexão **de dentro do VPS**.
 - `-v fullgas-sqldata:/var/opt/mssql` → volume persistente: os dados sobrevivem
   a reinícios e updates do container.
 - `--restart unless-stopped` → sobe sozinho quando o VPS reinicia.
+
+Confirme a edição depois que subir:
+```bash
+docker exec -i fullgas-sql /opt/mssql-tools18/bin/sqlcmd \
+  -S localhost -U SA -P "SUA_SENHA_SA_FORTE" -C \
+  -Q "SELECT SERVERPROPERTY('Edition')"      # deve dizer "Express Edition"
+```
 
 Confira que subiu:
 ```bash
@@ -140,8 +197,9 @@ docker logs fullgas-sql | tail  # procure "SQL Server is now ready"
 ### 3.2 Ter o `sqlcmd` à mão
 A forma mais simples é usar o `sqlcmd` que já vem dentro do container:
 ```bash
-# um "atalho" pra rodar sqlcmd sem digitar tudo toda vez:
-alias fgsql='docker exec -i fullgas-sql /opt/mssql-tools18/bin/sqlcmd -S localhost -U SA -P "SUA_SENHA_SA_FORTE" -C'
+# um "atalho" pra rodar sqlcmd sem digitar tudo toda vez.
+# O -f 65001 NÃO é opcional — veja o aviso no passo 3.4.
+alias fgsql='docker exec -i fullgas-sql /opt/mssql-tools18/bin/sqlcmd -S localhost -U SA -P "SUA_SENHA_SA_FORTE" -C -f 65001'
 fgsql -Q "SELECT @@VERSION"
 ```
 > `-C` confia no certificado autoassinado do container. Se a imagem for antiga e
@@ -154,19 +212,43 @@ scp -r database fullgas@IP_DO_SEU_VPS:/home/fullgas/database
 ```
 
 ### 3.4 Criar o banco, tabelas, seeds e o usuário da aplicação
+> ### ⚠️ Encoding — leia antes de rodar
+>
+> O `sqlcmd` lê os arquivos **como ANSI** por padrão e **corrompe os acentos**:
+> `'Nota de crédito'` vira `'Nota de crǸdito'`. O efeito não é estético — as
+> `CHECK constraints` nascem com o texto errado, ou o `ALTER TABLE` falha
+> dizendo que os dados violam a regra, deixando a tabela **sem** a constraint.
+>
+> Isto foi reproduzido e medido: sem `-f 65001`, 7 arquivos falham; com ele,
+> zero. O `-f 65001` já está no atalho `fgsql` do passo 3.2 — **não remova**.
+>
+> Como conferir depois que rodar (o acento tem que aparecer certo):
+> ```bash
+> fgsql -d FullgasB2B -Q "SELECT definition FROM sys.check_constraints WHERE name='CK_Fatura_Tipo'"
+> # esperado:  ([Tipo]='Nota de crédito' OR [Tipo]='Fatura')
+> ```
+
 No VPS, rode **nesta ordem** (usando o `fgsql` do passo 3.2):
 ```bash
 cd /home/fullgas/database
 fgsql -i fullgas_schema_sqlserver.sql
-# depois TODAS as migrações, em ordem numérica:
-for f in $(ls migrations/*.sql | sort); do echo ">> $f"; fgsql -i "$f"; done
-fgsql -i fullgas_seeds.sql
+
+# TODAS as migrações, em ordem numérica, parando no primeiro erro:
+for f in $(ls migrations/*.sql | sort); do
+  echo ">> $f"
+  fgsql -b -i "$f" || { echo "FALHOU em $f — pare e investigue"; break; }
+done
+
 fgsql -i criar_usuario_app.sql        # cria o usuário fullgas_app
 ```
 
-> **Encoding:** alguns arquivos de migração usam acentos (NCHAR). Se aparecer
-> caractere estranho, garanta que a cópia `scp` não converteu o arquivo. Em
-> geral funciona direto.
+> **Seeds:** `fullgas_seeds.sql` traz dados de demonstração (empresas e
+> reivindicações de exemplo). Em produção, **pule** — a menos que queira o
+> usuário admin inicial; nesse caso rode e depois apague o que for demo.
+
+> **`|| break`:** sem isso o laço segue adiante depois de uma falha e você
+> termina com um banco pela metade sem perceber. As migrações são idempotentes,
+> então é seguro corrigir o problema e rodar o laço de novo do começo.
 
 ### 3.5 (Opcional) Migrar os dados que você já tem no PC
 Se quiser levar os dados atuais do seu SQL Server local (e não só recomeçar do
@@ -215,7 +297,27 @@ TINY_TOKEN=
 TINY_SYNC_INTERVALO_MIN=30
 TINY_EXPORTAR_PEDIDOS=true
 TINY_SINCRONIZAR_CLIENTES=true
+
+# E-mail (recuperação de senha). Gmail: senha de APP, não a senha da conta.
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_SECURE=
+SMTP_USER=fullgasbrasil.oficial@gmail.com
+SMTP_PASS=SENHA_DE_APP_DO_GMAIL
+SMTP_FROM=Fullgas B2B <fullgasbrasil.oficial@gmail.com>
+
+# OBRIGATÓRIO em produção: é a base do link enviado por e-mail.
+# Deixar vazio aqui faz o link seguir a origem da requisição — aceitável em
+# desenvolvimento, mas em produção o valor tem de ser fixo e explícito.
+APP_URL=https://SEU_DOMINIO
 ```
+
+> **Sem `SMTP_HOST` a API não envia nada** — ela imprime o e-mail no log e
+> segue. O cliente pede "esqueci minha senha" e nunca recebe. Confira depois de
+> subir:
+> ```bash
+> journalctl -u fullgas-api | grep -i "E-MAIL NÃO ENVIADO"   # não deve achar nada
+> ```
 
 Gere o `JWT_SECRET` com:
 ```bash
