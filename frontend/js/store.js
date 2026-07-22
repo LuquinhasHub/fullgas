@@ -240,14 +240,15 @@
     { niv: 'VBFGF4503SM399025', modeloId: 'fg450f-2025', cor: 'Vermelho', status: 'Disponível', entrada: daysAgo(9) }
   ];
 
-  var USERS = [
-    { id: 'u1', nome: 'Administrador Fullgas', email: 'admin@fullgas.com.br', senha: 'admin123',
-      empresa: 'FULLGAS MOTOS', papel: 'admin', status: 'aprovado', criado: daysAgo(300) },
-    { id: 'u2', nome: 'João Silva', email: 'cliente@exemplo.com', senha: 'cliente123',
-      empresa: 'POWER MOTOS LTDA', papel: 'cliente', status: 'aprovado', criado: daysAgo(120) },
-    { id: 'u3', nome: 'Maria Souza', email: 'maria@silvaracing.com', senha: 'maria123',
-      empresa: 'SILVA RACING', papel: 'cliente', status: 'pendente', criado: daysAgo(1) }
-  ];
+  // VAZIO DE PROPÓSITO. Aqui existiam três usuários de demonstração com a
+  // SENHA EM TEXTO PURO, herdados da época em que o portal
+  // rodava só no localStorage, antes da API. Hoje o api-adapter.js sobrescreve
+  // FG.login e FG.all, então esses dados nunca são usados — mas o arquivo é
+  // baixado por todo visitante, ou seja, as senhas iam junto. Pior: se o
+  // api-adapter falhasse ao carregar, o login antigo abaixo voltaria a valer e
+  // aceitaria essas credenciais. As contas de teste vivem no
+  // database/fullgas_seeds.sql, que não é aplicado em produção.
+  var USERS = [];
 
   var CLAIMS = [
     { id: '12094338', data: daysAgo(15), criador: 'SILVA RACING',   pais: 'Brasil', tipo: 'IT',           niv: 'VBFGA125XSM160872', status: 'Em processo', preAuth: 'Não', sentBack: false, descricao: 'Falha intermitente no sensor TPS.' },

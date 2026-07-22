@@ -131,17 +131,16 @@
       </div>
     </div>
 
-    <div class="auth-hint">
-      <b>Acessos de demonstração</b><br>
-      Administrador: <code>admin@fullgas.com.br</code> / <code>admin123</code><br>
-      Cliente: <code>cliente@exemplo.com</code> / <code>cliente123</code><br>
-      Pendente (teste de aprovação): <code>maria@silvaracing.com</code> / <code>maria123</code>
-    </div>
+    <!-- Aqui existia um quadro "Acessos de demonstração" com e-mail e senha das
+         contas de teste. Saiu na preparação para produção: ficava visível para
+         qualquer visitante da tela de acesso, entregando contas válidas e o
+         padrão de senha da casa. As credenciais de teste vivem no
+         database/fullgas_seeds.sql, que não é aplicado em produção. -->
   </div>
 
   <script src="js/config.js?v=20260722b"></script>
-  <script src="js/store.js?v=20260722b"></script>
+  <script src="js/store.js?v=20260722c"></script>
   <script src="js/api-adapter.js?v=20260722b"></script>
-  <script src="js/auth.js?v=20260722b"></script>
+  <script src="js/auth.js?v=20260722c"></script>
 </body>
 </html>
