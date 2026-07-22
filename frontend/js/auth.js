@@ -8,6 +8,7 @@
   var tabCad = document.getElementById('tab-cad');
   var formLogin = document.getElementById('form-login');
   var formCad = document.getElementById('form-cad');
+  var formEsq = document.getElementById('form-esq');
   var msg = document.getElementById('auth-msg');
 
   // se já existe sessão, vai direto para o portal
@@ -18,17 +19,42 @@
     msg.className = 'auth-msg' + (texto ? ' ' + (tipo || 'err') : '');
   }
 
+  // 'login' | 'cad' | 'esq'. "Esqueci minha senha" não tem aba própria: a
+  // aba Entrar segue marcada, porque é para lá que o fluxo volta.
   function switchTab(qual) {
-    var login = qual === 'login';
-    tabLogin.classList.toggle('on', login);
-    tabCad.classList.toggle('on', !login);
-    formLogin.classList.toggle('hidden', !login);
-    formCad.classList.toggle('hidden', login);
+    tabLogin.classList.toggle('on', qual !== 'cad');
+    tabCad.classList.toggle('on', qual === 'cad');
+    formLogin.classList.toggle('hidden', qual !== 'login');
+    formCad.classList.toggle('hidden', qual !== 'cad');
+    formEsq.classList.toggle('hidden', qual !== 'esq');
     showMsg('');
   }
 
   tabLogin.addEventListener('click', function () { switchTab('login'); });
   tabCad.addEventListener('click', function () { switchTab('cad'); });
+
+  /* ---------- esqueci minha senha ---------- */
+  document.getElementById('lk-esqueci').addEventListener('click', function () {
+    document.getElementById('es-email').value = document.getElementById('lg-email').value.trim();
+    switchTab('esq');
+    document.getElementById('es-email').focus();
+  });
+  document.getElementById('lk-voltar-login').addEventListener('click', function () { switchTab('login'); });
+
+  async function doEsqueci() {
+    var b = document.getElementById('btn-esq');
+    var email = document.getElementById('es-email').value.trim();
+    if (!/^\S+@\S+\.\S+$/.test(email)) { showMsg('Informe um e-mail válido.'); return; }
+    b.disabled = true; b.textContent = 'Enviando…';
+    var r = await FG.esqueciSenha(email);
+    b.disabled = false; b.textContent = 'Enviar link de recuperação';
+    // A API responde igual exista ou não o e-mail — não confirmamos cadastro.
+    if (!r.ok) { showMsg(r.msg || 'Não foi possível enviar agora.'); return; }
+    switchTab('login');
+    showMsg(r.msg, 'ok');
+  }
+  document.getElementById('btn-esq').addEventListener('click', doEsqueci);
+  formEsq.addEventListener('keydown', function (e) { if (e.key === 'Enter') doEsqueci(); });
 
   /* ---------- login ---------- */
   async function doLogin() {
