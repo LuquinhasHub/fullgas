@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FULLGAS B2B — Nova senha</title>
+  <!-- O link vem por e-mail e carrega o token na URL: nada de indexar isto. -->
+  <meta name="robots" content="noindex, nofollow">
+  <link rel="icon" type="image/png" href="img/favicon.png?v=20260722d">
+  <link rel="apple-touch-icon" href="img/favicon.png?v=20260722d">
+  <link rel="stylesheet" href="css/styles.css?v=20260722b">
+</head>
+<body>
+  <div class="auth-wrap">
+    <div class="auth-card">
+      <div class="head">
+        <span class="brand big"><span class="g-badge">F</span> FULLGAS</span>
+        <div class="sub">Criar nova senha</div>
+      </div>
+
+      <div class="auth-body">
+        <p id="auth-msg" class="auth-msg"></p>
+
+        <!-- Enquanto o token não é verificado no servidor -->
+        <div id="rd-carregando" class="muted" style="font-size:13px;">Verificando o link…</div>
+
+        <!-- Token válido: formulário da nova senha -->
+        <div id="rd-form" class="hidden">
+          <p class="muted" style="font-size:13px;margin-top:0;">
+            Conta: <b id="rd-quem"></b>
+          </p>
+          <div class="field">
+            <label for="rd-senha">Nova senha</label>
+            <input id="rd-senha" type="password" autocomplete="new-password" placeholder="Mínimo 6 caracteres">
+          </div>
+          <div class="field">
+            <label for="rd-senha2">Repita a nova senha</label>
+            <input id="rd-senha2" type="password" autocomplete="new-password" placeholder="••••••••">
+          </div>
+          <button class="btn red" id="btn-rd" type="button" style="width:100%;justify-content:center;">Salvar nova senha</button>
+        </div>
+
+        <!-- Token ausente, expirado ou já usado -->
+        <div id="rd-invalido" class="hidden">
+          <p style="font-size:13px;margin-top:0;">
+            Este link não vale mais — ele expira em 1 hora e só pode ser usado uma vez.
+          </p>
+          <a class="btn red" href="index.html" style="width:100%;justify-content:center;">Pedir um novo link</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/config.js?v=20260722b"></script>
+  <script src="js/store.js?v=20260722b"></script>
+  <script src="js/api-adapter.js?v=20260722b"></script>
+  <script src="js/redefinir.js?v=20260722b"></script>
+</body>
+</html>

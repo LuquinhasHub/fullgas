@@ -4,14 +4,16 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Fullgas Admin — Painel de Controle</title>
-  <link rel="stylesheet" href="css/styles.css">
-  <link rel="stylesheet" href="css/admin.css">
+  <link rel="icon" type="image/png" href="img/favicon.png?v=20260722d">
+  <link rel="apple-touch-icon" href="img/favicon.png?v=20260722d">
+  <link rel="stylesheet" href="css/styles.css?v=20260722b">
+  <link rel="stylesheet" href="css/admin.css?v=20260722b">
 </head>
 <body class="admin">
 
   <!-- ====== sidebar ====== -->
   <aside class="adm-side">
-    <div class="logo-cell"><span class="g-badge">F</span></div>
+    <div class="logo-cell"><a href="portal.html" title="Voltar ao portal" style="text-decoration:none;"><span class="g-badge">F</span></a></div>
 
     <a class="item" href="#dashboard" data-rota="dashboard">
       <svg viewBox="0 0 24 24"><path d="M12 14 L17 7"/><path d="M4 18 a8 8 0 0 1 16 0"/></svg>
@@ -33,6 +35,14 @@
       <svg viewBox="0 0 24 24"><circle cx="10" cy="10" r="6.5"/><path d="M15 15 L21 21"/><path d="M7 10 H13 M10 7 V13"/></svg>
       Parts Finder
     </a>
+    <a class="item" href="#tiny" data-rota="tiny">
+      <svg viewBox="0 0 24 24"><path d="M20 12 a8 8 0 1 1 -2.3 -5.6"/><path d="M20 3 V7 H16"/></svg>
+      Tiny ERP
+    </a>
+    <a class="item" href="#chassis" data-rota="chassis">
+      <svg viewBox="0 0 24 24"><circle cx="6" cy="17" r="3.2"/><circle cx="18" cy="17" r="3.2"/><path d="M6 17 L10 10 H15 L18 17 M10 10 L8 7 H5 M15 10 h3"/></svg>
+      Chassis
+    </a>
     <a class="item" href="#usuarios" data-rota="usuarios">
       <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21 a8 8 0 0 1 16 0"/></svg>
       Clientes
@@ -40,6 +50,10 @@
     <a class="item" href="#reivindicacoes" data-rota="reivindicacoes">
       <svg viewBox="0 0 24 24"><path d="M12 3 L20 6 V12 c0 5 -4 8 -8 9 c-4 -1 -8 -4 -8 -9 V6 Z"/><path d="M9 12 l2 2 l4 -4"/></svg>
       Reivindicações
+    </a>
+    <a class="item" href="#notificacoes" data-rota="notificacoes">
+      <svg viewBox="0 0 24 24"><path d="M3 10 L15 5 V19 L3 14 Z"/><path d="M15 8 c3 0 5 2 5 4 s-2 4 -5 4"/><path d="M6 14 v5 h3 v-4"/></svg>
+      Notificações
     </a>
     <a class="item" href="portal.html">
       <svg viewBox="0 0 24 24"><path d="M14 5 H5 V19 H14 M10 12 H21 M17 8 l4 4 -4 4"/></svg>
@@ -58,9 +72,9 @@
     <div class="adm-body" id="adm-view"></div>
   </div>
 
-  <script src="js/config.js"></script>
-  <script src="js/store.js"></script>
-  <script src="js/api-adapter.js"></script>
-  <script src="js/admin.js"></script>
+  <script src="js/config.js?v=20260722b"></script>
+  <script src="js/store.js?v=20260722b"></script>
+  <script src="js/api-adapter.js?v=20260722b"></script>
+  <script src="js/admin.js?v=20260722b"></script>
 </body>
 </html>

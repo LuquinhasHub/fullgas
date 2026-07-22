@@ -47,10 +47,6 @@ DELETE FROM dbo.Empresa;
 INSERT INTO dbo.Empresa (RazaoSocial, Pais) VALUES (N'FULLGAS MOTOS', N'Brasil');
 INSERT INTO dbo.Empresa (RazaoSocial, Pais) VALUES (N'POWER MOTOS LTDA', N'Brasil');
 INSERT INTO dbo.Empresa (RazaoSocial, Pais) VALUES (N'SILVA RACING', N'Brasil');
-INSERT INTO dbo.Empresa (RazaoSocial, Pais) VALUES (N'GOX POWERSPORTS', N'Brasil');
-INSERT INTO dbo.Empresa (RazaoSocial, Pais) VALUES (N'BK OFF ROAD', N'Brasil');
-INSERT INTO dbo.Empresa (RazaoSocial, Pais) VALUES (N'M4 RACING-PR', N'Brasil');
-INSERT INTO dbo.Empresa (RazaoSocial, Pais) VALUES (N'ART MOTO RACING', N'Brasil');
 
 /* ===== Usuarios (SenhaHash = bcrypt em bytes) ===== */
 INSERT INTO dbo.Usuario (EmpresaId, Nome, Email, SenhaHash, Papel, Status, CriadoEm) VALUES ((SELECT EmpresaId FROM dbo.Empresa WHERE RazaoSocial=N'FULLGAS MOTOS'), N'Administrador Fullgas', N'admin@fullgas.com.br', CONVERT(VARBINARY(256), N'$2a$10$r6TfKrhyYLU3C/y3pDPABunwQMpwamCx2lzn54nBVUwynyGbKCKWa'), N'admin', N'aprovado', DATEADD(HOUR, -7190, SYSUTCDATETIME()));
@@ -382,13 +378,11 @@ INSERT INTO dbo.Entrega (NumeroEntrega, EmpresaId, DataEntrega, FaturaId) VALUES
 INSERT INTO dbo.RastreioEntrega (EntregaId, Codigo, Transportadora) VALUES ((SELECT EntregaId FROM dbo.Entrega WHERE NumeroEntrega=N'0050731002'), N'000521104', N'Transportadora Fullgas');
 INSERT INTO dbo.EntregaPedido (EntregaId, PedidoId) VALUES ((SELECT EntregaId FROM dbo.Entrega WHERE NumeroEntrega=N'0050731002'), (SELECT PedidoId FROM dbo.Pedido WHERE NumeroPedido=N'0005041100'));
 
-/* ===== Reivindicacoes (garantia) ===== */
-INSERT INTO dbo.Reivindicacao (Numero, EmpresaId, VeiculoId, Tipo, Status, Pais, PreAutorizacao, Devolvido, Descricao, DataAbertura) VALUES (N'12094338', (SELECT EmpresaId FROM dbo.Empresa WHERE RazaoSocial=N'SILVA RACING'), (SELECT VeiculoId FROM dbo.Veiculo WHERE Niv=N'VBFGA125XSM160872'), N'IT', N'Em processo', N'Brasil', 0, 0, N'Falha intermitente no sensor TPS.', DATEADD(HOUR, -350, SYSUTCDATETIME()));
-INSERT INTO dbo.Reivindicacao (Numero, EmpresaId, VeiculoId, Tipo, Status, Pais, PreAutorizacao, Devolvido, Descricao, DataAbertura) VALUES (N'12079465', (SELECT EmpresaId FROM dbo.Empresa WHERE RazaoSocial=N'GOX POWERSPORTS'), (SELECT VeiculoId FROM dbo.Veiculo WHERE Niv=N'VBFGC3094SM310633'), N'Manufacturer', N'Em processo', N'Brasil', 0, 0, N'Vazamento no retentor do amortecedor.', DATEADD(HOUR, -758, SYSUTCDATETIME()));
-INSERT INTO dbo.Reivindicacao (Numero, EmpresaId, VeiculoId, Tipo, Status, Pais, PreAutorizacao, Devolvido, Descricao, DataAbertura) VALUES (N'12079380', (SELECT EmpresaId FROM dbo.Empresa WHERE RazaoSocial=N'BK OFF ROAD'), (SELECT VeiculoId FROM dbo.Veiculo WHERE Niv=N'VBFGA1252SM160901'), N'Implícito', N'Em processo', N'Brasil', 0, 0, N'Trinca na carenagem lateral direita.', DATEADD(HOUR, -758, SYSUTCDATETIME()));
-INSERT INTO dbo.Reivindicacao (Numero, EmpresaId, VeiculoId, Tipo, Status, Pais, PreAutorizacao, Devolvido, Descricao, DataAbertura) VALUES (N'12071122', (SELECT EmpresaId FROM dbo.Empresa WHERE RazaoSocial=N'M4 RACING-PR'), (SELECT VeiculoId FROM dbo.Veiculo WHERE Niv=N'VBFGF4501SM399000'), N'IT', N'Esboço', N'Brasil', 0, 0, N'Rascunho: ruído na embreagem a frio.', DATEADD(HOUR, -1142, SYSUTCDATETIME()));
-INSERT INTO dbo.Reivindicacao (Numero, EmpresaId, VeiculoId, Tipo, Status, Pais, PreAutorizacao, Devolvido, Descricao, DataAbertura) VALUES (N'12065540', (SELECT EmpresaId FROM dbo.Empresa WHERE RazaoSocial=N'ART MOTO RACING'), (SELECT VeiculoId FROM dbo.Veiculo WHERE Niv=N'VBFGC3096SM310702'), N'Manufacturer', N'Aprovada', N'Brasil', 1, 0, N'Substituição da bomba de combustível em garantia.', DATEADD(HOUR, -1910, SYSUTCDATETIME()));
-INSERT INTO dbo.Reivindicacao (Numero, EmpresaId, VeiculoId, Tipo, Status, Pais, PreAutorizacao, Devolvido, Descricao, DataAbertura) VALUES (N'12060071', (SELECT EmpresaId FROM dbo.Empresa WHERE RazaoSocial=N'POWER MOTOS LTDA'), (SELECT VeiculoId FROM dbo.Veiculo WHERE Niv=N'VBFGA125YSM160873'), N'IT', N'Recusada', N'Brasil', 0, 1, N'Desgaste de pastilhas — item de manutenção.', DATEADD(HOUR, -2270, SYSUTCDATETIME()));
+/* ===== Reivindicacoes (garantia) =====
+   Sem reivindicações de exemplo: o quadro de reivindicações é dinâmico e mostra
+   apenas os casos reais criados pelos clientes. Antes havia 6 registros de
+   demonstração presos a concessionárias "fantasma" (removidos — ver
+   migrations/025_remover_dados_demo_reivindicacoes.sql). */
 
 /* ===== Notificacoes (globais) ===== */
 INSERT INTO dbo.Notificacao (EmpresaId, Tipo, Titulo, Texto, Lida, DataEnvio) VALUES (NULL, N'critica', N'Campanha técnica FG 300 2026', N'Verificar torque dos parafusos da mesa superior nos chassis VBFGC309... antes da entrega ao cliente final.', 0, DATEADD(HOUR, -14, SYSUTCDATETIME()));

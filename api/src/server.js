@@ -9,13 +9,18 @@ import 'dotenv/config';
 
 import { getPool } from './db.js';
 import authRoutes from './routes/auth.routes.js';
+import usuariosRoutes from './routes/usuarios.routes.js';
+import contaRoutes from './routes/conta.routes.js';
 import produtosRoutes from './routes/produtos.routes.js';
 import pedidosRoutes from './routes/pedidos.routes.js';
 import veiculosRoutes from './routes/veiculos.routes.js';
 import faturasRoutes from './routes/faturas.routes.js';
 import preVendaRoutes from './routes/prevenda.routes.js';
 import reivindicacoesRoutes from './routes/reivindicacoes.routes.js';
+import notificacoesRoutes from './routes/notificacoes.routes.js';
 import finderRoutes from './routes/finder.routes.js';
+import tinyRoutes from './routes/tiny.routes.js';
+import { iniciarSincronizacaoAgendada } from './tiny-cron.js';
 
 const app = express();
 
@@ -54,13 +59,17 @@ app.get('/api/health', (_req, res) => res.json({ ok: true, ts: new Date().toISOS
 
 // Rotas
 app.use('/api/auth', authRoutes);
+app.use('/api', usuariosRoutes);
+app.use('/api', contaRoutes);
 app.use('/api', produtosRoutes);
 app.use('/api', pedidosRoutes);
 app.use('/api', veiculosRoutes);
 app.use('/api', faturasRoutes);
 app.use('/api', preVendaRoutes);
 app.use('/api', reivindicacoesRoutes);
+app.use('/api', notificacoesRoutes);
 app.use('/api', finderRoutes);
+app.use('/api', tinyRoutes);
 
 // 404
 app.use((req, res) => res.status(404).json({ erro: 'Rota não encontrada.' }));
@@ -81,6 +90,9 @@ getPool()
     app.listen(PORT, '0.0.0.0', () =>
       console.log(`✓ API ouvindo na porta ${PORT} (localhost e rede local)`)
     );
+    // Sincronização automática com o Tiny (node-cron, intervalo em minutos
+    // via TINY_SYNC_INTERVALO_MIN) — só depois do banco estar de pé.
+    iniciarSincronizacaoAgendada();
   })
   .catch(() => {
     console.error('A API não subiu porque não conectou no banco. Confira o arquivo .env.');

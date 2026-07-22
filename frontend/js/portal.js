@@ -24,6 +24,29 @@
 
   if (sess.papel === 'admin') document.getElementById('tab-admin').classList.remove('hidden');
 
+  /* ---------- permissões por área (contas internas / sub-dealers) ----------
+     O gestor restringe as áreas de cada conta interna no painel "Minha
+     conta". Aqui as abas bloqueadas somem; o roteador (abaixo) também barra
+     acesso direto pelo hash. Admin/gestor têm sempre acesso total. */
+  var GATE_TABS = [
+    ['loja', '.tabs a[href="loja.html"]'],
+    ['finder', '.tabs a[href="finder.html"]'],
+    ['finder', '.topbar .pf-link'],
+    ['pedidos', '.tabs a[data-rota="pedidos"]'],
+    ['financeiro', '#tab-fin'],
+    ['reivindicacoes', '.tabs a[data-rota="reivindicacoes"]'],
+    ['estoque', '.tabs a[data-rota="estoque"]'],
+    ['acoes', '.tabs a[data-rota="acoes"]']
+  ];
+  GATE_TABS.forEach(function (par) {
+    if (FG.temArea(sess, par[0])) return;
+    var el = document.querySelector(par[1]);
+    if (el) el.classList.add('hidden');
+  });
+  // Rotas do portal barradas para quem não tem a área (acesso direto por hash).
+  var GATE_ROTAS = { pedidos: 'pedidos', pedido: 'pedidos', financeiro: 'financeiro',
+    reivindicacoes: 'reivindicacoes', estoque: 'estoque', acoes: 'acoes' };
+
   function refreshPill() {
     var n = FG.unreadCount();
     var pill = document.getElementById('notif-pill');
@@ -54,9 +77,18 @@
 
   /* ---------- util ---------- */
   function setCrumb(partes) {
-    var html = '<a href="#home">Página inicial</a>';
+    // Fora da home, o botão VOLTAR abre a trilha (bem visível — volta um
+    // passo na navegação; sem histórico, cai na página inicial).
+    var html = (partes || []).length
+      ? '<button class="btn-voltar" id="crumb-voltar" type="button">Voltar</button>'
+      : '';
+    html += '<a href="#home">Página inicial</a>';
     (partes || []).forEach(function (p) { html += ' &rsaquo; <span>' + esc(p) + '</span>'; });
     crumb.innerHTML = html;
+    var bv = document.getElementById('crumb-voltar');
+    if (bv) bv.addEventListener('click', function () {
+      if (history.length > 1) history.back(); else location.hash = '#home';
+    });
   }
   function setTabOn(rota) {
     Array.prototype.forEach.call(document.querySelectorAll('.tabs a[data-rota]'), function (a) {
@@ -134,12 +166,20 @@
     var html = '<h2>Notificações</h2>';
     if (!list.length) html += '<p class="muted">Nenhuma notificação.</p>';
     list.forEach(function (n) {
+      // Anexo enviado pelo admin: imagem inline, vídeo com player ou link.
+      var anexo = '';
+      if (n.anexo) {
+        if (n.anexoTipo === 'imagem') anexo = '<img class="nt-img" src="' + esc(n.anexo) + '" alt="Anexo" loading="lazy">';
+        else if (n.anexoTipo === 'video') anexo = '<video class="nt-video" src="' + esc(n.anexo) + '" controls preload="metadata"></video>';
+        else anexo = '<a class="link-action" href="' + esc(n.anexo) + '" target="_blank" rel="noopener">📎 Abrir anexo</a>';
+      }
       html += '<div class="notif ' + n.tipo + (n.lida ? '' : ' unread') + '">' +
         '<div class="nt-body"><div class="nt-title">' + (n.tipo === 'critica' ? '⚠ ' : '') + esc(n.titulo) + '</div>' +
-        '<div>' + esc(n.texto) + '</div>' +
+        (n.texto ? '<div style="white-space:pre-line;">' + esc(n.texto) + '</div>' : '') +
+        anexo +
         '<div class="nt-date">' + FG.fmtDateTime(n.data) + '</div></div>' +
-        '<button class="link-action" data-id="' + n.id + '" data-lida="' + (!n.lida) + '">' +
-        (n.lida ? 'Marcar como não lida' : 'Marcar como lida') + '</button></div>';
+        (n.lida ? '' : '<button class="link-action" data-id="' + n.id + '" data-lida="true">Marcar como lida</button>') +
+        '</div>';
     });
     view.innerHTML = html;
     Array.prototype.forEach.call(view.querySelectorAll('[data-id]'), function (b) {
@@ -359,13 +399,13 @@
       '</select></div>' +
       '<div class="field"><label>Peça(s) defeituosa(s) *</label>' +
       '<div class="peca-add">' +
-      '<input id="nc-peca" list="nc-peca-list" autocomplete="off" placeholder="Código ou nome da peça">' +
+      // Autocomplete PRÓPRIO (dropdown estilizado) — o datalist nativo herdava
+      // o visual do sistema operacional e destoava do resto do portal.
+      '<div class="ac-wrap"><input id="nc-peca" autocomplete="off" placeholder="Digite o código ou o nome da peça">' +
+      '<div class="ac-list hidden" id="nc-peca-ac"></div></div>' +
       '<input id="nc-peca-qtd" type="number" min="1" step="1" value="1" title="Quantidade">' +
       '<button type="button" class="btn" id="nc-peca-add">Adicionar</button>' +
       '</div>' +
-      '<datalist id="nc-peca-list">' +
-      FG.all('products').map(function (p) { return '<option value="' + esc(p.artigo + ' — ' + p.nome) + '"></option>'; }).join('') +
-      '</datalist>' +
       '<div id="nc-peca-info" class="muted" style="font-size:11px;margin-top:4px;"></div>' +
       '<div id="nc-pecas-list" class="pecas-list"></div></div>' +
       '<div class="form-grid">' +
@@ -383,8 +423,9 @@
     document.body.appendChild(back);
 
     function fechar() { back.remove(); }
+    // Só o X fecha o formulário — clicar no fundo escuro NÃO fecha, para o
+    // cliente não perder o que preencheu por um clique fora sem querer.
     back.querySelector('.x').addEventListener('click', fechar);
-    back.addEventListener('click', function (e) { if (e.target === back) fechar(); });
 
     // Consultor de peças: resolve o que foi digitado para um SKU do catálogo.
     // Retorna '' (vazio), o SKU (válido) ou null (digitado mas não encontrado).
@@ -399,8 +440,9 @@
     }
     // Feedback ao vivo: mostra a peça cadastrada conforme o cliente digita.
     var pecaInfo = document.getElementById('nc-peca-info');
-    document.getElementById('nc-peca').addEventListener('input', function () {
-      var v = this.value.trim();
+    var inpPeca = document.getElementById('nc-peca');
+    function atualizarInfo() {
+      var v = inpPeca.value.trim();
       if (!v) { pecaInfo.textContent = ''; pecaInfo.style.color = ''; return; }
       var sku = resolverPeca();
       if (sku) {
@@ -411,7 +453,56 @@
         pecaInfo.style.color = '';
         pecaInfo.textContent = 'Selecione uma peça da lista (código cadastrado).';
       }
+    }
+
+    // --- Autocomplete próprio: dropdown com até 8 sugestões (código OU nome).
+    // Setas navegam, Enter escolhe, Esc fecha; clicar também escolhe.
+    var ac = document.getElementById('nc-peca-ac');
+    var acItens = [], acIdx = -1;
+    function acFechar() { ac.classList.add('hidden'); ac.innerHTML = ''; acItens = []; acIdx = -1; }
+    function acMarcar(n) {
+      acIdx = n;
+      Array.prototype.forEach.call(ac.querySelectorAll('.ac-item'), function (el, i) {
+        el.classList.toggle('on', i === acIdx);
+        if (i === acIdx) el.scrollIntoView({ block: 'nearest' });
+      });
+    }
+    function acEscolher(i) {
+      var p = acItens[i]; if (!p) return;
+      inpPeca.value = p.artigo + ' — ' + p.nome;
+      acFechar(); atualizarInfo();
+      document.getElementById('nc-peca-qtd').focus();
+    }
+    function acAbrir() {
+      var t = inpPeca.value.trim().toLowerCase();
+      if (t.length < 2) { acFechar(); return; }
+      acItens = FG.all('products').filter(function (p) {
+        return p.artigo.toLowerCase().indexOf(t) >= 0 || p.nome.toLowerCase().indexOf(t) >= 0;
+      }).slice(0, 8);
+      if (!acItens.length) { acFechar(); return; }
+      acIdx = -1;
+      ac.innerHTML = acItens.map(function (p, i) {
+        return '<div class="ac-item" data-i="' + i + '"><b>' + esc(p.artigo) + '</b><span class="ac-nome">' +
+          esc(p.nome) + '</span><span class="ac-preco">' + FG.fmtMoney(p.preco) + '</span></div>';
+      }).join('');
+      ac.classList.remove('hidden');
+      Array.prototype.forEach.call(ac.querySelectorAll('.ac-item'), function (el) {
+        // mousedown (não click): dispara antes do blur do input fechar a lista.
+        el.addEventListener('mousedown', function (e) {
+          e.preventDefault();
+          acEscolher(Number(el.getAttribute('data-i')));
+        });
+      });
+    }
+    inpPeca.addEventListener('input', function () { acAbrir(); atualizarInfo(); });
+    inpPeca.addEventListener('keydown', function (e) {
+      if (ac.classList.contains('hidden')) return;
+      if (e.key === 'ArrowDown') { e.preventDefault(); acMarcar(Math.min(acItens.length - 1, acIdx + 1)); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); acMarcar(Math.max(0, acIdx - 1)); }
+      else if (e.key === 'Enter') { e.preventDefault(); acEscolher(acIdx >= 0 ? acIdx : 0); }
+      else if (e.key === 'Escape') acFechar();
     });
+    inpPeca.addEventListener('blur', function () { setTimeout(acFechar, 150); });
 
     // --- Peças defeituosas: lista dinâmica (código + quantidade) ---
     var pecas = [];
@@ -512,9 +603,24 @@
     }
 
     // ENVIAR: cria (novo/rascunho) ou atualiza+reenvia (editar). Sobe as fotos.
+    // Durante o envio, uma cortina cobre o modal com um carregamento breve e,
+    // no sucesso, a confirmação de que a garantia será avaliada pela equipe.
     document.getElementById('nc-env').addEventListener('click', async function () {
       var d = coletar();
       if (!validarEnvio(d)) return;
+
+      // A cortina cobre o overlay INTEIRO (não o .modal, que rola): assim a
+      // mensagem fica sempre centralizada na tela, mesmo com o formulário longo
+      // rolado. Um card branco no centro dá destaque à confirmação.
+      var cortina = document.createElement('div');
+      cortina.className = 'claim-envio';
+      cortina.innerHTML = '<div class="claim-envio-card"><div class="fg-spinner"></div>' +
+        '<p><b>Enviando sua garantia…</b></p></div>';
+      back.appendChild(cortina);
+
+      // Espera mínima de ~1,1s: sem ela a cortina "pisca" e o cliente não
+      // percebe que o envio aconteceu.
+      var minimo = new Promise(function (r) { setTimeout(r, 1100); });
       var c;
       if (modo === 'editar') {
         c = await FG.updateClaim(ctx.claim.id, d);
@@ -523,16 +629,31 @@
         d.criador = sess.empresa;
         c = await FG.createClaim(d);
       }
-      if (!c) return;   // a API já avisou o erro
+      if (!c) { cortina.remove(); return; }   // a API já avisou o erro; o form fica intacto
       if (inpFotos.files && inpFotos.files.length) {
         var up = await FG.uploadClaimFotos(c.id, inpFotos.files);
         if (!up.ok) FG.toast(up.msg || 'Salvo, mas falhou o envio das fotos.', 'erro');
       }
+      await minimo;
       if (modo === 'rascunho' && ctx.rasc) excluirRascunho(ctx.rasc.localId);
-      fechar();
-      claimFiltro = 'Em processo';
-      FG.toast(modo === 'editar' ? 'Reivindicação atualizada e reenviada.' : 'Reivindicação registrada.');
-      renderClaims();
+
+      cortina.innerHTML =
+        '<div class="claim-envio-card ok">' +
+        '<div class="claim-ok">✔</div>' +
+        '<h3>Garantia enviada!</h3>' +
+        '<p>Sua reivindicação <b>' + esc(c.id) + '</b> foi registrada e será avaliada por ' +
+        'nossos representantes. Acompanhe o andamento na aba Reivindicações.</p>' +
+        '<button class="btn red" id="nc-ok-fechar">Entendi</button>' +
+        '</div>';
+      // Fica visível por ~5s (tempo de sobra p/ ler) ou até clicar em "Entendi".
+      function concluir() {
+        if (!back.parentNode) return;
+        fechar();
+        claimFiltro = 'Em processo';
+        renderClaims();
+      }
+      document.getElementById('nc-ok-fechar').addEventListener('click', concluir);
+      setTimeout(concluir, 5000);
     });
 
     // SALVAR COMO ESBOÇO: grava no navegador (não vai ao banco). Some ao editar
@@ -581,7 +702,8 @@
       '<div class="modal"><header><h3>Reivindicação ' + esc(c.id) + '</h3><button class="x">×</button></header>' +
       '<div class="modal-body">' +
       (c.sentBack ? '<div class="devolvida-aviso">↩ Devolvida — falta: ' + esc(c.faltaInformacao || 'informações') + '</div>' : '') +
-      (c.status === 'Aprovada' && c.valorGarantia ? '<div class="det-credito">✔ Garantia aprovada — crédito de ' + FG.fmtMoney(c.valorGarantia) + ' descontado da sua fatura.</div>' : '') +
+      (c.status === 'Aprovada' ? '<div class="det-credito">✔ Garantia aprovada — as peças serão repostas sem cobrança ' +
+        'por um pedido de garantia. Acompanhe na área de pedidos.</div>' : '') +
       '<div class="det-grid">' +
       linha('N° da reivindicação', '<b class="cl-num">' + esc(c.id) + '</b>') +
       linha('Status', esc(c.status)) +
@@ -603,7 +725,7 @@
     function fechar() { back.remove(); }
     back.querySelector('.x').addEventListener('click', fechar);
     document.getElementById('det-fechar').addEventListener('click', fechar);
-    back.addEventListener('click', function (e) { if (e.target === back) fechar(); });
+    // Clicar fora NÃO fecha — pop-ups só fecham no X (pedido do dono).
     var ed = document.getElementById('det-editar');
     if (ed) ed.addEventListener('click', function () { fechar(); modalClaim(c.tipo, { modo: 'editar', claim: c }); });
   }
@@ -620,7 +742,6 @@
       '<aside class="side-nav"><h2>Gestão de pedidos</h2>' +
       '<div class="group-title">Cestas</div>' + nav('Cesta atual') +
       '<div class="group-title">Pedidos</div>' + nav('Ordens pendentes') + nav('Arquivado') +
-      '<div class="group-title">Entregas</div>' + nav('Entregas em processo') + nav('Entregas arquivadas') +
       '</aside>' +
       '<section id="ped-body"></section></div>';
     view.innerHTML = html;
@@ -641,27 +762,6 @@
       return;
     }
 
-    if (pedFiltro.indexOf('Entregas') === 0) {
-      var arq = pedFiltro === 'Entregas arquivadas';
-      var dels = FG.all('deliveries').filter(function (d, i) { return arq ? i >= 2 : i < 2; });
-      body.innerHTML =
-        '<div class="toolbar"><button class="tool" id="pd-csv">📄 Export. p/ Excel</button></div>' +
-        '<table class="table"><thead><tr><th class="filt">N° da entrega</th><th class="filt">Data</th>' +
-        '<th>Rastreio(s)</th><th>Pedido(s)</th><th>Fatura</th></tr></thead><tbody>' +
-        (dels.length ? dels.map(function (d) {
-          return '<tr><td>' + d.numero + '</td><td>' + FG.fmtDate(d.data) + '</td>' +
-            '<td>' + d.rastreios.join('<br>') + '</td><td>' + d.pedidos.map(esc).join('<br>') + '</td>' +
-            '<td><a href="#financeiro">' + d.fatura + '</a></td></tr>';
-        }).join('') : '<tr><td colspan="5" class="muted">Vazio</td></tr>') +
-        '</tbody></table>';
-      document.getElementById('pd-csv').addEventListener('click', function () {
-        var linhas = [['N° entrega', 'Data', 'Rastreios', 'Pedidos', 'Fatura']];
-        dels.forEach(function (d) { linhas.push([d.numero, FG.fmtDate(d.data), d.rastreios.join(' '), d.pedidos.join(' | '), d.fatura]); });
-        FG.exportCSV('entregas', linhas);
-      });
-      return;
-    }
-
     var arquivado = pedFiltro === 'Arquivado';
     var meus = FG.all('orders').filter(function (o) {
       var fim = o.status === 'Entregue' || o.status === 'Cancelado';
@@ -678,9 +778,10 @@
       '<th class="filt">Criado</th><th>Status</th><th class="right">Total</th></tr></thead><tbody id="pd-rows">' +
       (meus.length ? meus.map(function (o, i) {
         var statusCol = '<span class="pill-status ' + esc(o.status) + '">' + esc(o.status) + '</span>' +
+          (o.garantia ? ' <span class="pill-status Garantia">Garantia</span>' : '') +
           (o.progresso && o.progresso.parcial ? ' <span class="pill-status Parcial">Parcial</span>' : '') +
           (o.temBackorder ? '<br><span class="muted" style="font-size:11px;">contém pré-venda</span>' : '');
-        return '<tr><td><a href="#pedido/' + esc(o.id) + '">' + o.cx + ' / ' + o.id + '</a>' +
+        return '<tr><td><a href="#pedido/' + esc(o.id) + '">' + esc(o.id) + '</a>' +
           ' <button class="link-action pd-open" data-i="' + i + '" title="Ver itens">⤢</button>' +
           '<div class="pd-itens hidden" data-i="' + i + '">' +
           o.itens.map(function (it) { return '<div class="muted">' + it.qtd + '× ' + esc(it.nome) + ' (' + it.artigo + ')</div>'; }).join('') +
@@ -700,8 +801,8 @@
       Array.prototype.forEach.call(body.querySelectorAll('.pd-itens'), function (d) { d.classList.remove('hidden'); });
     });
     document.getElementById('pd-csv').addEventListener('click', function () {
-      var linhas = [['Pedido', 'CX', 'Data', 'Status', 'Total']];
-      meus.forEach(function (o) { linhas.push([o.id, o.cx, FG.fmtDateTime(o.data), o.status, o.total.toFixed(2)]); });
+      var linhas = [['Pedido', 'Data', 'Status', 'Total']];
+      meus.forEach(function (o) { linhas.push([o.id, FG.fmtDateTime(o.data), o.status, o.total.toFixed(2)]); });
       FG.exportCSV('pedidos', linhas);
     });
   }
@@ -709,19 +810,31 @@
   /* =========================================================
      DETALHE DO PEDIDO (#pedido/:numero)
      ========================================================= */
-  // Indicador circular por item: verde=enviado, amarelo=parcial, cinza=pendente.
-  function dotItem(it) {
+  // Indicador circular por item: verde=enviado, amarelo=parcial, cinza=pendente,
+  // vermelho=cancelado (o pedido inteiro foi cancelado — nada será enviado).
+  function dotItem(it, cancelado) {
+    if (cancelado) return '<span class="item-dot dot-cancelado" title="Cancelado"></span>';
     var cls = it.qtdEnviada >= it.qtd ? 'dot-ok' : (it.qtdEnviada > 0 ? 'dot-parcial' : 'dot-pendente');
     var t = it.qtdEnviada >= it.qtd ? 'Enviado' : (it.qtdEnviada > 0 ? 'Parcial' : 'Não enviado');
     return '<span class="item-dot ' + cls + '" title="' + t + '"></span>';
   }
 
-  function tabelaItens(itens) {
-    return '<table class="table"><thead><tr><th></th><th>SKU</th><th>Produto</th>' +
+  // Legenda das bolinhas — vai uma única vez, logo abaixo das tabelas de itens.
+  var LEGENDA_DOTS =
+    '<div class="dot-legenda"><strong>Legenda do status:</strong>' +
+    '<span><span class="item-dot dot-ok"></span>Enviado — quantidade completa já despachada</span>' +
+    '<span><span class="item-dot dot-parcial"></span>Parcial — parte da quantidade já saiu</span>' +
+    '<span><span class="item-dot dot-pendente"></span>Não enviado — aguardando separação/estoque</span>' +
+    '<span><span class="item-dot dot-cancelado"></span>Cancelado — o pedido foi cancelado</span>' +
+    '</div>';
+
+  function tabelaItens(itens, cancelado) {
+    return '<table class="table"><thead><tr><th title="Status de envio do item">Status</th>' +
+      '<th>SKU</th><th>Produto</th>' +
       '<th class="right">Qtd. pedida</th><th class="right">Qtd. enviada</th>' +
       '<th class="right">Preço un.</th><th class="right">Subtotal</th></tr></thead><tbody>' +
       itens.map(function (it) {
-        return '<tr><td>' + dotItem(it) + '</td><td>' + esc(it.artigo) + '</td><td>' + esc(it.nome) + '</td>' +
+        return '<tr><td>' + dotItem(it, cancelado) + '</td><td>' + esc(it.artigo) + '</td><td>' + esc(it.nome) + '</td>' +
           '<td class="right">' + it.qtd + '</td><td class="right">' + it.qtdEnviada + '</td>' +
           '<td class="right">' + FG.fmtMoney(it.preco) + '</td>' +
           '<td class="right">' + FG.fmtMoney(it.preco * it.qtd) + '</td></tr>';
@@ -732,42 +845,45 @@
     setCrumb(['Pedidos', numero]); setTabOn('pedidos');
     FG.pedidoDetalhe(numero).then(function (d) {
     if (!d || !d.id) {
-      view.innerHTML = '<div class="empty-box">Pedido não encontrado.<br>' +
-        '<a class="btn red" href="#pedidos">Voltar para Pedidos</a></div>';
+      // Sem botão de voltar aqui: o VOLTAR padrão da trilha já cobre.
+      view.innerHTML = '<div class="empty-box">Pedido não encontrado.</div>';
       return;
     }
     var normais = d.itens.filter(function (i) { return !i.backorder; });
     var preVenda = d.itens.filter(function (i) { return i.backorder; });
     var pg = d.progresso;
 
+    // O VOLTAR fica só na trilha (botão padrão) — não se repete aqui dentro.
     var html =
-      '<div style="margin-bottom:12px;"><a class="btn" href="#pedidos">← Voltar para Pedidos</a></div>' +
-      '<div class="ped-det-head"><h2 style="margin:0;">Pedido ' + esc(d.cx) + ' / ' + esc(d.id) + '</h2>' +
+      '<div class="ped-det-head"><h2 style="margin:0;">Pedido ' + esc(d.id) + '</h2>' +
       '<span class="pill-status ' + esc(d.status) + '">' + esc(d.status) + '</span>' +
+      (d.garantia ? ' <span class="pill-status Garantia">Garantia — reposição sem cobrança</span>' : '') +
       (pg.parcial ? ' <span class="pill-status Parcial">Parcial</span>' : '') + '</div>' +
       '<p class="muted">' + FG.fmtDateTime(d.data) + ' · ' + esc(d.empresa) + ' · Total ' + FG.fmtMoney(d.total) + '</p>' +
       '<div class="prog-wrap"><div class="prog-bar"><div class="prog-fill" style="width:' + pg.pct + '%;"></div></div>' +
       '<span class="prog-label">' + pg.pct + '% (' + pg.enviada + ' de ' + pg.qtd + ' enviadas)</span></div>';
 
+    var cancelado = String(d.status || '').toLowerCase() === 'cancelado';
+
     if (normais.length)
-      html += '<h3 class="sec-title">Itens em envio normal</h3>' + tabelaItens(normais);
+      html += '<h3 class="sec-title">Itens em envio normal</h3>' + tabelaItens(normais, cancelado);
 
     if (preVenda.length)
       html += '<h3 class="sec-title">Itens em pré-venda</h3>' +
-        '<div class="backorder-aviso">Estes itens serão enviados quando o estoque for reposto. ' +
-        'Eles farão parte de uma entrega separada.</div>' + tabelaItens(preVenda);
+        '<div class="backorder-aviso">Estes itens serão enviados quando o estoque for reposto.</div>' +
+        tabelaItens(preVenda, cancelado);
 
-    if (d.entregas.length)
-      html += '<h3 class="sec-title">Entregas e faturas</h3>' +
-        '<table class="table"><thead><tr><th>Entrega</th><th>Data</th><th>Status</th>' +
-        '<th>Rastreio(s)</th><th>Fatura</th><th class="right">Valor</th></tr></thead><tbody>' +
-        d.entregas.map(function (e) {
-          return '<tr><td>' + esc(e.numero) + '</td><td>' + (e.data ? FG.fmtDate(e.data) : '—') + '</td>' +
-            '<td><span class="pill-status ' + esc(e.status) + '">' + esc(e.status) + '</span></td>' +
-            '<td>' + (e.rastreios.join('<br>') || '—') + '</td>' +
-            '<td>' + (e.fatura || '—') +
-              (e.faturaStatus ? ' <span class="pill-status ' + esc(e.faturaStatus) + '">' + esc(e.faturaStatus) + '</span>' : '') + '</td>' +
-            '<td class="right">' + (e.faturaValor != null ? FG.fmtMoney(e.faturaValor) : '—') + '</td></tr>';
+    // Legenda uma única vez, logo abaixo da(s) tabela(s) de itens.
+    if (normais.length || preVenda.length) html += LEGENDA_DOTS;
+
+    if (d.faturas && d.faturas.length)
+      html += '<h3 class="sec-title">Faturas</h3>' +
+        '<table class="table"><thead><tr><th>Fatura</th><th>Data</th><th>Status</th>' +
+        '<th class="right">Valor</th></tr></thead><tbody>' +
+        d.faturas.map(function (f) {
+          return '<tr><td>' + esc(f.numero) + '</td><td>' + (f.data ? FG.fmtDate(f.data) : '—') + '</td>' +
+            '<td>' + (f.status ? '<span class="pill-status ' + esc(f.status) + '">' + esc(f.status) + '</span>' : '—') + '</td>' +
+            '<td class="right">' + (f.valor != null ? FG.fmtMoney(f.valor) : '—') + '</td></tr>';
         }).join('') + '</tbody></table>';
 
     view.innerHTML = html;
@@ -800,7 +916,7 @@
     function fechar() { back.remove(); }
     back.querySelector('.x').addEventListener('click', fechar);
     back.querySelector('#vd-canc').addEventListener('click', fechar);
-    back.addEventListener('click', function (e) { if (e.target === back) fechar(); });
+    // Clicar fora NÃO fecha — pop-ups só fecham no X (pedido do dono).
     document.getElementById('vd-nome').focus();
 
     // Máscara leve de CPF enquanto digita (000.000.000-00).
@@ -826,6 +942,56 @@
       if (!r.ok) { FG.toast(r.msg || 'Não foi possível registrar a venda.'); return; }
       fechar();
       FG.toast('Venda registrada e garantia ativada.');
+      if (onDone) onDone();
+    });
+  }
+
+  // Modal (SÓ ADMIN) para transferir o chassi para outra concessionária,
+  // digitando o nome dela (razão social ou nome fantasia).
+  function modalTransferir(v, onDone) {
+    var back = document.createElement('div');
+    back.className = 'modal-back';
+    back.innerHTML =
+      '<div class="modal"><header><h3>Transferir revendedor — ' + esc(v.niv) + '</h3><button class="x">×</button></header>' +
+      '<div class="modal-body">' +
+      '<p class="muted" style="margin-top:0;">O chassi passa a pertencer à concessionária informada. ' +
+      'Comece a digitar e escolha na lista.</p>' +
+      '<div class="field"><label>Concessionária de destino *</label>' +
+      '<div class="ac-wrap"><input id="tf-emp" type="text" placeholder="Digite o nome da concessionária" autocomplete="off">' +
+      '<div class="ac-list hidden" id="tf-emp-ac"></div></div></div>' +
+      '</div>' +
+      '<div class="modal-foot"><button class="btn-line" id="tf-canc">Cancelar</button>' +
+      '<button class="btn red" id="tf-ok">Transferir</button></div></div>';
+    document.body.appendChild(back);
+
+    function fechar() { back.remove(); }
+    back.querySelector('.x').addEventListener('click', fechar);
+    back.querySelector('#tf-canc').addEventListener('click', fechar);
+    // Clicar fora NÃO fecha — pop-ups só fecham no X (pedido do dono).
+    document.getElementById('tf-emp').focus();
+
+    // Sugestões enquanto digita (front próprio — nada de datalist nativo).
+    FG.bindAutocomplete('tf-emp', function (termo) {
+      return FG.empresas().then(function (emps) {
+        var t = termo.toLowerCase();
+        return emps.filter(function (e2) {
+          return e2.nome.toLowerCase().indexOf(t) !== -1 ||
+            (e2.fantasia && e2.fantasia.toLowerCase().indexOf(t) !== -1);
+        }).map(function (e2) {
+          return { id: e2.id, label: e2.nome, sub: e2.fantasia || '' };
+        });
+      });
+    });
+
+    document.getElementById('tf-ok').addEventListener('click', async function () {
+      var el = document.getElementById('tf-emp');
+      var nome = el.value.trim();
+      var idSel = el.getAttribute('data-ac-id');
+      if (!nome) { FG.toast('Informe o nome da concessionária.'); return; }
+      var r = await FG.transferirVeiculo(v.niv, idSel ? { empresaId: Number(idSel) } : nome);
+      if (!r.ok) { FG.toast(r.msg || 'Não foi possível transferir.', 'erro'); return; }
+      fechar();
+      FG.toast('Veículo transferido para ' + esc(r.empresa || nome) + '.');
       if (onDone) onDone();
     });
   }
@@ -865,12 +1031,15 @@
         '<div style="display:flex;gap:10px;flex-wrap:wrap;">' +
         (v.status === 'Disponível' ? '<button class="btn red" id="av-venda">Registrar venda</button>' : '') +
         (!v.garantia ? '<button class="btn" id="av-gar">Ativar garantia</button>' : '') +
+        (sess.papel === 'admin' ? '<button class="btn" id="av-transf">Transferir revendedor</button>' : '') +
         '<a class="btn" href="#reivindicacoes">Criar reivindicação</a>' +
         '<a class="btn" href="finder.html">Abrir no Parts Finder</a>' +
         '</div></div>';
 
       var bv = document.getElementById('av-venda');
       if (bv) bv.addEventListener('click', function () { modalVenda(v, buscar); });
+      var bt = document.getElementById('av-transf');
+      if (bt) bt.addEventListener('click', function () { modalTransferir(v, buscar); });
       var bg = document.getElementById('av-gar');
       if (bg) bg.addEventListener('click', async function () {
         var r = await FG.ativarGarantia(v.niv);
@@ -916,18 +1085,30 @@
   function renderFinanceiro() {
     setCrumb(['Conta financeira', 'Faturas']); setTabOn('financeiro');
     var inv = FG.all('invoices'); // faturas reais (cobrança)
-    var faturado = 0, credito = 0;
-    inv.forEach(function (i) { if (i.valor >= 0) faturado += i.valor; else credito += i.valor; });
+    var faturado = 0;
+    inv.forEach(function (i) { faturado += i.valor; });
+
+    // Garantias aprovadas (substituem as antigas "notas de crédito"): as
+    // reivindicações do revendedor que o admin já aprovou.
+    var garantias = FG.all('claims').filter(function (c) { return c.status === 'Aprovada'; })
+      .slice().sort(function (a, b) {
+        return (b.dataAprovacao || b.data || '') < (a.dataAprovacao || a.data || '') ? -1 : 1;
+      });
+    var totalGarantias = garantias.reduce(function (s, c) { return s + (c.valorGarantia || 0); }, 0);
 
     // Pré-venda: peças já compradas (incluídas na fatura do pedido, sem cobrança
-    // à parte) que aguardam envio. Derivado dos pedidos; status pelo estoque atual.
+    // à parte) que AINDA aguardam envio. Derivado dos pedidos; status pelo
+    // estoque atual. Só entra o que tem saldo pendente (qtdEnviada < qtd) e de
+    // pedidos vivos — item já enviado por completo ou pedido cancelado não é
+    // "peça a enviar" e não deve poluir o rastreador.
     var preParts = [];
     FG.all('orders').forEach(function (o) {
+      if (o.status === 'Cancelado') return;
       (o.itens || []).forEach(function (it) {
         if (!it.backorder) return;
+        if (it.qtdEnviada >= it.qtd) return; // nada pendente — já enviado
         var p = FG.product(it.artigo);
-        var st = it.qtdEnviada >= it.qtd ? 'Enviado'
-          : ((p && p.estoque >= (it.qtd - it.qtdEnviada)) ? 'Disponivel' : 'Aguardando');
+        var st = (p && p.estoque >= (it.qtd - it.qtdEnviada)) ? 'Disponivel' : 'Aguardando';
         preParts.push({ it: it, o: o, st: st, prev: p && p.previsao });
       });
     });
@@ -941,67 +1122,489 @@
         '<table class="table"><thead><tr><th>Artigo</th><th>Peça</th><th class="right">Qtd.</th>' +
         '<th>Data do pedido</th><th>Pedido</th><th>Status do envio</th></tr></thead><tbody>' +
         preParts.map(function (x) {
-          var pill = x.st === 'Enviado' ? '<span class="pill-status Enviado">Enviado</span>'
-            : x.st === 'Disponivel' ? '<span class="pill-status Disponivel">Disponível — envio em breve</span>'
+          var pendente = x.it.qtd - x.it.qtdEnviada;
+          var pill = x.st === 'Disponivel'
+            ? '<span class="pill-status Disponivel">Disponível — envio em breve</span>'
             : '<span class="pill-status Aguardando">Aguardando reposição' + (x.prev ? ' · ' + esc(x.prev) : '') + '</span>';
           return '<tr><td>' + esc(x.it.artigo) + '</td><td>' + esc(x.it.nome) + '</td>' +
-            '<td class="right">' + x.it.qtd + '</td>' +
+            '<td class="right">' + pendente + '</td>' +
             '<td>' + (x.o.data ? FG.fmtDate(x.o.data) : '—') + '</td>' +
-            '<td><a href="#pedido/' + esc(x.o.id) + '">' + esc(x.o.cx) + '</a></td>' +
+            '<td><a href="#pedido/' + esc(x.o.id) + '">' + esc(x.o.id) + '</a></td>' +
             '<td>' + pill + '</td></tr>';
         }).join('') + '</tbody></table>';
     }
+
+    // Bloco "Garantias" — reivindicações aprovadas do revendedor.
+    var garantiasHTML =
+      '<h3 class="sec-title">Garantias aprovadas</h3>' +
+      (garantias.length
+        ? '<table class="table"><thead><tr><th>Reivindicação</th><th>Data da aprovação</th>' +
+          '<th>Chassi (NIV)</th><th>Peças</th><th class="right">Valor da garantia</th></tr></thead><tbody>' +
+          garantias.map(function (c) {
+            var pecas = (c.pecas || []).map(function (p) {
+              return esc((p.nome || p.sku) + (p.quantidade > 1 ? ' ×' + p.quantidade : ''));
+            }).join(', ');
+            return '<tr><td><b>' + esc(c.id) + '</b></td>' +
+              '<td>' + (c.dataAprovacao ? FG.fmtDate(c.dataAprovacao) : '—') + '</td>' +
+              '<td>' + esc(c.niv || '—') + '</td>' +
+              '<td style="font-size:12px;max-width:320px;">' + (pecas || '<span class="muted">—</span>') + '</td>' +
+              '<td class="right">' + (c.valorGarantia != null ? FG.fmtMoney(c.valorGarantia) : '—') + '</td></tr>';
+          }).join('') + '</tbody></table>'
+        : '<p class="muted">Nenhuma garantia aprovada.</p>');
 
     view.innerHTML =
       '<h2>Conta financeira</h2>' +
       '<div class="fin-cards">' +
       '<div class="fin-card"><div class="muted">Total faturado</div><div class="v">' + FG.fmtMoney(faturado) + '</div></div>' +
-      '<div class="fin-card"><div class="muted">Notas de crédito</div><div class="v">' + FG.fmtMoney(credito) + '</div></div>' +
+      '<div class="fin-card"><div class="muted">Garantias aprovadas</div><div class="v">' + FG.fmtMoney(totalGarantias) + '</div></div>' +
       '<div class="fin-card"><div class="muted">Documentos</div><div class="v">' + inv.length + '</div></div>' +
       '</div>' +
       '<div class="toolbar"><button class="tool" id="fi-csv">📄 Export. p/ Excel</button></div>' +
       '<table class="table"><thead><tr><th class="filt">Tipo</th><th class="filt">N° da fatura</th>' +
-      '<th class="filt">Data da fatura ↓</th><th class="right filt">Quantia cobrada</th><th>Moeda</th><th></th></tr></thead><tbody>' +
-      inv.map(function (i, idx) {
+      '<th class="filt">Data da fatura ↓</th><th class="right filt">Quantia cobrada</th><th></th></tr></thead><tbody>' +
+      (inv.length ? inv.map(function (i, idx) {
         return '<tr><td>' + esc(i.tipo) +
           (i.status && i.status !== 'Emitida' ? ' <span class="pill-status ' + esc(i.status) + '">' + esc(i.status) + '</span>' : '') +
-          (i.referencia ? '<br><span class="muted" style="font-size:11px;">ref. reivindicação ' + esc(i.referencia) + '</span>' : '') +
           '</td><td>' + i.numero + '</td><td>' + FG.fmtDate(i.data) + '</td>' +
           '<td class="right">' + i.valor.toLocaleString('pt-BR', { minimumFractionDigits: 2 }) + '</td>' +
-          '<td>' + esc(i.moeda) + '</td><td><button class="pdf-ico" data-i="' + idx + '">PDF</button></td></tr>';
-      }).join('') +
-      '</tbody></table>' + preVendaHTML;
+          '<td class="nowrap"><button class="pdf-ico pdf-baixar" data-i="' + idx + '">⬇ Baixar PDF</button> ' +
+          '<button class="pdf-ico pdf-imprimir" data-i="' + idx + '">🖨 Imprimir</button></td></tr>';
+      }).join('') : '<tr><td colspan="5" class="muted">Nenhuma fatura.</td></tr>') +
+      '</tbody></table>' + garantiasHTML + preVendaHTML;
 
     document.getElementById('fi-csv').addEventListener('click', function () {
-      var linhas = [['Tipo', 'N°', 'Data', 'Valor', 'Moeda']];
-      inv.forEach(function (i) { linhas.push([i.tipo, i.numero, FG.fmtDate(i.data), i.valor.toFixed(2), i.moeda]); });
+      var linhas = [['Tipo', 'N°', 'Data', 'Valor']];
+      inv.forEach(function (i) { linhas.push([i.tipo, i.numero, FG.fmtDate(i.data), i.valor.toFixed(2)]); });
       FG.exportCSV('faturas', linhas);
     });
-    Array.prototype.forEach.call(view.querySelectorAll('.pdf-ico'), function (b) {
+    Array.prototype.forEach.call(view.querySelectorAll('.pdf-baixar'), function (b) {
+      b.addEventListener('click', function () { baixarFaturaPDF(inv[Number(b.getAttribute('data-i'))], b); });
+    });
+    Array.prototype.forEach.call(view.querySelectorAll('.pdf-imprimir'), function (b) {
       b.addEventListener('click', function () { imprimirFatura(inv[Number(b.getAttribute('data-i'))]); });
     });
   }
 
+  // Monta o endereço do destinatário em linhas (uma por <br>), no estilo da
+  // fatura de referência (logradouro/nº, complemento, bairro, cidade-UF/CEP, país).
+  function linhasEndereco(end) {
+    if (!end) return [];
+    var linhas = [];
+    var l1 = [end.logradouro, end.numero].filter(Boolean).join(', ');
+    if (l1) linhas.push(l1);
+    if (end.complemento) linhas.push(end.complemento);
+    if (end.bairro) linhas.push(end.bairro);
+    var cidadeUf = [end.cidade, end.uf].filter(Boolean).join(' - ');
+    var l4 = [end.cep, cidadeUf].filter(Boolean).join('  ');
+    if (l4) linhas.push(l4);
+    if (end.pais) linhas.push(end.pais);
+    return linhas;
+  }
+
+  // Fatura detalhada — replica o layout da fatura de referência (docs/
+  // referencias/fatura_referencia.png): cabeçalho com o logo FULLGAS + dados
+  // do documento, bloco do destinatário (empresa + endereço + país + CNPJ) e a
+  // tabela de itens com os produtos vendidos, quantidades e valores.
+  // Devolve só o HTML (usado tanto para imprimir quanto para baixar em PDF).
+  function faturaHTML(i) {
+    var itens = i.itens || [];
+    var somaItens = itens.reduce(function (s, it) { return s + (it.subtotal || 0); }, 0);
+    var total = itens.length ? somaItens : i.valor;
+    var endLinhas = linhasEndereco(i.endereco).map(esc).join('<br>');
+    var nomeEmpresa = esc(i.empresa || sess.empresa || '');
+    var pais = esc(i.pais || (i.endereco && i.endereco.pais) || '');
+    var pedidos = (i.pedidos || []).length ? (i.pedidos || []).map(esc).join(', ') : '—';
+
+    // Estilos inline (o print-area é isolado; nada de classes externas).
+    var thBase = 'text-align:left;padding:7px 6px;border-bottom:2px solid #e5b100;font-size:12px;';
+    var tdBase = 'padding:7px 6px;border-bottom:1px solid #e5e5e5;font-size:12px;vertical-align:top;';
+    var lbl = 'font-size:10px;color:#888;text-transform:uppercase;letter-spacing:.4px;';
+    var val = 'font-size:13px;font-weight:700;color:#222;';
+
+    function campo(rotulo, valor) {
+      return '<div style="margin-bottom:10px;"><div style="' + lbl + '">' + rotulo + '</div>' +
+        '<div style="' + val + '">' + (valor || '—') + '</div></div>';
+    }
+
+    // Logo da marca (data URI carregado por js/logo-data.js). Se por algum
+    // motivo não estiver disponível, cai no nome em texto.
+    // Largura e altura explícitas (110x70 = proporção original 600x382): evita
+    // o reflow do `width:auto` durante a captura do PDF.
+    var logo = window.FG_LOGO
+      ? '<img src="' + window.FG_LOGO + '" alt="FULLGAS" width="110" height="70" ' +
+        'style="width:110px;height:70px;display:block;flex:0 0 110px;">'
+      : '<div style="font-size:26px;font-weight:800;font-style:italic;color:#e5b100;">FULLGAS</div>';
+
+    // O PADDING LATERAL PRECISA ESTAR AQUI, na raiz do documento.
+    // O html2pdf recebe ESTE elemento e o clona para dentro de um container
+    // próprio, do tamanho da página — a margem do container que o segura na
+    // tela é jogada fora. Sem este padding o conteúdo encostava na borda da
+    // folha e o "S" de FULLGAS saía cortado (a logo fica colada à direita por
+    // causa do space-between). Medido: 34 linhas de pixel pintadas na última
+    // coluna do canvas antes da correção, zero depois.
+    return '<div style="font-family:Arial,Helvetica,sans-serif;color:#222;' +
+      'max-width:760px;box-sizing:border-box;padding:0 18px;">' +
+
+      /* ---- cabeçalho: título + logo ---- */
+      '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;">' +
+      '<h1 style="margin:0;font-size:30px;letter-spacing:.5px;">Fatura</h1>' +
+      logo +
+      '</div>' +
+
+      /* ---- grade de dados do documento ---- */
+      '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0 24px;margin-top:22px;">' +
+      campo('Fatura n°', esc(i.numero)) +
+      campo('Data da fatura', FG.fmtDate(i.data)) +
+      campo('Pedido(s)', pedidos) +
+      campo('CNPJ', esc(i.cnpj) || '—') +
+      campo('País', pais || '—') +
+      campo('Documento', esc(i.tipo)) +
+      '</div>' +
+
+      /* ---- destinatário ---- */
+      '<div style="margin-top:8px;border-top:1px solid #e5e5e5;padding-top:14px;">' +
+      '<div style="' + lbl + '">Destinatário da fatura</div>' +
+      '<div style="font-size:14px;font-weight:700;margin-top:3px;">' + nomeEmpresa + '</div>' +
+      (endLinhas ? '<div style="font-size:12px;line-height:1.5;margin-top:2px;">' + endLinhas + '</div>' : '') +
+      (i.cnpj ? '<div style="font-size:12px;margin-top:4px;">CNPJ: ' + esc(i.cnpj) + '</div>' : '') +
+      '</div>' +
+
+      /* ---- itens ---- */
+      '<table style="width:100%;border-collapse:collapse;margin-top:22px;">' +
+      '<thead><tr>' +
+      '<th style="' + thBase + 'width:36px;">Item</th>' +
+      '<th style="' + thBase + '">Código</th>' +
+      '<th style="' + thBase + '">Descrição</th>' +
+      '<th style="' + thBase + 'text-align:center;">Qtd.</th>' +
+      '<th style="' + thBase + 'text-align:right;">Preço unit.</th>' +
+      '<th style="' + thBase + 'text-align:right;">Total</th>' +
+      '</tr></thead><tbody>' +
+      (itens.length
+        ? itens.map(function (it, ix) {
+          return '<tr>' +
+            '<td style="' + tdBase + '">' + ((ix + 1) * 10) + '</td>' +
+            '<td style="' + tdBase + '">' + esc(it.sku || '') + '</td>' +
+            '<td style="' + tdBase + '">' + esc(it.nome || '') + '</td>' +
+            '<td style="' + tdBase + 'text-align:center;">' + it.qtd + '</td>' +
+            '<td style="' + tdBase + 'text-align:right;">' + FG.fmtMoney(it.preco) + '</td>' +
+            '<td style="' + tdBase + 'text-align:right;">' + FG.fmtMoney(it.subtotal) + '</td>' +
+            '</tr>';
+        }).join('')
+        : '<tr><td style="' + tdBase + '" colspan="6">Movimentação de peças e acessórios</td></tr>') +
+      '</tbody></table>' +
+
+      /* ---- total ---- */
+      '<div style="display:flex;justify-content:flex-end;margin-top:16px;">' +
+      '<table style="border-collapse:collapse;min-width:280px;">' +
+      '<tr><td style="padding:6px 10px;font-size:13px;">Total de itens</td>' +
+      '<td style="padding:6px 10px;text-align:right;font-size:13px;">' + itens.length + '</td></tr>' +
+      '<tr><td style="padding:10px;font-size:15px;font-weight:800;border-top:2px solid #e5b100;">Total</td>' +
+      '<td style="padding:10px;text-align:right;font-size:15px;font-weight:800;border-top:2px solid #e5b100;">' + FG.fmtMoney(total) + '</td></tr>' +
+      '</table></div>' +
+
+      // Sem rodapé: a nota de "documento demonstrativo gerado em <data>" saiu a
+      // pedido do dono — não acrescenta nada ao documento que o cliente recebe.
+      '</div>';
+  }
+
+  // Imprimir: joga o HTML no #print-area (isolado por @media print) e chama a
+  // impressão do navegador (o usuário pode escolher "Salvar como PDF").
   function imprimirFatura(i) {
     var area = document.getElementById('print-area');
+    area.innerHTML = faturaHTML(i);
     area.classList.remove('hidden');
-    area.innerHTML =
-      '<div style="font-family:Arial,sans-serif;max-width:680px;">' +
-      '<h1 style="color:#d20a11;font-style:italic;">FULLGAS</h1>' +
-      '<h2>' + esc(i.tipo) + ' n° ' + i.numero + '</h2>' +
-      '<p><b>Data:</b> ' + FG.fmtDate(i.data) + '<br><b>Cliente:</b> ' + esc(sess.empresa) + '<br>' +
-      (i.referencia ? '<b>Ref. reivindicação:</b> ' + esc(i.referencia) + '<br>' : '') +
-      '<b>Moeda:</b> ' + esc(i.moeda) + '</p>' +
-      '<table style="width:100%;border-collapse:collapse;margin-top:14px;">' +
-      '<tr><th style="text-align:left;border-bottom:2px solid #d20a11;padding:8px 4px;">Descrição</th>' +
-      '<th style="text-align:right;border-bottom:2px solid #d20a11;padding:8px 4px;">Valor</th></tr>' +
-      '<tr><td style="padding:8px 4px;">Movimentação de peças e acessórios</td>' +
-      '<td style="text-align:right;padding:8px 4px;">' + FG.fmtMoney(i.valor) + '</td></tr>' +
-      '<tr><td style="padding:14px 4px;font-weight:700;">Total</td>' +
-      '<td style="text-align:right;padding:14px 4px;font-weight:700;">' + FG.fmtMoney(i.valor) + '</td></tr>' +
-      '</table><p style="font-size:11px;color:#777;margin-top:30px;">Documento demonstrativo gerado pelo portal Fullgas B2B.</p></div>';
     window.print();
     setTimeout(function () { area.classList.add('hidden'); }, 300);
+  }
+
+  // Baixar: gera um arquivo PDF de verdade (html2pdf) e dispara o download,
+  // sem passar pela caixa de impressão. Nome: fatura-<numero>.pdf.
+  function baixarFaturaPDF(i, btn) {
+    if (typeof html2pdf === 'undefined') { // biblioteca não carregou → imprime
+      FG.toast('Gerador de PDF indisponível — abrindo a impressão.', 'erro');
+      return imprimirFatura(i);
+    }
+    var rotulo = btn ? btn.textContent : '';
+    if (btn) { btn.disabled = true; btn.textContent = 'Gerando…'; }
+
+    // Container temporário fora da tela (o html2pdf renderiza o elemento real).
+    // Fica preso ao <html> (não ao <body>) para escapar do `zoom` global da
+    // interface — assim o PDF sai sempre no tamanho projetado.
+    var holder = document.createElement('div');
+    holder.style.cssText = 'position:fixed;left:-9999px;top:0;width:760px;background:#fff;padding:24px;zoom:1;';
+    holder.innerHTML = faturaHTML(i);
+    document.documentElement.appendChild(holder);
+
+    html2pdf().set({
+      margin: [10, 10, 10, 10],
+      filename: 'fatura-' + i.numero + '.pdf',
+      image: { type: 'jpeg', quality: 0.98 },
+      html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
+      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+    }).from(holder.firstChild).save()
+      .then(function () { FG.toast('PDF da fatura ' + i.numero + ' baixado.'); })
+      .catch(function () { FG.toast('Não foi possível gerar o PDF.', 'erro'); })
+      .then(function () {
+        holder.remove();
+        if (btn) { btn.disabled = false; btn.textContent = rotulo; }
+      });
+  }
+
+  /* =========================================================
+     MINHA CONTA — cadastro da empresa + contas internas
+     ---------------------------------------------------------
+     O GESTOR (conta que se cadastrou) edita os dados da empresa
+     e gerencia as contas internas (sub-dealers): cria contas
+     para funcionários da concessionária e restringe as áreas
+     que cada uma acessa (loja, finder, pedidos, financeiro...).
+     Conta interna vê tudo somente-leitura.
+     ========================================================= */
+  var AREA_LABELS = {
+    loja: 'Loja', finder: 'Parts Finder', pedidos: 'Pedidos',
+    financeiro: 'Conta financeira', reivindicacoes: 'Reivindicações',
+    estoque: 'Estoque do revendedor', acoes: 'Ações do veículo'
+  };
+
+  function permTexto(permissoes) {
+    if (!Array.isArray(permissoes)) return '<span class="stock-ok">Acesso total</span>';
+    if (!permissoes.length) return '<span class="muted">Só o portal básico</span>';
+    return esc(permissoes.map(function (a) { return AREA_LABELS[a] || a; }).join(', '));
+  }
+
+  function renderConta() {
+    setCrumb(['Minha conta']); setTabOn('conta');
+    view.innerHTML = '<h2>Minha conta</h2><p class="muted">Carregando…</p>';
+
+    FG.conta().then(function (c) {
+      if (!c) { view.innerHTML = '<h2>Minha conta</h2><p class="muted">Não foi possível carregar os dados. Tente de novo.</p>'; return; }
+      var gestor = !!(sess.gestor || sess.papel === 'admin');
+      var e = c.endereco || {};
+      var ro = gestor ? '' : ' readonly disabled';
+
+      var html =
+        '<h2>Minha conta</h2>' +
+        (gestor ? '' : '<p class="muted">Somente o gestor da concessionária pode alterar o cadastro.</p>') +
+
+        /* ---- dados da empresa ---- */
+        '<h3 class="sec-title">Dados da empresa</h3>' +
+        '<div class="conta-grid">' +
+        '<div class="field"><label>Razão social</label><input type="text" value="' + esc(c.empresa.razaoSocial) + '" readonly disabled></div>' +
+        '<div class="field"><label for="ct-cnpj">CNPJ</label><input id="ct-cnpj" type="text" maxlength="18" value="' + esc(c.empresa.cnpj) + '"' + ro + '></div>' +
+        '<div class="field"><label for="ct-ie">Inscrição estadual (opcional)</label><input id="ct-ie" type="text" maxlength="20" value="' + esc(c.empresa.inscricaoEstadual || '') + '"' + ro + '></div>' +
+        '<div class="field"><label for="ct-tel">Telefone</label><input id="ct-tel" type="text" maxlength="15" value="' + esc(c.empresa.telefone) + '"' + ro + '></div>' +
+        '<div class="field"><label for="ct-email">E-mail (empresa e acesso)</label><input id="ct-email" type="email" value="' + esc(c.empresa.email) + '"' + ro + '>' +
+        (gestor ? '<span class="muted" style="font-size:11px;">É também o seu e-mail de login. Ao alterar, entre com o novo.</span>' : '') + '</div>' +
+        '</div>' +
+
+        '<h3 class="sec-title">Endereço</h3>' +
+        '<div class="conta-grid">' +
+        '<div class="field"><label for="ct-cep">CEP</label><input id="ct-cep" type="text" maxlength="9" value="' + esc(e.cep || '') + '"' + ro + '></div>' +
+        '<div class="field"><label for="ct-log">Logradouro</label><input id="ct-log" type="text" value="' + esc(e.logradouro || '') + '"' + ro + '></div>' +
+        '<div class="field"><label for="ct-num">Número</label><input id="ct-num" type="text" value="' + esc(e.numero || '') + '"' + ro + '></div>' +
+        '<div class="field"><label for="ct-comp">Complemento</label><input id="ct-comp" type="text" value="' + esc(e.complemento || '') + '"' + ro + '></div>' +
+        '<div class="field"><label for="ct-bairro">Bairro</label><input id="ct-bairro" type="text" value="' + esc(e.bairro || '') + '"' + ro + '></div>' +
+        '<div class="field"><label for="ct-cidade">Cidade</label><input id="ct-cidade" type="text" value="' + esc(e.cidade || '') + '"' + ro + '></div>' +
+        '<div class="field"><label for="ct-uf">UF</label><input id="ct-uf" type="text" maxlength="2" value="' + esc(e.uf || '') + '"' + ro + ' style="text-transform:uppercase;"></div>' +
+        '</div>' +
+        (gestor ? '<button class="btn red" id="ct-salvar" type="button">Salvar dados da empresa</button>' : '');
+
+      /* ---- contas internas ---- */
+      html += '<h3 class="sec-title">Contas internas (sub-dealers)</h3>' +
+        '<p class="muted" style="font-size:12px;">Contas para os usuários internos da concessionária. ' +
+        'O gestor escolhe as áreas do site que cada conta pode acessar.</p>';
+
+      var internas = (c.usuarios || []).filter(function (u) { return !u.gestor; });
+      html += '<table class="table"><thead><tr><th>Nome</th><th>E-mail</th><th>Acesso</th><th>Status</th>' +
+        (gestor ? '<th>Ações</th>' : '') + '</tr></thead><tbody>' +
+        (internas.length ? internas.map(function (u) {
+          return '<tr><td>' + esc(u.nome) + '</td><td>' + esc(u.email) + '</td>' +
+            '<td style="font-size:12px;">' + permTexto(u.permissoes) + '</td>' +
+            '<td><span class="pill-status ' + esc(u.status) + '">' + esc(u.status) + '</span></td>' +
+            (gestor
+              ? '<td class="nowrap">' +
+                '<button class="tool" data-ed="' + u.id + '">Permissões</button> ' +
+                '<button class="tool" data-bl="' + u.id + '" data-st="' + u.status + '">' + (u.status === 'bloqueado' ? 'Desbloquear' : 'Bloquear') + '</button> ' +
+                '<button class="tool" data-sn="' + u.id + '">Redefinir senha</button> ' +
+                '<button class="tool danger" data-del="' + u.id + '" data-nome="' + esc(u.nome) + '">Excluir</button></td>'
+              : '') + '</tr>';
+        }).join('') : '<tr><td colspan="' + (gestor ? 5 : 4) + '" class="muted">Nenhuma conta interna ainda.</td></tr>') +
+        '</tbody></table>';
+
+      /* form de nova conta interna (só gestor) */
+      if (gestor) {
+        html += '<div class="conta-nova" id="ct-nova">' +
+          '<h3 class="sec-title">Nova conta interna</h3>' +
+          '<div class="conta-grid">' +
+          '<div class="field"><label for="sd-nome">Nome</label><input id="sd-nome" type="text" placeholder="Nome do funcionário"></div>' +
+          '<div class="field"><label for="sd-email">E-mail</label><input id="sd-email" type="email" placeholder="email@suaempresa.com.br"></div>' +
+          '<div class="field"><label for="sd-senha">Senha</label><input id="sd-senha" type="password" placeholder="Mínimo 6 caracteres"></div>' +
+          '</div>' +
+          '<div class="field"><label>Áreas permitidas</label><div class="perm-list" id="sd-perms">' +
+          c.areas.map(function (a) {
+            return '<label class="perm-chk"><input type="checkbox" value="' + a + '" checked> ' + (AREA_LABELS[a] || a) + '</label>';
+          }).join('') +
+          '</div></div>' +
+          '<button class="btn red" id="sd-criar" type="button">Criar conta interna</button>' +
+          '</div>';
+      }
+
+      view.innerHTML = html;
+      if (!gestor) return;
+
+      /* máscaras + ViaCEP no cadastro da empresa */
+      FG.bindMask('ct-cnpj', FG.maskCnpj);
+      FG.bindMask('ct-ie', FG.maskIe);
+      FG.bindMask('ct-tel', FG.maskTelefone);
+      FG.bindMask('ct-num', FG.maskNumero);
+      FG.bindMask('ct-cidade', FG.maskCidade);
+      var cepBuscado = (e.cep || '').replace(/\D/g, '');
+      FG.bindMask('ct-cep', FG.maskCep, function (valor, el) {
+        var dig = valor.replace(/\D/g, '');
+        if (dig.length !== 8 || dig === cepBuscado) return;
+        cepBuscado = dig;
+        el.classList.add('buscando');
+        fetch('https://viacep.com.br/ws/' + dig + '/json/')
+          .then(function (r) { return r.json(); })
+          .then(function (d) {
+            if (d.erro) { FG.toast('CEP não encontrado — preencha o endereço manualmente.', 'erro'); return; }
+            if (d.logradouro) document.getElementById('ct-log').value = d.logradouro;
+            if (d.bairro) document.getElementById('ct-bairro').value = d.bairro;
+            if (d.localidade) document.getElementById('ct-cidade').value = d.localidade;
+            if (d.uf) document.getElementById('ct-uf').value = d.uf;
+            document.getElementById('ct-num').focus();
+          })
+          .catch(function () { })
+          .then(function () { el.classList.remove('buscando'); });
+      });
+
+      /* salvar dados da empresa */
+      document.getElementById('ct-salvar').addEventListener('click', function () {
+        var v = function (id) { return document.getElementById(id).value.trim(); };
+        var dados = {
+          cnpj: v('ct-cnpj'), inscricaoEstadual: v('ct-ie'), telefone: v('ct-tel'), email: v('ct-email'),
+          endereco: { cep: v('ct-cep'), logradouro: v('ct-log'), numero: v('ct-num'),
+            complemento: v('ct-comp'), bairro: v('ct-bairro'), cidade: v('ct-cidade'),
+            uf: v('ct-uf').toUpperCase() }
+        };
+        if (dados.cnpj.replace(/\D/g, '').length !== 14) { FG.toast('CNPJ incompleto — use os 14 dígitos.', 'erro'); return; }
+        if (dados.endereco.cep.replace(/\D/g, '').length !== 8) { FG.toast('CEP incompleto.', 'erro'); return; }
+        if (!/^\d+$/.test(dados.endereco.numero)) { FG.toast('Número do endereço deve conter apenas dígitos.', 'erro'); return; }
+        if (/[^A-Za-zÀ-ÖØ-öø-ÿ'. -]/.test(dados.endereco.cidade)) { FG.toast('Cidade não pode conter números ou caracteres especiais.', 'erro'); return; }
+        FG.contaSalvarEmpresa(dados).then(function (r) {
+          if (!r.ok) { FG.toast(r.msg || 'Não foi possível salvar.', 'erro'); return; }
+          // E-mail é também o login: se mudou, atualiza a sessão em memória e no
+          // localStorage e o cabeçalho, para o portal refletir na hora (o próximo
+          // login usa o novo e-mail).
+          if (r.email && r.email !== sess.email) {
+            sess.email = r.email;
+            try {
+              var s = JSON.parse(localStorage.getItem('fullgas_session_v1') || '{}');
+              s.email = r.email;
+              localStorage.setItem('fullgas_session_v1', JSON.stringify(s));
+            } catch (e) { /* sessão intacta se falhar */ }
+            var who = document.getElementById('user-who');
+            if (who) who.textContent = sess.nome + ' (' + sess.email + ') - ' + sess.empresa +
+              ', ' + (sess.papel === 'admin' ? 'Administrador' : 'Concessionário');
+            FG.toast('Dados salvos. Seu e-mail de acesso agora é ' + r.email + '.');
+          } else {
+            FG.toast('Dados da empresa salvos.');
+          }
+        });
+      });
+
+      /* criar conta interna */
+      document.getElementById('sd-criar').addEventListener('click', function () {
+        var perms = [];
+        Array.prototype.forEach.call(document.querySelectorAll('#sd-perms input:checked'), function (i) { perms.push(i.value); });
+        var dados = {
+          nome: document.getElementById('sd-nome').value.trim(),
+          email: document.getElementById('sd-email').value.trim(),
+          senha: document.getElementById('sd-senha').value,
+          permissoes: perms
+        };
+        if (!dados.nome || !dados.email || !dados.senha) { FG.toast('Preencha nome, e-mail e senha.', 'erro'); return; }
+        if (dados.senha.length < 6) { FG.toast('A senha precisa de ao menos 6 caracteres.', 'erro'); return; }
+        FG.subdealerCriar(dados).then(function (r) {
+          if (!r.ok) { FG.toast(r.msg || 'Não foi possível criar a conta.', 'erro'); return; }
+          FG.toast('Conta interna criada — já pode entrar no portal.');
+          renderConta();
+        });
+      });
+
+      /* ações das contas internas */
+      Array.prototype.forEach.call(view.querySelectorAll('[data-bl]'), function (b) {
+        b.addEventListener('click', function () {
+          var novo = b.getAttribute('data-st') === 'bloqueado' ? 'aprovado' : 'bloqueado';
+          FG.subdealerEditar(b.getAttribute('data-bl'), { status: novo }).then(function (r) {
+            if (!r.ok) { FG.toast(r.msg || 'Falhou.', 'erro'); return; }
+            FG.toast(novo === 'bloqueado' ? 'Conta bloqueada.' : 'Conta desbloqueada.');
+            renderConta();
+          });
+        });
+      });
+      Array.prototype.forEach.call(view.querySelectorAll('[data-sn]'), function (b) {
+        b.addEventListener('click', function () {
+          var senha = prompt('Nova senha para esta conta (mínimo 6 caracteres):');
+          if (senha == null) return;
+          if (senha.length < 6) { FG.toast('A senha precisa de ao menos 6 caracteres.', 'erro'); return; }
+          FG.subdealerEditar(b.getAttribute('data-sn'), { senha: senha }).then(function (r) {
+            if (!r.ok) { FG.toast(r.msg || 'Falhou.', 'erro'); return; }
+            FG.toast('Senha redefinida.');
+          });
+        });
+      });
+      Array.prototype.forEach.call(view.querySelectorAll('[data-ed]'), function (b) {
+        b.addEventListener('click', function () {
+          var id = Number(b.getAttribute('data-ed'));
+          var u = internas.find(function (x) { return x.id === id; });
+          if (!u) return;
+          abrirPermissoes(u, c.areas);
+        });
+      });
+      Array.prototype.forEach.call(view.querySelectorAll('[data-del]'), function (b) {
+        b.addEventListener('click', function () {
+          var nome = b.getAttribute('data-nome') || 'esta conta';
+          if (!confirm('Excluir a conta interna de ' + nome + '? Esta ação não pode ser desfeita.')) return;
+          FG.subdealerExcluir(b.getAttribute('data-del')).then(function (r) {
+            if (!r.ok) { FG.toast(r.msg || 'Não foi possível excluir.', 'erro'); return; }
+            FG.toast('Conta interna excluída.');
+            renderConta();
+          });
+        });
+      });
+
+      /* modal simples p/ editar permissões de uma conta interna */
+      function abrirPermissoes(u, areas) {
+        var atual = Array.isArray(u.permissoes) ? u.permissoes : areas.slice();
+        var back = document.createElement('div');
+        back.className = 'modal-back';
+        back.innerHTML = '<div class="modal" style="max-width:440px;">' +
+          '<header><h3>Permissões — ' + esc(u.nome) + '</h3><button class="x" type="button" aria-label="Fechar">×</button></header>' +
+          '<div class="modal-body">' +
+          '<p class="muted" style="font-size:12px;margin-top:0;">Marque as áreas que esta conta pode acessar. ' +
+          'A mudança vale a partir do próximo login da conta.</p>' +
+          '<div class="perm-list" id="pm-list">' +
+          areas.map(function (a) {
+            return '<label class="perm-chk"><input type="checkbox" value="' + a + '"' +
+              (atual.indexOf(a) !== -1 ? ' checked' : '') + '> ' + (AREA_LABELS[a] || a) + '</label>';
+          }).join('') +
+          '</div>' +
+          '<button class="btn red" id="pm-salvar" type="button" style="margin-top:14px;">Salvar permissões</button>' +
+          '</div></div>';
+        document.body.appendChild(back);
+        function fechar() { back.remove(); }
+        back.querySelector('.x').addEventListener('click', fechar);
+        document.getElementById('pm-salvar').addEventListener('click', function () {
+          var perms = [];
+          Array.prototype.forEach.call(back.querySelectorAll('#pm-list input:checked'), function (i) { perms.push(i.value); });
+          FG.subdealerEditar(u.id, { permissoes: perms }).then(function (r) {
+            if (!r.ok) { FG.toast(r.msg || 'Falhou.', 'erro'); return; }
+            FG.toast('Permissões salvas — valem a partir do próximo login.');
+            fechar(); renderConta();
+          });
+        });
+      }
+    });
   }
 
   /* =========================================================
@@ -1048,6 +1651,12 @@
     var h = (location.hash || '#home').slice(1);
     var partes = h.split('/');
     var rota = partes[0] || 'home';
+    // Conta interna sem a área não entra nem por hash direto.
+    if (GATE_ROTAS[rota] && !FG.temArea(sess, GATE_ROTAS[rota])) {
+      FG.toast('Sua conta não tem acesso a esta área. Fale com o gestor da concessionária.', 'erro');
+      location.hash = '#home';
+      return;
+    }
     switch (rota) {
       case 'home': renderHome(); break;
       case 'notificacoes': renderNotifs(); break;
@@ -1057,6 +1666,7 @@
       case 'acoes': renderAcoes(partes[1]); break;
       case 'estoque': renderEstoque(); break;
       case 'financeiro': renderFinanceiro(); break;
+      case 'conta': renderConta(); break;
       case 'busca': renderBusca(partes.slice(1).join('/')); break;
       default: renderHome();
     }

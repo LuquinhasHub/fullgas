@@ -31,7 +31,103 @@
       a.classList.toggle('on', a.getAttribute('data-rota') === rota);
     });
   }
-  function pill(v) { return '<span class="pill-status ' + esc(v) + '">' + esc(v) + '</span>'; }
+  // Além da classe com o texto cru (compatível com os estilos antigos), adiciona
+  // uma classe slug ASCII (ps-<slug>) para status com espaço/acento — ex.:
+  // "Em separação" → "ps-Em-separacao" — que o CSS consegue mirar.
+  function pill(v) {
+    var slug = String(v).normalize('NFD').replace(/\p{Diacritic}/gu, '').replace(/[^a-zA-Z0-9]+/g, '-');
+    return '<span class="pill-status ' + esc(v) + ' ps-' + esc(slug) + '">' + esc(v) + '</span>';
+  }
+
+  /* =========================================================
+     FILTROS DAS ABAS
+     ---------------------------------------------------------
+     O estado mora aqui fora dos render() para sobreviver aos re-renders
+     (salvar uma peça, aprovar um usuário, atribuir um chassi...). A chave
+     `busca` é sempre o campo de texto livre da aba.
+     ========================================================= */
+  var filtros = {
+    pedidos:  { status: '', busca: '' },
+    prevenda: { status: '', busca: '' },
+    produtos: { cat: '', estoque: '', busca: '' },
+    chassis:  { status: '', modelo: '', atrib: '', busca: '' },
+    usuarios: { status: '', papel: '', busca: '' }
+  };
+
+  function filtroAtivo(aba) {
+    var st = filtros[aba];
+    return Object.keys(st).some(function (k) { return st[k]; });
+  }
+
+  // Texto livre casa com qualquer um dos campos passados (sem acento, sem caixa).
+  function casaBusca(aba, campos) {
+    var termo = filtros[aba].busca.trim().toLowerCase()
+      .normalize('NFD').replace(/\p{Diacritic}/gu, '');
+    if (!termo) return true;
+    return campos.some(function (c) {
+      return String(c == null ? '' : c).toLowerCase()
+        .normalize('NFD').replace(/\p{Diacritic}/gu, '').indexOf(termo) >= 0;
+    });
+  }
+
+  // Barra de filtros. `selects` = [{ k, rotulo, opcoes: [[valor, texto], ...],
+  // todos? }]. `placeholder` vazio esconde o campo de busca.
+  function barraFiltro(aba, selects, placeholder) {
+    var st = filtros[aba];
+    return '<div class="shop-tools adm-filtros">' +
+      selects.map(function (s) {
+        return '<label>' + esc(s.rotulo) + ': <select data-f="' + aba + '|' + s.k + '">' +
+          '<option value="">' + esc(s.todos || 'Todos') + '</option>' +
+          s.opcoes.map(function (o) {
+            return '<option value="' + esc(o[0]) + '"' + (st[s.k] === String(o[0]) ? ' selected' : '') +
+              '>' + esc(o[1]) + '</option>';
+          }).join('') + '</select></label>';
+      }).join('') +
+      (placeholder
+        ? '<input type="text" class="f-busca" data-f="' + aba + '|busca" placeholder="' + esc(placeholder) +
+          '" value="' + esc(st.busca) + '">'
+        : '') +
+      (filtroAtivo(aba) ? '<button class="btn-line btn-mini" data-f-limpar="' + aba + '">Limpar filtro</button>' : '') +
+      '</div>';
+  }
+
+  // Liga a barra ao render da aba. A busca espera o usuário parar de digitar e
+  // devolve o foco/cursor depois — o re-render recria o campo do zero.
+  var buscaTimer = null;
+  function bindFiltro(render) {
+    Array.prototype.forEach.call(view.querySelectorAll('[data-f]'), function (el) {
+      var p = el.getAttribute('data-f').split('|');
+      if (el.tagName === 'SELECT') {
+        el.addEventListener('change', function () { filtros[p[0]][p[1]] = el.value; render(); });
+        return;
+      }
+      el.addEventListener('input', function () {
+        filtros[p[0]][p[1]] = el.value;
+        clearTimeout(buscaTimer);
+        buscaTimer = setTimeout(function () {
+          render();
+          var novo = view.querySelector('[data-f="' + p[0] + '|busca"]');
+          if (novo) { novo.focus(); novo.setSelectionRange(novo.value.length, novo.value.length); }
+        }, 350);
+      });
+    });
+    var lim = view.querySelector('[data-f-limpar]');
+    if (lim) lim.addEventListener('click', function () {
+      var st = filtros[lim.getAttribute('data-f-limpar')];
+      Object.keys(st).forEach(function (k) { st[k] = ''; });
+      render();
+    });
+  }
+
+  // "3 de 28" no cabeçalho do card quando há filtro; só "28" quando não há.
+  function contagem(aba, mostrados, total) {
+    return mostrados + (filtroAtivo(aba) && mostrados !== total ? ' de ' + total : '');
+  }
+
+  function vazioFiltro(cols, texto) {
+    return '<tr><td colspan="' + cols + '" class="muted">' +
+      esc(texto || 'Nada encontrado com esse filtro.') + '</td></tr>';
+  }
 
   /* =========================================================
      DASHBOARD
@@ -125,41 +221,417 @@
      ========================================================= */
   function renderUsuarios() {
     h1.textContent = 'Administração de usuários'; setOn('usuarios');
-    var users = FG.all('users');
+    var todos = FG.all('users');
+    var f = filtros.usuarios;
+    var users = todos.filter(function (u) {
+      if (f.status && u.status !== f.status) return false;
+      if (f.papel === 'interna' ? u.gestor !== false : (f.papel && u.papel !== f.papel)) return false;
+      return casaBusca('usuarios', [u.nome, u.email, u.empresa, u.cnpj]);
+    });
     view.innerHTML =
-      '<div class="adm-card"><div class="c-head">Usuários cadastrados (' + users.length + ')</div><div class="c-body">' +
-      '<table class="tbl"><thead><tr><th>Nome</th><th>E-mail</th><th>Empresa</th><th>Papel</th><th>Status</th><th>Ações</th></tr></thead><tbody>' +
-      users.map(function (u) {
-        var acoes = '';
-        if (u.status === 'pendente') acoes += '<button class="btn-orange btn-mini" data-ac="aprovar" data-id="' + u.id + '">Aprovar</button> ';
-        if (u.id !== sess.id) {
-          acoes += '<button class="btn-line btn-mini" data-ac="papel" data-id="' + u.id + '">' +
-            (u.papel === 'admin' ? 'Tornar cliente' : 'Tornar admin') + '</button> ';
-          acoes += '<button class="btn-line btn-mini" data-ac="bloq" data-id="' + u.id + '">' +
-            (u.status === 'bloqueado' ? 'Desbloquear' : 'Bloquear') + '</button>';
-        } else {
-          acoes += '<span class="muted">(você)</span>';
+      '<div class="adm-card"><div class="c-head">Usuários cadastrados (' + contagem('usuarios', users.length, todos.length) + ')</div><div class="c-body">' +
+      barraFiltro('usuarios', [
+        { k: 'status', rotulo: 'Status', opcoes: [['pendente', 'Pendente'], ['aprovado', 'Aprovado'], ['bloqueado', 'Bloqueado']] },
+        { k: 'papel', rotulo: 'Tipo', opcoes: [['admin', 'Administrador'], ['cliente', 'Cliente'], ['interna', 'Conta interna']] }
+      ], 'Buscar por nome, e-mail, empresa ou CNPJ') +
+      '<table class="tbl"><thead><tr><th>Nome</th><th>E-mail</th><th>Empresa</th><th>CNPJ</th><th>Endereço</th><th>Papel</th><th>Status</th><th>Ações</th></tr></thead><tbody>' +
+      (users.length ? users.map(function (u) {
+        // Uma porta só: "Gerenciar" abre o painel com TODAS as ações daquele
+        // usuário, em vez da fileira de botões espremidos que havia aqui.
+        var acoes = String(u.id) === String(sess.id)
+          ? '<span class="muted">(você)</span>'
+          : '<button class="btn-orange btn-mini usr-ger" data-ger="' + u.id + '">⚙ Gerenciar</button>' +
+            (u.status === 'pendente' ? ' <span class="usr-alerta" title="Cadastro aguardando aprovação">!</span>' : '');
+        var e = u.endereco;
+        // Resumo compacto na tabela; os dados completos ficam na linha
+        // expansível abaixo (botão "Expandir ▾"), bem divididos campo a campo.
+        var endTxt = e ? (esc(e.cidade || '') + (e.uf ? '/' + esc(e.uf) : '')) : '<span class="muted">—</span>';
+        function dd(rotulo, valor) {
+          return '<div class="usr-dd"><b>' + rotulo + '</b><span>' +
+            (valor ? esc(valor) : '<i class="muted">—</i>') + '</span></div>';
         }
-        return '<tr><td>' + esc(u.nome) + '</td><td>' + esc(u.email) + '</td><td>' + esc(u.empresa) + '</td>' +
-          '<td>' + pill(u.papel) + '</td><td>' + pill(u.status) + '</td><td>' + acoes + '</td></tr>';
-      }).join('') + '</tbody></table></div></div>';
+        var det =
+          '<div class="usr-det-sec">Empresa</div><div class="usr-det-grid">' +
+          dd('Razão social', u.empresa) + dd('CNPJ', u.cnpj) +
+          dd('Inscrição estadual', u.inscricaoEstadual) + dd('Telefone', u.telefone) +
+          '<div class="usr-dd"><b>Contato Tiny</b><span>' + (u.tinyContatoId
+            ? 'vinculado <span class="muted">(#' + esc(u.tinyContatoId) + ')</span>'
+            : '<i class="muted">não vinculado</i>') + '</span></div>' +
+          '</div>' +
+          '<div class="usr-det-sec">Endereço</div>' +
+          (e ? '<div class="usr-det-grid">' +
+            dd('CEP', e.cep) + dd('Logradouro', e.logradouro) + dd('Número', e.numero) +
+            dd('Complemento', e.complemento) + dd('Bairro', e.bairro) +
+            dd('Cidade', e.cidade) + dd('UF', e.uf) +
+            '</div>' : '<p class="muted" style="margin:4px 0 0;">Sem endereço cadastrado.</p>');
+        return '<tr><td>' + esc(u.nome) +
+          (u.gestor === false ? ' <span class="muted" style="font-size:11px;">(interna)</span>' : '') +
+          '</td><td>' + esc(u.email) + '</td><td>' + esc(u.empresa) + '</td>' +
+          '<td>' + (u.cnpj ? esc(u.cnpj) : '<span class="muted">—</span>') + '</td>' +
+          '<td style="font-size:12px;">' + endTxt +
+          ' <button class="btn-line btn-mini usr-exp" data-exp="' + u.id + '">Expandir ▾</button></td>' +
+          '<td>' + pill(u.papel) + '</td><td>' + pill(u.status) + '</td><td>' + acoes + '</td></tr>' +
+          '<tr class="usr-det hidden" data-det="' + u.id + '"><td colspan="8">' + det + '</td></tr>';
+      }).join('') : vazioFiltro(8, 'Nenhum usuário com esse filtro.')) + '</tbody></table></div></div>';
 
-    Array.prototype.forEach.call(view.querySelectorAll('[data-ac]'), function (b) {
+    bindFiltro(renderUsuarios);
+
+    // Expandir/recolher os dados completos do cadastro.
+    Array.prototype.forEach.call(view.querySelectorAll('[data-exp]'), function (b) {
       b.addEventListener('click', function () {
-        var id = b.getAttribute('data-id');
-        var u = FG.all('users').find(function (x) { return x.id === id; });
-        if (!u) return;
+        var det = view.querySelector('[data-det="' + b.getAttribute('data-exp') + '"]');
+        if (!det) return;
+        var aberto = !det.classList.contains('hidden');
+        det.classList.toggle('hidden', aberto);
+        b.textContent = aberto ? 'Expandir ▾' : 'Recolher ▴';
+      });
+    });
+
+    Array.prototype.forEach.call(view.querySelectorAll('[data-ger]'), function (b) {
+      b.addEventListener('click', function () {
+        var u = FG.all('users').find(function (x) { return String(x.id) === String(b.getAttribute('data-ger')); });
+        if (u) modalUsuario(u);
+      });
+    });
+  }
+
+  /* ---------------------------------------------------------
+     PAINEL DE GESTÃO DO USUÁRIO
+     ---------------------------------------------------------
+     Cada ação é um cartão com título, explicação do que acontece e um botão —
+     em vez de quatro botões soltos numa célula de tabela sem contexto.
+     --------------------------------------------------------- */
+  function modalUsuario(u) {
+    var interna = u.gestor === false;
+    var back = document.createElement('div');
+    back.className = 'modal-back';
+
+    // Cada cartão: [chave, ícone, título, descrição, rótulo do botão, tom]
+    var cards = [];
+
+    cards.push(['identidade', '👤', 'Alterar identidade',
+      'Entra no portal como ' + esc(u.nome) + ' e vê exatamente o que ' + (interna ? 'esta conta interna' : 'o cliente') +
+      ' vê. Uma tarja fica no topo e você volta para a sua conta quando quiser.',
+      'Entrar na conta', 'destaque']);
+
+    if (u.status === 'pendente')
+      cards.push(['aprovar', '✅', 'Aprovar cadastro',
+        'Libera o primeiro acesso. Enquanto está pendente, esta pessoa não consegue entrar no portal.',
+        'Aprovar agora', 'ok']);
+
+    cards.push(['papel', u.papel === 'admin' ? '⬇' : '⬆',
+      u.papel === 'admin' ? 'Rebaixar para cliente' : 'Promover a administrador',
+      u.papel === 'admin'
+        ? 'Tira o acesso ao painel administrativo. Passa a usar só o portal da concessionária.'
+        : 'Dá acesso total ao painel administrativo: pedidos, catálogo, chassis, clientes e Tiny.',
+      u.papel === 'admin' ? 'Tornar cliente' : 'Tornar admin', '']);
+
+    cards.push(['bloq', u.status === 'bloqueado' ? '🔓' : '🚫',
+      u.status === 'bloqueado' ? 'Desbloquear acesso' : 'Bloquear acesso',
+      u.status === 'bloqueado'
+        ? 'Devolve o acesso ao portal, com os dados e o histórico intactos.'
+        : 'Impede o login sem apagar nada. É o caminho recomendado no lugar de excluir.',
+      u.status === 'bloqueado' ? 'Desbloquear' : 'Bloquear', u.status === 'bloqueado' ? '' : 'aviso']);
+
+    cards.push(['del', '🗑', 'Excluir conta',
+      'Apaga o usuário definitivamente. Não funciona se houver histórico (pedidos, reivindicações) — nesse caso, bloqueie.',
+      'Excluir', 'perigo']);
+
+    back.innerHTML =
+      '<div class="modal usr-modal"><header><h3>Gerenciar usuário</h3><button class="x">×</button></header>' +
+      '<div class="modal-body">' +
+      /* ---- identificação ---- */
+      '<div class="usr-ficha">' +
+      '<div class="usr-avatar">' + esc((u.nome || '?').trim().charAt(0).toUpperCase()) + '</div>' +
+      '<div class="usr-ficha-txt"><div class="usr-ficha-nome">' + esc(u.nome) + '</div>' +
+      '<div class="usr-ficha-mail">' + esc(u.email) + '</div>' +
+      '<div class="usr-ficha-tags">' + pill(u.papel) + pill(u.status) +
+      (interna ? '<span class="pill-status ps-interna">Conta interna</span>' : '<span class="pill-status ps-gestor">Gestor</span>') +
+      '</div>' +
+      '<div class="usr-ficha-emp">' + esc(u.empresa || '—') +
+      (u.cnpj ? ' <span class="muted">· ' + esc(u.cnpj) + '</span>' : '') + '</div>' +
+      '</div></div>' +
+      /* ---- ações ---- */
+      '<div class="usr-acoes">' +
+      cards.map(function (c) {
+        return '<div class="usr-acao ' + c[5] + '">' +
+          '<div class="usr-acao-ico">' + c[1] + '</div>' +
+          '<div class="usr-acao-txt"><b>' + c[2] + '</b><span>' + c[3] + '</span></div>' +
+          '<button class="usr-acao-btn" data-ac="' + c[0] + '">' + c[4] + '</button></div>';
+      }).join('') +
+      '</div></div></div>';
+    document.body.appendChild(back);
+
+    function fechar() { back.remove(); }
+    back.querySelector('.x').addEventListener('click', fechar);
+
+    Array.prototype.forEach.call(back.querySelectorAll('[data-ac]'), function (b) {
+      b.addEventListener('click', async function () {
         var ac = b.getAttribute('data-ac');
-        if (ac === 'aprovar') { FG.setUser(id, { status: 'aprovado' }); FG.toast('Usuário aprovado.'); }
-        if (ac === 'papel') {
+
+        if (ac === 'identidade') {
+          b.disabled = true; b.textContent = 'Entrando…';
+          var r = await FG.assumirIdentidade(u.id);
+          if (!r.ok) { FG.toast(r.msg, 'erro'); b.disabled = false; b.textContent = 'Entrar na conta'; return; }
+          location.href = 'portal.html';   // recarrega o app já com a nova sessão
+          return;
+        }
+
+        if (ac === 'del') {
+          if (!confirm('Excluir o usuário "' + u.nome + '" (' + u.email + ')?\nEsta ação não pode ser desfeita.')) return;
+          b.disabled = true;
+          var rd = await FG.delUser(u.id);
+          if (rd && rd.ok === false) { FG.toast(rd.msg || 'Não foi possível excluir o usuário.', 'erro'); b.disabled = false; return; }
+          FG.toast('Usuário excluído.');
+          fechar(); refreshBell(); renderUsuarios();
+          return;
+        }
+
+        var patch = null, msg = '';
+        if (ac === 'aprovar') { patch = { status: 'aprovado' }; msg = 'Usuário aprovado.'; }
+        else if (ac === 'papel') {
           var novo = u.papel === 'admin' ? 'cliente' : 'admin';
-          FG.setUser(id, { papel: novo }); FG.toast('Papel alterado para ' + novo + '.');
-        }
-        if (ac === 'bloq') {
+          patch = { papel: novo }; msg = 'Papel alterado para ' + novo + '.';
+        } else if (ac === 'bloq') {
           var st = u.status === 'bloqueado' ? 'aprovado' : 'bloqueado';
-          FG.setUser(id, { status: st }); FG.toast(st === 'bloqueado' ? 'Usuário bloqueado.' : 'Usuário desbloqueado.');
+          patch = { status: st }; msg = st === 'bloqueado' ? 'Usuário bloqueado.' : 'Usuário desbloqueado.';
         }
-        refreshBell(); renderUsuarios();
+        if (!patch) return;
+        b.disabled = true;
+        var r2 = await FG.setUser(u.id, patch);
+        if (r2 && r2.ok === false) { FG.toast(r2.msg || 'Não foi possível atualizar o usuário.', 'erro'); b.disabled = false; return; }
+        FG.toast(msg);
+        fechar(); refreshBell(); renderUsuarios();
+      });
+    });
+  }
+
+  /* =========================================================
+     NOTIFICAÇÕES — admin envia mensagens às concessionárias
+     ========================================================= */
+  function renderNotifsAdmin() {
+    h1.textContent = 'Notificações'; setOn('notificacoes');
+    var notifs = FG.all('notifications');
+
+    view.innerHTML =
+      /* ---- envio ---- */
+      '<div class="adm-card"><div class="c-head">Enviar mensagem às concessionárias</div><div class="c-body">' +
+      '<div class="nt-form">' +
+      '<div class="field"><label for="nt-emp">Destinatário</label>' +
+      '<div class="ac-wrap"><input id="nt-emp" type="text" placeholder="Todas as concessionárias (digite p/ escolher uma)" autocomplete="off">' +
+      '<div class="ac-list hidden" id="nt-emp-ac"></div></div></div>' +
+      '<div class="field"><label for="nt-tipo">Tipo</label><select id="nt-tipo">' +
+      '<option value="info">Aviso</option><option value="critica">Crítica (⚠ destaque)</option></select></div>' +
+      '</div>' +
+      '<div class="field"><label for="nt-titulo">Título *</label>' +
+      '<input id="nt-titulo" type="text" maxlength="160" placeholder="Ex.: Recall do modelo FG 125"></div>' +
+      '<div class="field"><label for="nt-texto">Mensagem</label>' +
+      '<textarea id="nt-texto" rows="4" maxlength="2000" placeholder="Escreva a mensagem para as concessionárias..."></textarea></div>' +
+      '<div class="field"><label for="nt-anexo">Anexo (imagem, vídeo, PDF... — opcional, máx. 60 MB)</label>' +
+      '<input id="nt-anexo" type="file" accept="image/*,video/*,.pdf,.zip,.doc,.docx,.xls,.xlsx"></div>' +
+      '<button class="btn-orange" id="nt-enviar">Enviar notificação</button>' +
+      '</div></div>' +
+
+      /* ---- enviadas ---- */
+      '<div class="adm-card"><div class="c-head">Enviadas (' + notifs.length + ')</div><div class="c-body">' +
+      '<table class="tbl"><thead><tr><th>Data</th><th>Destinatário</th><th>Tipo</th><th>Título</th>' +
+      '<th>Mensagem</th><th>Anexo</th><th></th></tr></thead><tbody>' +
+      (notifs.length ? notifs.map(function (n) {
+        return '<tr><td class="nowrap">' + FG.fmtDateTime(n.data) + '</td>' +
+          '<td>' + (n.empresa ? esc(n.empresa) : '<b>Todas</b>') + '</td>' +
+          '<td>' + (n.tipo === 'critica' ? '⚠ Crítica' : 'Aviso') + '</td>' +
+          '<td>' + esc(n.titulo) + '</td>' +
+          '<td style="font-size:12px;max-width:320px;">' + esc((n.texto || '').slice(0, 140)) + ((n.texto || '').length > 140 ? '…' : '') + '</td>' +
+          '<td>' + (n.anexo ? '<a href="' + esc(n.anexo) + '" target="_blank" rel="noopener">📎 ' + esc(n.anexoTipo || 'anexo') + '</a>' : '<span class="muted">—</span>') + '</td>' +
+          '<td><button class="btn-line btn-mini usr-del" data-del="' + n.id + '">Apagar</button></td></tr>';
+      }).join('') : '<tr><td colspan="7" class="muted">Nenhuma notificação enviada ainda.</td></tr>') +
+      '</tbody></table></div></div>';
+
+    bindAcEmpresas('nt-emp');
+
+    document.getElementById('nt-enviar').addEventListener('click', function () {
+      var empEl = document.getElementById('nt-emp');
+      var idSel = empEl.getAttribute('data-ac-id');
+      if (empEl.value.trim() && !idSel) {
+        FG.toast('Escolha a concessionária na lista (ou apague o campo p/ enviar a todas).', 'erro'); return;
+      }
+      var dados = {
+        titulo: document.getElementById('nt-titulo').value.trim(),
+        texto: document.getElementById('nt-texto').value.trim(),
+        tipo: document.getElementById('nt-tipo').value,
+        empresaId: idSel ? Number(idSel) : null,
+        anexo: document.getElementById('nt-anexo').files[0] || null
+      };
+      if (!dados.titulo) { FG.toast('Escreva o título da notificação.', 'erro'); return; }
+      if (!dados.texto && !dados.anexo) { FG.toast('Escreva a mensagem ou anexe um arquivo.', 'erro'); return; }
+      var b = document.getElementById('nt-enviar');
+      b.disabled = true; b.textContent = 'Enviando…';
+      FG.notifEnviar(dados).then(function (r) {
+        b.disabled = false; b.textContent = 'Enviar notificação';
+        if (!r.ok) { FG.toast(r.msg || 'Não foi possível enviar.', 'erro'); return; }
+        FG.toast('Notificação enviada' + (idSel ? ' para ' + empEl.value.trim() : ' a todas as concessionárias') + '.');
+        renderNotifsAdmin();
+      });
+    });
+
+    Array.prototype.forEach.call(view.querySelectorAll('[data-del]'), function (b) {
+      b.addEventListener('click', function () {
+        if (!confirm('Apagar esta notificação? Ela some do painel de todas as concessionárias.')) return;
+        b.disabled = true;
+        FG.notifApagar(b.getAttribute('data-del')).then(function (r) {
+          if (r && r.ok === false) { FG.toast(r.msg || 'Não foi possível apagar.', 'erro'); b.disabled = false; return; }
+          FG.toast('Notificação apagada.');
+          renderNotifsAdmin();
+        });
+      });
+    });
+  }
+
+  /* =========================================================
+     CHASSIS (VINs) — cadastro e atribuição a concessionárias
+     ========================================================= */
+
+  // Autocomplete de concessionária (front próprio, estilo .ac-wrap).
+  function bindAcEmpresas(inputId) {
+    FG.bindAutocomplete(inputId, function (termo) {
+      return FG.empresas().then(function (emps) {
+        var t = termo.toLowerCase();
+        return emps.filter(function (e2) {
+          return e2.nome.toLowerCase().indexOf(t) !== -1 ||
+            (e2.fantasia && e2.fantasia.toLowerCase().indexOf(t) !== -1);
+        }).map(function (e2) { return { id: e2.id, label: e2.nome, sub: e2.fantasia || '' }; });
+      });
+    });
+  }
+
+  // Modal para atribuir/transferir um chassi a uma concessionária.
+  function modalAtribuir(v) {
+    var back = document.createElement('div');
+    back.className = 'modal-back';
+    back.innerHTML =
+      '<div class="modal"><header><h3>' + (v.empresa ? 'Transferir' : 'Atribuir') + ' chassi — ' + esc(v.niv) + '</h3>' +
+      '<button class="x">×</button></header>' +
+      '<div class="modal-body">' +
+      (v.empresa ? '<p class="muted" style="margin-top:0;">Hoje pertence a <b>' + esc(v.empresa) + '</b>.</p>' : '') +
+      '<div class="field"><label>Concessionária de destino *</label>' +
+      '<div class="ac-wrap"><input id="ch-emp" type="text" placeholder="Digite o nome da concessionária" autocomplete="off">' +
+      '<div class="ac-list hidden" id="ch-emp-ac"></div></div></div>' +
+      '</div>' +
+      '<div class="modal-foot"><button class="btn-line" id="ch-canc">Cancelar</button>' +
+      '<button class="btn-orange" id="ch-ok">Confirmar</button></div></div>';
+    document.body.appendChild(back);
+
+    function fechar() { back.remove(); }
+    back.querySelector('.x').addEventListener('click', fechar);
+    back.querySelector('#ch-canc').addEventListener('click', fechar);
+    document.getElementById('ch-emp').focus();
+    bindAcEmpresas('ch-emp');
+
+    document.getElementById('ch-ok').addEventListener('click', function () {
+      var el = document.getElementById('ch-emp');
+      var idSel = el.getAttribute('data-ac-id');
+      var nome = el.value.trim();
+      if (!nome) { FG.toast('Informe a concessionária.', 'erro'); return; }
+      FG.transferirVeiculo(v.niv, idSel ? { empresaId: Number(idSel) } : nome).then(function (r) {
+        if (!r.ok) { FG.toast(r.msg || 'Não foi possível atribuir.', 'erro'); return; }
+        fechar();
+        FG.toast('Chassi ' + v.niv + ' atribuído a ' + (r.empresa || nome) + '.');
+        renderChassis();
+      });
+    });
+  }
+
+  function renderChassis() {
+    h1.textContent = 'Chassis (VINs)'; setOn('chassis');
+    var todos = FG.all('vehicles');
+    var modelos = FG.all('models');
+    var f = filtros.chassis;
+    var vehs = todos.filter(function (v) {
+      if (f.status && v.status !== f.status) return false;
+      if (f.modelo && String(v.modeloId) !== f.modelo) return false;
+      if (f.atrib === 'sim' && !v.empresa) return false;
+      if (f.atrib === 'nao' && v.empresa) return false;
+      var m = FG.model(v.modeloId);
+      return casaBusca('chassis', [v.niv, v.cor, v.numeroMotor, v.empresa, m ? m.label : v.modeloId]);
+    });
+
+    view.innerHTML =
+      /* ---- cadastro de chassi novo ---- */
+      '<div class="adm-card"><div class="c-head">Cadastrar novo chassi</div><div class="c-body">' +
+      '<div class="ch-form">' +
+      '<div class="field"><label for="ch-niv">NIV (chassi) *</label>' +
+      '<input id="ch-niv" type="text" maxlength="17" placeholder="Ex.: VBFGA125XSM160872" style="text-transform:uppercase;"></div>' +
+      '<div class="field"><label for="ch-modelo">Modelo *</label><select id="ch-modelo">' +
+      '<option value="">— escolha o modelo —</option>' +
+      modelos.map(function (m) { return '<option value="' + esc(m.id) + '">' + esc(m.label) + '</option>'; }).join('') +
+      '</select></div>' +
+      '<div class="field"><label for="ch-cor">Cor</label><input id="ch-cor" type="text" maxlength="40" placeholder="Ex.: Vermelho"></div>' +
+      '<div class="field"><label for="ch-motor">Nº do motor</label><input id="ch-motor" type="text" maxlength="40" placeholder="opcional"></div>' +
+      '<div class="field"><label for="ch-nova-emp">Concessionária (opcional)</label>' +
+      '<div class="ac-wrap"><input id="ch-nova-emp" type="text" placeholder="Deixe vazio p/ cadastrar sem atribuir" autocomplete="off">' +
+      '<div class="ac-list hidden" id="ch-nova-emp-ac"></div></div></div>' +
+      '<div class="field" style="align-self:end;"><button class="btn-orange" id="ch-criar">Cadastrar chassi</button></div>' +
+      '</div>' +
+      '<p class="muted" style="font-size:12px;margin:8px 0 0;">Sem concessionária, o chassi fica <b>não atribuído</b> ' +
+      '— nenhum cliente o vê até você atribuir. A atribuição pode ser feita (ou trocada) a qualquer momento na tabela abaixo.</p>' +
+      '</div></div>' +
+
+      /* ---- lista ---- */
+      '<div class="adm-card"><div class="c-head">Chassis cadastrados (' + contagem('chassis', vehs.length, todos.length) + ')</div><div class="c-body">' +
+      barraFiltro('chassis', [
+        { k: 'status', rotulo: 'Status', opcoes: [['Disponível', 'Disponível'], ['Vendido', 'Vendido']] },
+        { k: 'modelo', rotulo: 'Modelo', opcoes: modelos.map(function (m) { return [m.id, m.label]; }) },
+        { k: 'atrib', rotulo: 'Atribuição', opcoes: [['sim', 'Atribuído'], ['nao', 'Não atribuído']] }
+      ], 'Buscar por NIV, cor, nº do motor ou concessionária') +
+      '<table class="tbl"><thead><tr><th>NIV</th><th>Modelo</th><th>Cor</th><th>Nº motor</th>' +
+      '<th>Status</th><th>Concessionária</th><th>Entrada</th><th>Ações</th></tr></thead><tbody>' +
+      (vehs.length ? vehs.map(function (v) {
+        var m = FG.model(v.modeloId);
+        return '<tr><td>' + esc(v.niv) + '</td><td>' + esc(m ? m.label : v.modeloId) + '</td>' +
+          '<td>' + (v.cor ? esc(v.cor) : '<span class="muted">—</span>') + '</td>' +
+          '<td>' + (v.numeroMotor ? esc(v.numeroMotor) : '<span class="muted">—</span>') + '</td>' +
+          '<td>' + pill(v.status) + '</td>' +
+          '<td>' + (v.empresa ? esc(v.empresa) : '<span class="ch-livre">não atribuído</span>') + '</td>' +
+          '<td>' + FG.fmtDate(v.entrada) + '</td>' +
+          '<td><button class="btn-line btn-mini" data-atr="' + esc(v.niv) + '">' +
+          (v.empresa ? 'Transferir' : 'Atribuir') + '</button></td></tr>';
+      }).join('') : vazioFiltro(8, todos.length
+        ? 'Nenhum chassi com esse filtro.'
+        : 'Nenhum chassi cadastrado ainda.')) +
+      '</tbody></table></div></div>';
+
+    bindFiltro(renderChassis);
+    bindAcEmpresas('ch-nova-emp');
+
+    /* cadastrar */
+    document.getElementById('ch-criar').addEventListener('click', function () {
+      var empEl = document.getElementById('ch-nova-emp');
+      var idSel = empEl.getAttribute('data-ac-id');
+      var dados = {
+        niv: document.getElementById('ch-niv').value.trim().toUpperCase(),
+        modeloId: document.getElementById('ch-modelo').value,
+        cor: document.getElementById('ch-cor').value.trim(),
+        numeroMotor: document.getElementById('ch-motor').value.trim(),
+        empresaId: idSel ? Number(idSel) : null
+      };
+      if (!/^[A-Z0-9]{11,17}$/.test(dados.niv)) { FG.toast('NIV inválido — use 11 a 17 letras/números.', 'erro'); return; }
+      if (!dados.modeloId) { FG.toast('Escolha o modelo da moto.', 'erro'); return; }
+      if (empEl.value.trim() && !idSel) { FG.toast('Escolha a concessionária na lista de sugestões (ou deixe vazio).', 'erro'); return; }
+      var b = document.getElementById('ch-criar');
+      b.disabled = true;
+      FG.criarVeiculo(dados).then(function (r) {
+        b.disabled = false;
+        if (r && r.ok === false) { FG.toast(r.msg || 'Não foi possível cadastrar o chassi.', 'erro'); return; }
+        FG.toast('Chassi ' + dados.niv + ' cadastrado.');
+        renderChassis();
+      });
+    });
+
+    /* atribuir / transferir */
+    Array.prototype.forEach.call(view.querySelectorAll('[data-atr]'), function (b) {
+      b.addEventListener('click', function () {
+        var v = FG.all('vehicles').find(function (x) { return x.niv === b.getAttribute('data-atr'); });
+        if (v) modalAtribuir(v);
       });
     });
   }
@@ -170,18 +642,70 @@
   function renderProdutos() {
     h1.textContent = 'Catálogo de produtos'; setOn('produtos');
     var prods = FG.all('products');
+    var f = filtros.produtos;
+    // A gestão de categorias abaixo continua vendo o catálogo INTEIRO (`prods`);
+    // o filtro vale só para a tabela de produtos (`prodsF`).
+    var prodsF = prods.filter(function (p) {
+      // Categoria de topo casa também com os produtos das subcategorias.
+      if (f.cat && FG.categoriaEDescendentes(f.cat).indexOf(p.cat) < 0) return false;
+      if (f.estoque === 'com' && !(p.estoque > 0)) return false;
+      if (f.estoque === 'sem' && p.estoque > 0) return false;
+      var c = FG.category(p.cat);
+      return casaBusca('produtos', [p.artigo, p.nome, c ? c.nome : p.cat]);
+    });
+    // Opções do filtro de categoria: topo e, indentadas, as subcategorias.
+    var catOpcoes = [];
+    FG.categoriasTopo().forEach(function (c) {
+      catOpcoes.push([c.id, c.nome]);
+      FG.subcategorias(c.id).forEach(function (s) { catOpcoes.push([s.id, '   ↳ ' + s.nome]); });
+    });
+
+    // --- Gestão de categorias (árvore de 2 níveis) ---
+    function catRow(c, sub) {
+      var n = prods.filter(function (p) { return p.cat === c.id; }).length;
+      return '<tr>' +
+        '<td>' + (sub ? '<span class="muted">↳&nbsp;</span>' : '') + esc(c.nome) +
+          ' <span class="muted" style="font-size:11px;">(' + esc(c.id) + ')</span></td>' +
+        '<td class="r">' + n + '</td>' +
+        '<td class="nowrap">' +
+          (sub ? '' : '<button class="btn-line btn-mini" data-cat-sub="' + esc(c.id) + '">＋ Sub</button> ') +
+          '<button class="btn-line btn-mini" data-cat-edit="' + esc(c.id) + '">Editar</button> ' +
+          '<button class="btn-line btn-mini" data-cat-del="' + esc(c.id) + '">Excluir</button>' +
+        '</td></tr>';
+    }
+    var catRows = FG.categoriasTopo().map(function (c) {
+      return catRow(c, false) +
+        FG.subcategorias(c.id).map(function (s) { return catRow(s, true); }).join('');
+    }).join('');
+
     view.innerHTML =
+      '<div class="adm-card"><div class="c-head">Categorias e subcategorias</div><div class="c-body">' +
+      '<div class="adm-bar"><span class="grow"></span>' +
+      '<button class="btn-orange" id="ct-novo">Adicionar categoria</button></div>' +
+      '<table class="tbl"><thead><tr><th>Categoria</th><th class="r">Produtos</th><th>Ações</th></tr></thead><tbody>' +
+      (catRows || '<tr><td colspan="3" class="muted">Nenhuma categoria cadastrada.</td></tr>') +
+      '</tbody></table>' +
+      '<p class="muted" style="font-size:12px;margin:8px 0 0;">As subcategorias (↳) aparecem dentro da categoria pai na loja. ' +
+      'Só é possível excluir categorias vazias (sem produtos e sem subcategorias).</p>' +
+      '</div></div>' +
+
       '<div class="adm-bar"><span class="grow"></span>' +
       '<button class="btn-orange" id="pr-novo">Adicionar produto</button></div>' +
-      '<div class="adm-card"><div class="c-head">Produtos (' + prods.length + ')</div><div class="c-body">' +
+      '<div class="adm-card"><div class="c-head">Produtos (' + contagem('produtos', prodsF.length, prods.length) + ')</div><div class="c-body">' +
+      barraFiltro('produtos', [
+        { k: 'cat', rotulo: 'Categoria', todos: 'Todas', opcoes: catOpcoes },
+        { k: 'estoque', rotulo: 'Estoque', opcoes: [['com', 'Com estoque'], ['sem', 'Fora de estoque']] }
+      ], 'Buscar por artigo ou nome') +
       '<table class="tbl"><thead><tr><th>Foto</th><th>Artigo</th><th>Nome</th><th>Categoria</th>' +
       '<th class="r">Preço</th><th class="r">Estoque</th><th>Ações</th></tr></thead><tbody>' +
-      prods.map(function (p) {
+      (prodsF.length ? prodsF.map(function (p) {
         var c = FG.category(p.cat);
         return '<tr><td>' + (p.imagem
             ? '<img class="fnd-thumb" src="' + esc(p.imagem) + '" alt="">'
             : '<span class="fnd-thumb vazio">sem foto</span>') + '</td>' +
-          '<td>' + p.artigo + '</td><td>' + esc(p.nome) + '</td><td>' + esc(c ? c.nome : p.cat) + '</td>' +
+          '<td>' + p.artigo + '</td><td>' + esc(p.nome) +
+          (p.tinyAtivo ? ' <span class="pill-status Tiny" title="Gerenciado pelo Tiny ERP">Tiny</span>' : '') +
+          '</td><td>' + esc(c ? c.nome : p.cat) + '</td>' +
           '<td class="r">' + FG.fmtMoney(p.preco) + '</td>' +
           '<td class="r">' + (p.estoque > 0
             ? p.estoque
@@ -191,8 +715,9 @@
                 : '<div style="color:#92600a;font-size:12px;margin-top:2px;">sem previsão</div>')) + '</td>' +
           '<td><button class="btn-line btn-mini" data-ac="edit" data-art="' + p.artigo + '">Editar</button> ' +
           '<button class="btn-line btn-mini" data-ac="del" data-art="' + p.artigo + '">Excluir</button></td></tr>';
-      }).join('') + '</tbody></table></div></div>';
+      }).join('') : vazioFiltro(7, 'Nenhum produto com esse filtro.')) + '</tbody></table></div></div>';
 
+    bindFiltro(renderProdutos);
     document.getElementById('pr-novo').addEventListener('click', function () { modalProduto(null); });
     Array.prototype.forEach.call(view.querySelectorAll('[data-ac]'), function (b) {
       b.addEventListener('click', function () {
@@ -204,40 +729,143 @@
           .catch(function (e) { FG.toast((e && e.message) || 'Falha ao excluir.', 'erro'); });
       });
     });
+
+    // --- categorias: criar / subcategoria / editar / excluir ---
+    document.getElementById('ct-novo').addEventListener('click', function () { modalCategoria(null, ''); });
+    Array.prototype.forEach.call(view.querySelectorAll('[data-cat-sub]'), function (b) {
+      b.addEventListener('click', function () { modalCategoria(null, b.getAttribute('data-cat-sub')); });
+    });
+    Array.prototype.forEach.call(view.querySelectorAll('[data-cat-edit]'), function (b) {
+      b.addEventListener('click', function () { modalCategoria(FG.category(b.getAttribute('data-cat-edit')), ''); });
+    });
+    Array.prototype.forEach.call(view.querySelectorAll('[data-cat-del]'), function (b) {
+      b.addEventListener('click', function () {
+        var id = b.getAttribute('data-cat-del');
+        var c = FG.category(id);
+        if (!confirm('Excluir a categoria "' + (c ? c.nome : id) + '"? Só funciona se estiver vazia.')) return;
+        b.disabled = true;
+        FG.apiExcluirCategoria(id).then(function (r) {
+          if (r && r.ok === false) { FG.toast(r.msg || 'Não foi possível excluir.', 'erro'); b.disabled = false; return; }
+          FG.toast('Categoria excluída.'); renderProdutos();
+        });
+      });
+    });
+  }
+
+  // Modal de criação/edição de categoria (ou subcategoria, quando `paiPre` traz
+  // o código da categoria pai). Na edição, o pai não muda (mover = excluir/recriar).
+  function modalCategoria(cat, paiPre) {
+    var novo = !cat;
+    var topo = FG.categoriasTopo();
+    var back = document.createElement('div');
+    back.className = 'modal-back';
+    back.innerHTML =
+      '<div class="modal"><header><h3>' + (novo ? 'Nova categoria' : 'Editar ' + esc(cat.nome)) + '</h3>' +
+      '<button class="x">×</button></header>' +
+      '<div class="modal-body">' +
+      '<div class="field"><label>Nome *</label>' +
+      '<input id="ct-nome" type="text" maxlength="120" value="' + (cat ? esc(cat.nome) : '') + '"></div>' +
+      (novo
+        ? '<div class="field"><label>Categoria pai (opcional)</label>' +
+          '<select id="ct-pai"><option value="">— Nenhuma (categoria de topo) —</option>' +
+          topo.map(function (c) {
+            return '<option value="' + esc(c.id) + '"' + (paiPre === c.id ? ' selected' : '') + '>' + esc(c.nome) + '</option>';
+          }).join('') + '</select>' +
+          '<p class="muted" style="font-size:12px;margin:4px 0 0;">Escolha uma categoria pai para criar uma <b>subcategoria</b> dentro dela.</p></div>'
+        : '<p class="muted" style="font-size:12px;">Para mover a categoria de lugar, exclua e recrie.</p>') +
+      '</div>' +
+      '<div class="modal-foot"><button class="btn-line" id="ct-canc">Cancelar</button>' +
+      '<button class="btn-orange" id="ct-ok">' + (novo ? 'Criar' : 'Salvar') + '</button></div></div>';
+    document.body.appendChild(back);
+
+    function fechar() { back.remove(); }
+    back.querySelector('.x').addEventListener('click', fechar);
+    back.querySelector('#ct-canc').addEventListener('click', fechar);
+    back.querySelector('#ct-ok').addEventListener('click', function () {
+      var nome = document.getElementById('ct-nome').value.trim();
+      if (!nome) { FG.toast('Informe o nome da categoria.', 'erro'); return; }
+      var btn = document.getElementById('ct-ok'); btn.disabled = true;
+      var prom = novo
+        ? FG.apiCriarCategoria({ nome: nome, pai: document.getElementById('ct-pai').value })
+        : FG.apiEditarCategoria(cat.id, { nome: nome });
+      prom.then(function (r) {
+        btn.disabled = false;
+        if (r && r.ok === false) { FG.toast(r.msg || 'Não foi possível salvar.', 'erro'); return; }
+        FG.toast(novo ? 'Categoria criada.' : 'Categoria atualizada.');
+        fechar(); renderProdutos();
+      });
+    });
   }
 
   function modalProduto(p) {
     var novo = !p;
+    // Produto do Tiny: nome, preço, estoque, descrição e foto são espelho do
+    // ERP — ficam travados aqui. Só categoria e previsão continuam editáveis.
+    var tiny = !!(p && p.tinyAtivo);
+    var trava = tiny ? ' disabled' : '';
     var back = document.createElement('div');
     back.className = 'modal-back';
     back.innerHTML =
       '<div class="modal"><header><h3>' + (novo ? 'Novo produto' : 'Editar ' + p.artigo) + '</h3><button class="x">×</button></header>' +
       '<div class="modal-body">' +
+      (tiny
+        ? '<div class="adm-banner">🔒 Este produto é gerenciado pelo <b>Tiny ERP</b>: nome, preço, estoque, descrição e foto ' +
+          'são atualizados automaticamente. Para alterar, edite no Tiny. Aqui só categoria e previsão de chegada.' +
+          (p.tinySincronizadoEm ? '<br><span class="muted">Última sincronização: ' + FG.fmtDateTime(p.tinySincronizadoEm) + '</span>' : '') +
+          '</div>'
+        : '') +
       '<div class="field"><label>Número do artigo</label><input id="mp-art" type="text"' + (novo ? '' : ' disabled') + ' value="' + (p ? p.artigo : '') + '"></div>' +
-      '<div class="field"><label>Nome</label><input id="mp-nome" type="text" value="' + (p ? esc(p.nome) : '') + '"></div>' +
+      '<div class="field"><label>Nome</label><input id="mp-nome" type="text"' + trava + ' value="' + (p ? esc(p.nome) : '') + '"></div>' +
       '<div class="field"><label>Categoria</label><select id="mp-cat">' +
-      FG.all('categories').map(function (c) {
-        return '<option value="' + c.id + '"' + (p && p.cat === c.id ? ' selected' : '') + '>' + esc(c.nome) + '</option>';
+      FG.categoriasTopo().map(function (c) {
+        var opt = '<option value="' + c.id + '"' + (p && p.cat === c.id ? ' selected' : '') + '>' + esc(c.nome) + '</option>';
+        FG.subcategorias(c.id).forEach(function (s) {
+          opt += '<option value="' + s.id + '"' + (p && p.cat === s.id ? ' selected' : '') + '>&nbsp;&nbsp;↳ ' + esc(s.nome) + '</option>';
+        });
+        return opt;
       }).join('') + '</select></div>' +
-      '<div class="field"><label>Preço (R$)</label><input id="mp-preco" type="number" step="0.01" min="0" value="' + (p ? p.preco : '') + '"></div>' +
-      '<div class="field"><label>Estoque</label><input id="mp-est" type="number" min="0" value="' + (p ? p.estoque : 0) + '"></div>' +
+      '<div class="field"><label>Preço (R$)</label><input id="mp-preco" type="number" step="0.01" min="0"' + trava + ' value="' + (p ? p.preco : '') + '"></div>' +
+      '<div class="field"><label>Estoque</label><input id="mp-est" type="number" min="0"' + trava + ' value="' + (p ? p.estoque : 0) + '"></div>' +
       '<div class="field"><label>Previsão de chegada (se sem estoque)</label><input id="mp-prev" type="text" placeholder="dd/mm/aa" value="' + (p && p.previsao ? p.previsao : '') + '"></div>' +
-      '<div class="field"><label>Descrição</label><textarea id="mp-desc" rows="3">' + (p ? esc(p.descricao) : '') + '</textarea></div>' +
+      '<div class="field"><label>Descrição</label><textarea id="mp-desc" rows="3"' + trava + '>' + (p ? esc(p.descricao) : '') + '</textarea></div>' +
       '<div class="field"><label>Foto da peça (miniatura no Parts Finder)</label>' +
       '<div class="fnd-foto-row">' +
       (p && p.imagem ? '<img class="fnd-thumb" src="' + esc(p.imagem) + '" alt="">' : '<span class="fnd-thumb vazio">sem foto</span>') +
-      '<input id="mp-foto" type="file" accept="image/*">' +
-      (p && p.imagem ? '<button class="btn-line btn-mini" id="mp-foto-del" type="button">Remover foto</button>' : '') +
+      '<input id="mp-foto" type="file" accept="image/*"' + trava + '>' +
+      (p && p.imagem && !tiny ? '<button class="btn-line btn-mini" id="mp-foto-del" type="button">Remover foto</button>' : '') +
       '</div></div>' +
+      // Log de sincronização DESTE produto (saiu da tela Tiny ERP para cá,
+      // junto do cadastro — só aparece em produtos gerenciados pelo Tiny).
+      (tiny ? '<div class="field"><label>Sincronizações com o Tiny (últimas)</label>' +
+        '<div id="mp-tiny-log" class="muted" style="font-size:12px;">Carregando…</div></div>' : '') +
       '</div>' +
       '<div class="modal-foot"><button class="btn-line" id="mp-canc">Cancelar</button>' +
       '<button class="btn-orange" id="mp-ok">Salvar</button></div></div>';
     document.body.appendChild(back);
 
+    if (tiny) {
+      FG.tinyLog(p.artigo, 15).then(function (rows) {
+        var el = document.getElementById('mp-tiny-log');
+        if (!el) return;
+        el.innerHTML = rows.length
+          ? '<table class="tbl"><thead><tr><th>Data</th><th>Evento</th><th>Status</th><th>Mensagem</th></tr></thead><tbody>' +
+            rows.map(function (l) {
+              var cls = l.status === 'ok' ? 'aprovado' : l.status === 'erro' ? 'bloqueado' : 'Aguardando';
+              return '<tr><td>' + FG.fmtDateTime(l.data) + '</td><td>' + esc(l.evento) + '</td>' +
+                '<td><span class="pill-status ' + cls + '">' + esc(l.status) + '</span></td>' +
+                '<td>' + esc(l.mensagem || '') + '</td></tr>';
+            }).join('') + '</tbody></table>'
+          : 'Nenhuma sincronização registrada ainda.';
+      }, function () {
+        var el = document.getElementById('mp-tiny-log');
+        if (el) el.textContent = 'Não foi possível carregar o log.';
+      });
+    }
+
     function fechar() { back.remove(); }
     back.querySelector('.x').addEventListener('click', fechar);
     document.getElementById('mp-canc').addEventListener('click', fechar);
-    back.addEventListener('click', function (e) { if (e.target === back) fechar(); });
+    // Clicar fora NÃO fecha — pop-ups só fecham no X (pedido do dono).
 
     var mpFotoDel = document.getElementById('mp-foto-del');
     if (mpFotoDel) mpFotoDel.addEventListener('click', function () {
@@ -279,7 +907,7 @@
   /* =========================================================
      PEDIDOS
      ========================================================= */
-  var STATUS = ['Pendente', 'Processando', 'Enviado', 'Entregue', 'Cancelado'];
+  var STATUS = ['Pendente', 'Em separação', 'Enviado', 'Entregue', 'Cancelado'];
   // Status terminais: uma vez aqui, o pedido não pode mais mudar de status.
   var STATUS_TERMINAIS = ['Entregue', 'Cancelado'];
 
@@ -293,21 +921,92 @@
     return { cls: 'Pendente', txt: 'Pendente' };
   }
 
-  // Linha de uma peça no detalhe da venda.
-  function linhaItemVenda(it) {
+  // Bolinha de status da peça — as MESMAS cores do portal do cliente:
+  // verde=enviado, amarelo=parcial, cinza=não enviado, vermelho=cancelado.
+  function dotItem(it, cancelado) {
+    if (cancelado) return '<span class="item-dot dot-cancelado" title="Cancelado"></span>';
+    var cls = it.qtdEnviada >= it.qtd ? 'dot-ok' : (it.qtdEnviada > 0 ? 'dot-parcial' : 'dot-pendente');
+    return '<span class="item-dot ' + cls + '" title="' + itemStatus(it).txt + '"></span>';
+  }
+
+  var LEGENDA_DOTS =
+    '<div class="dot-legenda"><strong>Legenda do status:</strong>' +
+    '<span><span class="item-dot dot-ok"></span>Enviado — quantidade completa despachada</span>' +
+    '<span><span class="item-dot dot-parcial"></span>Parcial — parte da quantidade já saiu</span>' +
+    '<span><span class="item-dot dot-pendente"></span>Não enviado — aguardando separação/estoque</span>' +
+    '<span><span class="item-dot dot-cancelado"></span>Cancelado — o pedido foi cancelado</span>' +
+    '</div>';
+
+  // Linha de uma peça no detalhe da venda. `ped` é o pedido dono da linha;
+  // `editavel` libera o controle de quantidade enviada (pedido não terminal).
+  function linhaItemVenda(it, ped, editavel) {
     var st = itemStatus(it);
-    return '<tr><td>' + esc(it.artigo) + '</td><td>' + esc(it.nome) + '</td>' +
+    var cancelado = ped.status === 'Cancelado';
+    // O controle por peça grava direto em PedidoItem.QuantidadeEnviada. Em
+    // peça de pré-venda, aumentar consome estoque de verdade (a API recusa se
+    // não houver) — por isso o campo é numérico e não um "Enviar" cego.
+    var ctrl = editavel
+      ? '<input type="number" class="it-qtd" data-item="' + it.itemId + '" min="0" max="' + it.qtd +
+          '" value="' + it.qtdEnviada + '" style="width:62px;">' +
+        '<button class="btn-line btn-mini it-save" data-ped="' + esc(ped.id) + '" data-item="' + it.itemId +
+          '" data-qtd="' + it.qtd + '">Salvar</button>' +
+        (it.qtdEnviada < it.qtd
+          ? '<button class="btn-line btn-mini it-tudo" data-ped="' + esc(ped.id) + '" data-item="' + it.itemId +
+            '" data-qtd="' + it.qtd + '">Tudo</button>' : '')
+      : '<span class="muted">—</span>';
+    return '<tr><td>' + dotItem(it, cancelado) + '</td>' +
+      '<td>' + esc(it.artigo) + '</td><td>' + esc(it.nome) + '</td>' +
       '<td class="r">' + it.qtd + '</td><td class="r">' + it.qtdEnviada + '</td>' +
       '<td class="r">' + FG.fmtMoney(it.preco) + '</td>' +
-      '<td><span class="pill-status ' + st.cls + '">' + esc(st.txt) + '</span></td></tr>';
+      '<td><span class="pill-status ' + st.cls + '">' + esc(st.txt) + '</span></td>' +
+      '<td class="it-ctrl">' + ctrl + '</td></tr>';
   }
 
   // Grupo de peças (cabeçalho + linhas) dentro do detalhe — separa "Em estoque"
   // das peças em "Pré-venda". Retorna '' quando o grupo está vazio.
-  function grupoItens(titulo, itens) {
+  function grupoItens(titulo, itens, ped, editavel) {
     if (!itens.length) return '';
-    return '<tr class="venda-grp"><td colspan="6">' + esc(titulo) + ' (' + itens.length + ')</td></tr>' +
-      itens.map(linhaItemVenda).join('');
+    return '<tr class="venda-grp"><td colspan="8">' + esc(titulo) + ' (' + itens.length + ')</td></tr>' +
+      itens.map(function (it) { return linhaItemVenda(it, ped, editavel); }).join('');
+  }
+
+  // Pill do status de UMA exportação de pedido ao Tiny.
+  function tinyPillExport(st) {
+    var cls = st === 'enviado' ? 'aprovado' : st === 'erro' ? 'bloqueado' : 'Aguardando';
+    var rot = st === 'enviado' ? 'Exportado' : st === 'erro' ? 'Erro' : st === 'cancelado' ? 'Cancelado' : 'Pendente';
+    return '<span class="pill-status ' + cls + '">' + rot + '</span>';
+  }
+
+  // Bloco "Tiny ERP" dentro do detalhe da venda: exportações DESTE pedido
+  // (saiu da tela Tiny ERP para cá). Carregado ao expandir o detalhe.
+  function carregarTinyVenda(box, numeroPedido) {
+    FG.tinyPedidos(numeroPedido).then(function (rows) {
+      if (!rows.length) { box.innerHTML = ''; return; }
+      box.innerHTML =
+        '<div style="font-weight:600;margin:10px 0 4px;">Exportação ao Tiny ERP</div>' +
+        '<table class="tbl"><thead><tr><th>Data</th><th>Escopo</th><th>Nº no Tiny</th>' +
+        '<th>Status</th><th>Detalhe</th><th></th></tr></thead><tbody>' +
+        rows.map(function (x) {
+          return '<tr><td>' + FG.fmtDateTime(x.criadoEm) + '</td>' +
+            '<td>' + (x.escopo === 'backorder' ? 'Pré-venda' : 'Normal') + '</td>' +
+            '<td class="muted">' + esc(x.tinyNumero || '—') + '</td>' +
+            '<td>' + tinyPillExport(x.status) + '</td>' +
+            '<td class="muted" style="max-width:260px;">' + esc(x.erro || '') + '</td>' +
+            '<td>' + (x.status === 'erro'
+              ? '<button class="btn-line btn-mini ty-ped-re" data-id="' + x.id + '">Reexportar</button>' : '') + '</td></tr>';
+        }).join('') + '</tbody></table>';
+      Array.prototype.forEach.call(box.querySelectorAll('.ty-ped-re'), function (b) {
+        b.addEventListener('click', function () {
+          b.disabled = true; b.textContent = 'Reexportando…';
+          FG.tinyReexportar(b.getAttribute('data-id')).then(function (r) {
+            FG.toast(r.ok !== false && r.status === 'enviado'
+              ? 'Pedido exportado ao Tiny.' : (r.msg || 'Ainda com erro — veja o detalhe.'),
+              r.status === 'enviado' ? undefined : 'erro');
+            carregarTinyVenda(box, numeroPedido);
+          });
+        });
+      });
+    }, function () { box.innerHTML = ''; });
   }
 
   // Bloco de detalhe (cliente + data + peças com status, separadas entre
@@ -316,29 +1015,54 @@
     var pg = o.progresso || { enviada: 0, qtd: 0, pct: 0 };
     var emEstoque = o.itens.filter(function (it) { return !it.backorder; });
     var preVenda = o.itens.filter(function (it) { return it.backorder; });
+    // Pedido entregue ou cancelado está fechado: as peças não mudam mais.
+    var editavel = STATUS_TERMINAIS.indexOf(o.status) < 0;
     return '<div class="venda-det">' +
       '<div class="venda-meta">' +
       '<div><span class="muted">Cliente</span><br><b>' + esc(o.empresa) + '</b><br><span class="muted">' + esc(o.usuario) + '</span></div>' +
       '<div><span class="muted">Data da compra</span><br><b>' + FG.fmtDateTime(o.data) + '</b></div>' +
-      '<div><span class="muted">Pedido</span><br><b>' + esc(o.cx) + '</b><br><span class="muted">' + esc(o.id) + '</span></div>' +
+      '<div><span class="muted">Pedido</span><br><b>' + esc(o.id) + '</b></div>' +
       '<div><span class="muted">Envio</span><br><b>' + pg.enviada + '/' + pg.qtd + '</b> peças (' + pg.pct + '%)</div>' +
       '</div>' +
-      '<table class="tbl"><thead><tr><th>Artigo</th><th>Peça</th><th class="r">Qtd.</th>' +
-      '<th class="r">Enviada</th><th class="r">Preço un.</th><th>Status da peça</th></tr></thead><tbody>' +
-      grupoItens('Em estoque', emEstoque) +
-      grupoItens('Pré-venda', preVenda) +
-      '</tbody></table></div>';
+      '<table class="tbl"><thead><tr><th title="Status de envio da peça">Status</th>' +
+      '<th>Artigo</th><th>Peça</th><th class="r">Qtd.</th>' +
+      '<th class="r">Enviada</th><th class="r">Preço un.</th><th>Status da peça</th>' +
+      '<th>Controle de envio</th></tr></thead><tbody>' +
+      grupoItens('Em estoque', emEstoque, o, editavel) +
+      grupoItens('Pré-venda', preVenda, o, editavel) +
+      '</tbody></table>' + LEGENDA_DOTS +
+      (editavel
+        ? '<p class="muted" style="font-size:12px;margin:4px 0 0;">Ajuste a quantidade já despachada de cada peça e clique em <b>Salvar</b>. ' +
+          'Em peça de pré-venda, aumentar dá baixa no estoque de verdade.</p>'
+        : '<p class="muted" style="font-size:12px;margin:4px 0 0;">Pedido ' + esc(o.status.toLowerCase()) +
+          ' — as peças não podem mais ser alteradas.</p>') +
+      '<div class="tiny-venda" data-ped="' + esc(o.id) + '"></div></div>';
   }
+
+  // Quais detalhes estão abertos (por número de pedido). Salvar uma peça
+  // re-renderiza a tela inteira — sem isto, o detalhe fecharia a cada clique.
+  var pedAbertos = {};
 
   function renderPedidos() {
     h1.textContent = 'Gestão de pedidos'; setOn('pedidos');
-    var orders = FG.all('orders');
+    var todos = FG.all('orders');
+    var f = filtros.pedidos;
+    var orders = todos.filter(function (o) {
+      if (f.status === 'garantia' ? !o.garantia : (f.status && o.status !== f.status)) return false;
+      // A busca alcança também os artigos/peças do pedido, não só o cabeçalho.
+      var pecas = o.itens.map(function (it) { return it.artigo + ' ' + it.nome; }).join(' ');
+      return casaBusca('pedidos', [o.id, o.empresa, o.usuario, pecas]);
+    });
     view.innerHTML =
-      '<div class="adm-card"><div class="c-head">Pedidos (' + orders.length + ')</div><div class="c-body">' +
+      '<div class="adm-card"><div class="c-head">Pedidos (' + contagem('pedidos', orders.length, todos.length) + ')</div><div class="c-body">' +
+      barraFiltro('pedidos', [
+        { k: 'status', rotulo: 'Status', opcoes: STATUS.map(function (s) { return [s, s]; }).concat([['garantia', 'Só garantias']]) }
+      ], 'Buscar por nº do pedido, empresa, e-mail ou peça') +
       '<table class="tbl"><thead><tr><th>Pedido</th><th>Empresa</th><th>Data</th>' +
       '<th class="r">Total</th><th>Status</th><th></th></tr></thead><tbody>' +
-      orders.map(function (o, i) {
-        return '<tr><td><b>' + o.cx + '</b><br><span class="muted">' + o.id + '</span></td>' +
+      (orders.length ? orders.map(function (o, i) {
+        return '<tr><td><b>' + esc(o.id) + '</b>' +
+          (o.garantia ? '<br><span class="pill-status Garantia">Garantia</span>' : '') + '</td>' +
           '<td>' + esc(o.empresa) + '<br><span class="muted">' + esc(o.usuario) + '</span></td>' +
           '<td>' + FG.fmtDateTime(o.data) + '</td>' +
           '<td class="r">' + FG.fmtMoney(o.total) + '</td>' +
@@ -349,16 +1073,60 @@
               STATUS.map(function (s) { return '<option' + (s === o.status ? ' selected' : '') + '>' + s + '</option>'; }).join('') +
               '</select>') +
           '</td>' +
-          '<td><button class="btn-line btn-mini od-open" data-i="' + i + '">Detalhes ▾</button></td></tr>' +
-          '<tr class="venda-row hidden" data-i="' + i + '"><td colspan="6">' + detalheVenda(o) + '</td></tr>';
-      }).join('') + '</tbody></table></div></div>';
+          '<td><button class="btn-line btn-mini od-open" data-i="' + i + '" data-ped="' + esc(o.id) + '">' +
+          (pedAbertos[o.id] ? 'Detalhes ▴' : 'Detalhes ▾') + '</button></td></tr>' +
+          '<tr class="venda-row' + (pedAbertos[o.id] ? '' : ' hidden') + '" data-i="' + i + '">' +
+          '<td colspan="6">' + detalheVenda(o) + '</td></tr>';
+      }).join('') : vazioFiltro(6, 'Nenhum pedido com esse filtro.')) + '</tbody></table></div></div>';
+
+    bindFiltro(renderPedidos);
+
+    // Exportações ao Tiny: carrega ao expandir (e já nos detalhes reabertos).
+    function carregarTinySeAberto(row) {
+      var tv = row.querySelector('.tiny-venda');
+      if (tv && !tv.getAttribute('data-ok')) {
+        tv.setAttribute('data-ok', '1');
+        carregarTinyVenda(tv, tv.getAttribute('data-ped'));
+      }
+    }
 
     Array.prototype.forEach.call(view.querySelectorAll('.od-open'), function (b) {
+      var row = view.querySelector('.venda-row[data-i="' + b.getAttribute('data-i') + '"]');
+      if (pedAbertos[b.getAttribute('data-ped')]) carregarTinySeAberto(row);
       b.addEventListener('click', function () {
-        var row = view.querySelector('.venda-row[data-i="' + b.getAttribute('data-i') + '"]');
         var aberto = row.classList.toggle('hidden') === false;
+        pedAbertos[b.getAttribute('data-ped')] = aberto;
         b.textContent = aberto ? 'Detalhes ▴' : 'Detalhes ▾';
+        if (aberto) carregarTinySeAberto(row);
       });
+    });
+
+    /* ---- controle por peça: grava QuantidadeEnviada de um item ---- */
+    async function salvarItem(b, forcado) {
+      var max = Number(b.getAttribute('data-qtd'));
+      var item = b.getAttribute('data-item');
+      var inp = view.querySelector('.it-qtd[data-item="' + item + '"]');
+      var qtd = forcado != null ? forcado : Number(inp.value);
+      if (!isFinite(qtd) || qtd % 1 !== 0 || qtd < 0 || qtd > max) {
+        FG.toast('Quantidade inválida — informe um número inteiro de 0 a ' + max + '.', 'erro');
+        inp.value = inp.defaultValue; return;
+      }
+      b.disabled = true;
+      var r = await FG.setItemEnviado(b.getAttribute('data-ped'), item, qtd);
+      b.disabled = false;
+      if (r && r.ok === false) {
+        // Motivo mais comum: estoque insuficiente p/ liberar peça de pré-venda.
+        FG.toast(r.msg || 'Não foi possível gravar o envio dessa peça.', 'erro');
+        inp.value = inp.defaultValue; return;
+      }
+      FG.toast('Envio da peça atualizado.');
+      renderPedidos();   // pedAbertos mantém o detalhe aberto
+    }
+    Array.prototype.forEach.call(view.querySelectorAll('.it-save'), function (b) {
+      b.addEventListener('click', function () { salvarItem(b, null); });
+    });
+    Array.prototype.forEach.call(view.querySelectorAll('.it-tudo'), function (b) {
+      b.addEventListener('click', function () { salvarItem(b, Number(b.getAttribute('data-qtd'))); });
     });
     Array.prototype.forEach.call(view.querySelectorAll('select.inline-status'), function (sel) {
       sel.addEventListener('change', async function () {
@@ -366,7 +1134,7 @@
         if (res && res.ok === false) {
           FG.toast(res.msg || 'Não foi possível mudar o status.', 'erro');
         } else {
-          FG.toast('Status atualizado' + (sel.value === 'Enviado' ? ' — entrega e fatura geradas.' : '.'));
+          FG.toast('Status atualizado.');
         }
         renderPedidos();
       });
@@ -378,15 +1146,40 @@
      ========================================================= */
   // "Esboço" não existe no admin — é só do cliente (rascunho no navegador).
   var CL_STATUS = ['Em processo', 'Aprovada', 'Recusada'];
+  // Filtro do painel (mantido entre re-renders).
+  var clFiltroStatus = '';   // '' = todos
+  var clBusca = '';
 
   function renderClaims() {
     h1.textContent = 'Gestão de reivindicações'; setOn('reivindicacoes');
-    var claims = FG.all('claims');
+    var todas = FG.all('claims');
+    var termo = clBusca.trim().toLowerCase();
+    var claims = todas.filter(function (c) {
+      if (clFiltroStatus && c.status !== clFiltroStatus) return false;
+      if (termo) {
+        if (String(c.id || '').toLowerCase().indexOf(termo) < 0 &&
+            String(c.criador || '').toLowerCase().indexOf(termo) < 0 &&
+            String(c.niv || '').toLowerCase().indexOf(termo) < 0) return false;
+      }
+      return true;
+    });
+    var filtrando = !!(clFiltroStatus || termo);
+
     // Tabela enxuta (só identificação). Detalhes + ações no modal ao clicar.
     view.innerHTML =
-      '<div class="adm-card"><div class="c-head">Reivindicações (' + claims.length + ')</div><div class="c-body">' +
+      '<div class="adm-card"><div class="c-head">Reivindicações (' + claims.length +
+        (filtrando ? ' de ' + todas.length : '') + ')</div><div class="c-body">' +
+      '<div class="shop-tools" style="margin:0 0 14px;">' +
+      '<label style="font-size:12px;">Status: <select id="cl-status">' +
+        '<option value="">Todos</option>' +
+        CL_STATUS.map(function (s) { return '<option value="' + s + '"' + (clFiltroStatus === s ? ' selected' : '') + '>' + s + '</option>'; }).join('') +
+        '</select></label>' +
+      '<input id="cl-busca" type="text" placeholder="Buscar por nº, criador ou NIV" value="' + esc(clBusca) + '" ' +
+        'style="flex:1;min-width:200px;padding:6px 10px;border:1px solid #ccc;border-radius:4px;">' +
+      (filtrando ? '<button class="btn-line btn-mini" id="cl-limpar">Limpar filtro</button>' : '') +
+      '</div>' +
       '<p class="muted" style="font-size:12px;margin:0 0 8px;">Clique numa reivindicação para ver os detalhes e agir.</p>' +
-      '<table class="tbl"><thead><tr><th>N° da reivindicação</th><th>Data</th><th>Criador</th><th>Tipo</th><th>Status</th></tr></thead><tbody>' +
+      '<table class="tbl"><thead><tr><th>N° da reivindicação</th><th>Data</th><th>Criador</th><th>Tipo</th><th>Status</th><th>Aprovada em</th></tr></thead><tbody>' +
       (claims.length ? claims.map(function (c) {
         return '<tr class="adm-claim-row' + (c.reenviada ? ' tr-reenviada' : '') + '" data-id="' + esc(c.id) + '">' +
           '<td><b class="cl-num">' + c.id + '</b></td>' +
@@ -396,9 +1189,21 @@
           '<td>' + pill(c.status) +
           (c.reenviada ? ' <span class="pill-status Reenviada">↩ Devolvida pelo revendedor</span>' : '') +
           (c.sentBack ? ' <span class="pill-status Devolvida">↩ Devolvida</span>' : '') +
-          '</td></tr>';
-      }).join('') : '<tr><td colspan="5" class="muted">Nenhuma reivindicação.</td></tr>') +
+          '</td>' +
+          '<td>' + (c.dataAprovacao ? FG.fmtDate(c.dataAprovacao) : '<span class="muted">—</span>') + '</td>' +
+          '</tr>';
+      }).join('') : '<tr><td colspan="6" class="muted">Nenhuma reivindicação' + (filtrando ? ' com esse filtro' : '') + '.</td></tr>') +
       '</tbody></table></div></div>';
+
+    document.getElementById('cl-status').addEventListener('change', function () { clFiltroStatus = this.value; renderClaims(); });
+    var bx = document.getElementById('cl-busca');
+    bx.addEventListener('input', function () {
+      clBusca = this.value; renderClaims();
+      var n = document.getElementById('cl-busca');
+      if (n) { n.focus(); n.setSelectionRange(n.value.length, n.value.length); }
+    });
+    var lp = document.getElementById('cl-limpar');
+    if (lp) lp.addEventListener('click', function () { clFiltroStatus = ''; clBusca = ''; renderClaims(); });
 
     Array.prototype.forEach.call(view.querySelectorAll('.adm-claim-row'), function (row) {
       row.addEventListener('click', function () {
@@ -444,7 +1249,8 @@
       '<div class="modal-body">' +
       (c.reenviada ? '<div class="reenviada-aviso">↩ Devolvida pelo revendedor — revisar' + (c.atualizadoEm ? ' (em ' + FG.fmtDateTime(c.atualizadoEm) + ')' : '') + '</div>' : '') +
       (c.sentBack ? '<div class="devolvida-aviso">↩ Devolvida ao revendedor — aguardando. Falta: ' + esc(c.faltaInformacao || '—') + '</div>' : '') +
-      (c.status === 'Aprovada' && c.valorGarantia ? '<div class="det-credito">✔ Aprovada — crédito de ' + FG.fmtMoney(c.valorGarantia) + ' descontado da fatura.</div>' : '') +
+      (c.status === 'Aprovada' ? '<div class="det-credito">✔ Aprovada — pedido de garantia criado para repor a(s) peça(s) sem cobrança' +
+        (c.valorGarantia ? ' (valor de referência: ' + FG.fmtMoney(c.valorGarantia) + ')' : '') + '. Acompanhe na área de pedidos.</div>' : '') +
       '<div class="det-grid">' +
       linha('N° da reivindicação', '<b class="cl-num">' + esc(c.id) + '</b>') +
       linha('Status', esc(c.status)) +
@@ -452,6 +1258,7 @@
       linha('NIV', esc(c.niv || '—')) +
       linha('Criador', esc(c.criador || '—')) +
       linha('Data da reivindicação', FG.fmtDateTime(c.data)) +
+      (c.dataAprovacao ? linha('Data de aprovação', FG.fmtDateTime(c.dataAprovacao)) : '') +
       linha('Data do ocorrido', c.dataDefeito ? FG.fmtDate(c.dataDefeito) : '—') +
       linha('Uso', uso.length ? uso.join(' / ') : '—') +
       '</div>' +
@@ -467,7 +1274,7 @@
     function fechar() { back.remove(); }
     back.querySelector('.x').addEventListener('click', fechar);
     document.getElementById('ad-fechar').addEventListener('click', fechar);
-    back.addEventListener('click', function (e) { if (e.target === back) fechar(); });
+    // Clicar fora NÃO fecha — pop-ups só fecham no X (pedido do dono).
 
     if (!term) {
       document.getElementById('ad-aplicar').addEventListener('click', async function () {
@@ -475,11 +1282,13 @@
         if (novo === c.status) { FG.toast('Selecione um status diferente.'); return; }
         if ((novo === 'Aprovada' || novo === 'Recusada') &&
           !confirm('Definir como "' + novo + '"? Esse status é FINAL e não poderá ser alterado' +
-            (novo === 'Aprovada' ? ' (gera crédito na fatura do cliente)' : '') + '.')) return;
+            (novo === 'Aprovada' ? ' (cria um pedido de garantia repondo as peças, sem cobrança)' : '') + '.')) return;
         var r = await FG.setClaimStatus(c.id, novo);
         if (r && r.ok === false) return;
         fechar();
-        FG.toast('Status atualizado.');
+        FG.toast(r && r.pedidoGarantia
+          ? 'Garantia aprovada — pedido de reposição ' + r.pedidoGarantia + ' criado.'
+          : 'Status atualizado.');
         renderClaims();
       });
       document.getElementById('ad-devolver').addEventListener('click', function () { fechar(); modalDevolver(c.id); });
@@ -503,7 +1312,7 @@
     function fechar() { back.remove(); }
     back.querySelector('.x').addEventListener('click', fechar);
     document.getElementById('dv-canc').addEventListener('click', fechar);
-    back.addEventListener('click', function (e) { if (e.target === back) fechar(); });
+    // Clicar fora NÃO fecha — pop-ups só fecham no X (pedido do dono).
     document.getElementById('dv-ok').addEventListener('click', async function () {
       var falta = document.getElementById('dv-falta').value.trim();
       if (!falta) { FG.toast('Descreva o que falta antes de devolver.', 'erro'); return; }
@@ -530,45 +1339,101 @@
     return '<span class="pill-status Aguardando">Aguardando reposição' + detalhe + '</span>';
   }
 
+  var MESES = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho',
+               'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
+
+  // Chave ordenável do mês ("2026-07") e o rótulo humano ("Julho de 2026").
+  function mesChave(iso) {
+    if (!iso) return '0000-00';
+    var d = new Date(iso);
+    return d.getFullYear() + '-' + FG.pad(d.getMonth() + 1, 2);
+  }
+  function mesRotulo(chave) {
+    if (chave === '0000-00') return 'Sem data';
+    var p = chave.split('-');
+    var nome = MESES[Number(p[1]) - 1] || '';
+    return nome.charAt(0).toUpperCase() + nome.slice(1) + ' de ' + p[0];
+  }
+
   function renderPreVenda() {
     h1.textContent = 'Pré-venda — peças a enviar'; setOn('prevenda');
-    var itens = FG.all('prevenda');
-    if (!itens.length) {
+    var todos = FG.all('prevenda');
+    if (!todos.length) {
       view.innerHTML = '<div class="adm-card"><div class="c-body muted">' +
         'Nenhuma peça em pré-venda pendente. Elas aparecem aqui quando um pedido inclui ' +
         'itens sem estoque, e podem ser marcadas como enviadas quando o produto for reposto.</div></div>';
       return;
     }
-    var grupos = {};
-    itens.forEach(function (it) { (grupos[it.empresa] = grupos[it.empresa] || []).push(it); });
+    var f = filtros.prevenda;
+    var itens = todos.filter(function (it) {
+      if (f.status && it.status !== f.status) return false;
+      return casaBusca('prevenda', [it.artigo, it.nome, it.empresa, it.pedido]);
+    });
+
+    // Bloco de uma empresa (cabeçalho + tabela das peças dela).
+    function blocoEmpresa(emp, lista) {
+      var linhas = lista.map(function (it) {
+        var acao = it.status === 'Disponivel'
+          ? '<button class="btn-orange btn-mini pv-enviar" data-ped="' + esc(it.pedido) + '" data-item="' + it.itemId + '" data-qtd="' + it.qtd + '">Liberar envio</button>'
+          : '<span class="muted" style="font-size:11px;">' + (it.estoque > 0 ? 'estoque insuficiente (' + it.estoque + '/' + it.pendente + ')' : 'sem estoque') + '</span>';
+        return '<tr><td>' + esc(it.artigo) + '</td><td>' + esc(it.nome) + '</td>' +
+          '<td class="r">' + it.pendente + '</td>' +
+          '<td>' + (it.data ? FG.fmtDate(it.data) : '—') + '</td>' +
+          '<td><a href="#pedidos" title="Ver em Vendas">' + esc(it.pedido) + '</a></td>' +
+          '<td>' + pvStatusPill(it) + '</td><td>' + acao + '</td></tr>';
+      }).join('');
+      return '<div class="venda-det"><div style="font-weight:600;margin:6px 0 2px;">' + esc(emp) + '</div>' +
+        '<table class="tbl"><thead><tr><th>Artigo</th><th>Peça</th><th class="r">Qtd.</th>' +
+        '<th>Data do pedido</th><th>Pedido de origem</th><th>Status</th><th>Ação</th></tr></thead><tbody>' +
+        linhas + '</tbody></table></div>';
+    }
+
+    function porEmpresa(lista) {
+      var g = {};
+      lista.forEach(function (it) { (g[it.empresa] = g[it.empresa] || []).push(it); });
+      return Object.keys(g).map(function (emp) { return blocoEmpresa(emp, g[emp]); }).join('');
+    }
+
+    // Quando a fila de pré-venda atravessa mais de um mês, ela é quebrada por
+    // mês (do mais recente para o mais antigo) — senão a lista vira um bolo só
+    // e some a noção de quanto tempo a peça está esperando. Um mês só: direto
+    // por empresa, como sempre foi.
+    var meses = {};
+    itens.forEach(function (it) { (meses[mesChave(it.data)] = meses[mesChave(it.data)] || []).push(it); });
+    var chaves = Object.keys(meses).sort().reverse();
+    var mesAtual = mesChave(new Date().toISOString());
+
+    var corpo;
+    if (!itens.length) {
+      corpo = '<p class="muted">Nenhuma peça com esse filtro.</p>';
+    } else if (chaves.length <= 1) {
+      corpo = porEmpresa(itens);
+    } else {
+      corpo = chaves.map(function (ch) {
+        var atrasado = ch < mesAtual && ch !== '0000-00';
+        return '<div class="pv-mes' + (atrasado ? ' atrasado' : '') + '">' +
+          '<div class="pv-mes-head">' + esc(mesRotulo(ch)) +
+          ' <span class="muted">(' + meses[ch].length + ' peça' + (meses[ch].length > 1 ? 's' : '') + ')</span>' +
+          (atrasado ? '<span class="pv-atraso">aguardando desde ' + esc(mesRotulo(ch).toLowerCase()) + '</span>' : '') +
+          '</div>' + porEmpresa(meses[ch]) + '</div>';
+      }).join('');
+    }
 
     view.innerHTML =
-      '<div class="adm-card"><div class="c-head">Peças a enviar — pré-venda (' + itens.length + ')</div>' +
+      '<div class="adm-card"><div class="c-head">Peças a enviar — pré-venda (' +
+      contagem('prevenda', itens.length, todos.length) + ')</div>' +
       '<div class="c-body">' +
-      Object.keys(grupos).map(function (emp) {
-        var linhas = grupos[emp].map(function (it) {
-          var disp = it.status === 'Disponivel';
-          var acao = disp
-            ? '<button class="btn-orange btn-mini pv-enviar" data-ped="' + esc(it.pedido) + '" data-item="' + it.itemId + '" data-qtd="' + it.qtd + '">Marcar Enviado</button>'
-            : '<span class="muted" style="font-size:11px;">' + (it.estoque > 0 ? 'estoque insuficiente (' + it.estoque + '/' + it.pendente + ')' : 'sem estoque') + '</span>';
-          return '<tr><td>' + esc(it.artigo) + '</td><td>' + esc(it.nome) + '</td>' +
-            '<td class="r">' + it.pendente + '</td>' +
-            '<td>' + (it.data ? FG.fmtDate(it.data) : '—') + '</td>' +
-            '<td><a href="#pedidos" title="Ver em Vendas">' + esc(it.cx) + '</a>' +
-            ' <span class="muted">' + esc(it.pedido) + '</span></td>' +
-            '<td>' + pvStatusPill(it) + '</td><td>' + acao + '</td></tr>';
-        }).join('');
-        return '<div class="venda-det"><div style="font-weight:600;margin:6px 0 2px;">' + esc(emp) + '</div>' +
-          '<table class="tbl"><thead><tr><th>Artigo</th><th>Peça</th><th class="r">Qtd.</th>' +
-          '<th>Data do pedido</th><th>Pedido de origem</th><th>Status</th><th>Ação</th></tr></thead><tbody>' +
-          linhas + '</tbody></table></div>';
-      }).join('') + '</div></div>';
+      barraFiltro('prevenda', [
+        { k: 'status', rotulo: 'Situação', opcoes: [['Disponivel', 'Disponível p/ envio'], ['Aguardando', 'Aguardando reposição']] }
+      ], 'Buscar por artigo, peça, empresa ou pedido') +
+      corpo + '</div></div>';
 
+    bindFiltro(renderPreVenda);
     Array.prototype.forEach.call(view.querySelectorAll('.pv-enviar'), function (b) {
       b.addEventListener('click', async function () {
         var r = await FG.setItemEnviado(b.getAttribute('data-ped'), b.getAttribute('data-item'), Number(b.getAttribute('data-qtd')));
-        if (r && r.ok === false) FG.toast(r.msg || 'Não foi possível marcar como enviado.', 'erro');
-        else FG.toast('Peça marcada como enviada.');
+        if (r && r.ok === false) FG.toast(r.msg || 'Não foi possível liberar a peça.', 'erro');
+        else FG.toast('Peça liberada para separação — confirme o envio no pedido quando sair.');
         renderPreVenda();
       });
     });
@@ -688,7 +1553,7 @@
     function fechar() { back.remove(); }
     back.querySelector('.x').addEventListener('click', fechar);
     document.getElementById('fm-canc').addEventListener('click', fechar);
-    back.addEventListener('click', function (e) { if (e.target === back) fechar(); });
+    // Clicar fora NÃO fecha — pop-ups só fecham no X (pedido do dono).
 
     var btnDel = document.getElementById('fm-foto-del');
     if (btnDel) btnDel.addEventListener('click', function () {
@@ -827,7 +1692,7 @@
     function fechar() { back.remove(); }
     back.querySelector('.x').addEventListener('click', fechar);
     document.getElementById('se-canc').addEventListener('click', fechar);
-    back.addEventListener('click', function (e) { if (e.target === back) fechar(); });
+    // Clicar fora NÃO fecha — pop-ups só fecham no X (pedido do dono).
 
     document.getElementById('se-ok').addEventListener('click', function () {
       var dados = {
@@ -861,7 +1726,7 @@
         (sec.lado === 'engine' ? 'Engine (motor)' : 'Frame (chassi)') + '</b></span><span class="grow"></span>' +
         '<a class="btn-line" href="finder.html#/secao/' + sec.id + '" target="_blank" rel="noopener">Ver no finder ↗</a></div>' +
 
-        /* ---- peças da lista ---- */
+        /* ---- peças da seção: tabela no topo, largura cheia ---- */
         '<div class="adm-card"><div class="c-head">Peças desta seção (' + sec.pecas.length + ')</div><div class="c-body">' +
         '<div class="fnd-add-row"><input id="fp-sku" list="fp-skus" type="text" placeholder="Código do artigo (SKU) — ex.: A46001094000FB">' +
         '<datalist id="fp-skus">' + FG.all('products').map(function (p) {
@@ -869,12 +1734,13 @@
         }).join('') + '</datalist>' +
         '<button class="btn-orange btn-mini" id="fp-add">Adicionar peça</button>' +
         '<span class="muted" style="font-size:12px;">A peça precisa existir no Catálogo. A miniatura vem da foto do produto.</span></div>' +
-        '<table class="tbl fnd-itens"><thead><tr><th>ID</th><th>Miniatura</th><th>Nome</th><th>Situação</th><th>Cód.</th>' +
+        '<table class="tbl fnd-itens"><thead><tr><th>ID</th><th>Miniatura</th><th>Nome</th><th>Status</th><th>Situação</th><th>Cód.</th>' +
         '<th class="r">Preço</th><th>Qtd. padrão</th><th>Number on Image</th><th>Qtd. no conjunto</th><th>Posição</th><th>Ações</th></tr></thead>' +
         '<tbody id="fp-tbody"></tbody></table>' +
         '</div></div>' +
 
-        /* ---- diagrama + hotspots ---- */
+        /* ---- diagrama à ESQUERDA + áreas clicáveis à DIREITA com rolagem
+                própria — espelho invertido do que o cliente vê no finder ---- */
         '<div class="adm-card"><div class="c-head">Imagem do diagrama e áreas clicáveis</div><div class="c-body">' +
         '<div class="fnd-add-row">' +
         '<input id="hi-file" type="file" accept="image/*">' +
@@ -886,20 +1752,42 @@
         (sec.imagem
           ? '<p class="muted" style="font-size:12px;margin:8px 0;">Clique na imagem para criar uma área; arraste para posicionar. ' +
             'O <b>Link Number</b> deve casar com o "Number on Image" das peças — clicar na área seleciona essas peças no finder do cliente.</p>' +
-            '<div class="ha-wrap"><div class="ha-canvas" id="ha-canvas"><img id="ha-img" src="' + esc(sec.imagem) + '" alt="diagrama" draggable="false"></div></div>' +
-            '<div class="ha-list-head"><span></span><span>Clickable Area (px)</span><span>Texto (opcional)</span><span>Link Number</span><span></span></div>' +
-            '<div id="ha-list"></div>'
+            '<div class="ha-2col">' +
+            '<div class="ha-wrap">' +
+            '<div class="ha-tools">' +
+            '<button class="dg-btn" id="ha-reset" type="button" title="Ajustar à tela">⟳</button>' +
+            '<button class="dg-btn" id="ha-nums" type="button" title="Mostrar/ocultar os números das áreas">#</button>' +
+            '<span class="grow"></span>' +
+            '<input type="range" id="ha-zoom" min="0.1" max="1.6" step="0.05" value="0.6">' +
+            '<span class="dg-marks">0.1&nbsp;&nbsp;0.6&nbsp;&nbsp;1.1&nbsp;&nbsp;1.6</span>' +
+            '</div>' +
+            '<div class="ha-view" id="ha-view"><div class="ha-canvas" id="ha-canvas"><img id="ha-img" src="' + esc(sec.imagem) + '" alt="diagrama" draggable="false"></div></div>' +
+            '</div>' +
+            '<div class="ha-side">' +
+            '<div class="ha-list-head"><span></span><span>#</span><span>Clickable Area (px)</span><span>Link Number</span><span></span></div>' +
+            '<div id="ha-list" class="ha-scroll"></div>' +
+            '</div></div>'
           : '<p class="muted">Envie a imagem do diagrama explodido para poder marcar as áreas clicáveis.</p>') +
         '</div></div>';
 
       /* ----- tabela de peças (linhas com edição inline) ----- */
       var tbody = document.getElementById('fp-tbody');
+
+      // Mesmo princípio de cores da loja: verde = em estoque, amarelo =
+      // pré-venda (com previsão), vermelho = indisponível para compra.
+      function statusPecaAdm(p) {
+        if (p.estoque > 0) return '<span class="fnde-status ok">● Em estoque (' + p.estoque + ')</span>';
+        if (p.previsao) return '<span class="fnde-status pre">● Pré-venda · ' + esc(p.previsao) + '</span>';
+        return '<span class="fnde-status out">● Indisponível</span>';
+      }
+
       function linhasPecas() {
         tbody.innerHTML = sec.pecas.length ? sec.pecas.map(function (p, i) {
           return '<tr data-id="' + p.id + '">' +
             '<td class="muted">' + p.id + '</td>' +
             '<td>' + thumbCell(p.imagem, p.nome) + '</td>' +
             '<td><b>' + esc(p.nome) + '</b></td>' +
+            '<td>' + statusPecaAdm(p) + '</td>' +
             '<td><label class="fnd-hab"><input type="checkbox" class="fi-at"' + (p.ativo ? ' checked' : '') + '> Habilitar</label></td>' +
             '<td>' + esc(p.sku) + '</td>' +
             '<td class="r">' + FG.fmtMoney(p.preco) + '</td>' +
@@ -909,29 +1797,27 @@
             '<td class="nowrap"><button class="btn-line btn-mini" data-mv="-1" data-i="' + i + '"' + (i === 0 ? ' disabled' : '') + '>▲</button> ' +
             '<button class="btn-line btn-mini" data-mv="1" data-i="' + i + '"' + (i === sec.pecas.length - 1 ? ' disabled' : '') + '>▼</button></td>' +
             '<td><button class="link-action" data-rm="' + p.id + '">Remover</button></td></tr>';
-        }).join('') : '<tr><td colspan="11" class="muted">Nenhuma peça nesta seção. Adicione pela busca acima.</td></tr>';
+        }).join('') : '<tr><td colspan="12" class="muted">Nenhuma peça nesta seção. Adicione pela busca acima.</td></tr>';
 
         Array.prototype.forEach.call(tbody.querySelectorAll('tr[data-id]'), function (tr) {
           var pecaId = Number(tr.getAttribute('data-id'));
-          ['change'].forEach(function (evt) {
-            Array.prototype.forEach.call(tr.querySelectorAll('.fi-at,.fi-qp,.fi-num,.fi-qtd'), function (inp) {
-              inp.addEventListener(evt, function () {
-                FG.finderEditarPeca(pecaId, {
-                  ativo: tr.querySelector('.fi-at').checked,
-                  quantidadePadrao: Number(tr.querySelector('.fi-qp').value) || 0,
-                  numeroImagem: tr.querySelector('.fi-num').value.trim(),
-                  quantidade: Math.max(1, Number(tr.querySelector('.fi-qtd').value) || 1)
-                }).then(function (r) {
-                  if (fndErro(r, 'Falha ao salvar a peça.')) return;
-                  var p = sec.pecas.find(function (x) { return x.id === pecaId; });
-                  if (p) {
-                    p.ativo = tr.querySelector('.fi-at').checked;
-                    p.quantidadePadrao = Number(tr.querySelector('.fi-qp').value) || 0;
-                    p.numeroImagem = tr.querySelector('.fi-num').value.trim();
-                    p.quantidade = Math.max(1, Number(tr.querySelector('.fi-qtd').value) || 1);
-                  }
-                  FG.toast('Peça atualizada.');
-                });
+          Array.prototype.forEach.call(tr.querySelectorAll('.fi-at,.fi-qp,.fi-num,.fi-qtd'), function (inp) {
+            inp.addEventListener('change', function () {
+              FG.finderEditarPeca(pecaId, {
+                ativo: tr.querySelector('.fi-at').checked,
+                quantidadePadrao: Number(tr.querySelector('.fi-qp').value) || 0,
+                numeroImagem: tr.querySelector('.fi-num').value.trim(),
+                quantidade: Math.max(1, Number(tr.querySelector('.fi-qtd').value) || 1)
+              }).then(function (r) {
+                if (fndErro(r, 'Falha ao salvar a peça.')) return;
+                var p = sec.pecas.find(function (x) { return x.id === pecaId; });
+                if (p) {
+                  p.ativo = tr.querySelector('.fi-at').checked;
+                  p.quantidadePadrao = Number(tr.querySelector('.fi-qp').value) || 0;
+                  p.numeroImagem = tr.querySelector('.fi-num').value.trim();
+                  p.quantidade = Math.max(1, Number(tr.querySelector('.fi-qtd').value) || 1);
+                }
+                FG.toast('Peça atualizada.');
               });
             });
           });
@@ -997,12 +1883,35 @@
       var canvas = document.getElementById('ha-canvas');
       var img = document.getElementById('ha-img');
       var lista = document.getElementById('ha-list');
+      var viewport = document.getElementById('ha-view');
+      var slider = document.getElementById('ha-zoom');
       var natW = 0, natH = 0;
       var hs = sec.hotspots.map(function (h) {
         return { x: h.x, y: h.y, w: h.w, h: h.h, texto: h.texto || '', linkNumero: h.linkNumero || '' };
       });
+      // Preferência do admin (lembrada entre seções): mostrar ou não o número
+      // de POSIÇÃO nas áreas do diagrama. É só um apoio visual da montagem — o
+      // cliente nunca vê esses números.
+      var NUM_KEY = 'fullgas_finder_ha_nums';
+      var mostrarNums = localStorage.getItem(NUM_KEY) !== '0';
 
+      // Zoom igual ao finder do cliente: o slider define a largura do canvas
+      // (natW*z); a imagem ocupa 100% do canvas e as caixas se posicionam em %,
+      // então tudo escala junto. escala() usa img.clientWidth (que já reflete o
+      // zoom), logo os cliques/arrastos continuam corretos em qualquer nível.
       function escala() { return natW / (img.clientWidth || 1); }
+
+      function aplicarZoom(z) {
+        if (!natW) return;
+        slider.value = z;
+        canvas.style.width = Math.round(natW * z) + 'px';
+      }
+      function zoomAjuste() {
+        if (!natW) return 0.6;
+        var fit = Math.min((viewport.clientWidth - 2) / natW,
+                           (viewport.clientHeight - 2) / natH);
+        return Math.max(0.1, Math.min(1.6, Math.floor(fit * 20) / 20));
+      }
 
       function boxHTML(h, i) {
         var b = document.createElement('div');
@@ -1012,21 +1921,31 @@
         b.style.top = (h.y / natH * 100) + '%';
         b.style.width = (h.w / natW * 100) + '%';
         b.style.height = (h.h / natH * 100) + '%';
-        b.innerHTML = '<span>' + esc(h.linkNumero || (i + 1)) + '</span>';
+        // O número da área é a POSIÇÃO na lista (começa em 0), não o Link
+        // Number da peça — reordenar a lista renumera as áreas na hora.
+        b.innerHTML = '<span>' + i + '</span>';
         return b;
       }
 
       function desenharBoxes() {
         Array.prototype.forEach.call(canvas.querySelectorAll('.ha-box'), function (el) { el.remove(); });
+        canvas.classList.toggle('ha-nonum', !mostrarNums);
         hs.forEach(function (h, i) { canvas.appendChild(boxHTML(h, i)); });
       }
 
+      // O campo "Texto (opcional)" foi removido da interface (nunca é usado);
+      // o valor que existir no banco é preservado em hs[i].texto ao salvar.
+      // A lista pode ser reordenada arrastando pelo "⠿": mover uma linha
+      // reordena o array hs e, como o número da área é a posição, renumera
+      // tudo automaticamente (canvas + lista).
+      var dragLista = null; // índice da linha sendo arrastada
       function desenharLista() {
         lista.innerHTML = hs.map(function (h, i) {
-          return '<div class="ha-row" data-i="' + i + '"><span class="muted">' + i + '</span>' +
+          return '<div class="ha-row" data-i="' + i + '" draggable="false">' +
+            '<span class="ha-grip" title="Arraste para reordenar">⠿</span>' +
+            '<span class="muted ha-idx">' + i + '</span>' +
             '<span class="ha-size"><input class="hw" type="number" min="8" value="' + h.w + '"> × ' +
             '<input class="hh" type="number" min="8" value="' + h.h + '"></span>' +
-            '<input class="ht" type="text" maxlength="200" placeholder="texto ao passar o mouse" value="' + esc(h.texto) + '">' +
             '<input class="hl" type="text" maxlength="12" placeholder="nº" value="' + esc(h.linkNumero) + '">' +
             '<button class="ha-x" title="Remover área">X</button></div>';
         }).join('') || '<p class="muted" style="font-size:12px;">Nenhuma área ainda — clique na imagem para criar.</p>';
@@ -1035,18 +1954,52 @@
           var i = Number(row.getAttribute('data-i'));
           row.querySelector('.hw').addEventListener('change', function (e) { hs[i].w = Math.max(8, Number(e.target.value) || 32); desenharBoxes(); });
           row.querySelector('.hh').addEventListener('change', function (e) { hs[i].h = Math.max(8, Number(e.target.value) || 32); desenharBoxes(); });
-          row.querySelector('.ht').addEventListener('input', function (e) { hs[i].texto = e.target.value; });
           row.querySelector('.hl').addEventListener('input', function (e) { hs[i].linkNumero = e.target.value.trim(); desenharBoxes(); });
           row.querySelector('.ha-x').addEventListener('click', function () {
             hs.splice(i, 1); desenharBoxes(); desenharLista();
           });
           row.addEventListener('mouseenter', function () {
+            if (dragLista != null) return;
             var b = canvas.querySelector('.ha-box[data-i="' + i + '"]');
             if (b) b.classList.add('sel');
           });
           row.addEventListener('mouseleave', function () {
             var b = canvas.querySelector('.ha-box[data-i="' + i + '"]');
             if (b) b.classList.remove('sel');
+          });
+
+          /* ---- reordenar arrastando (só a partir do "grip") ---- */
+          var grip = row.querySelector('.ha-grip');
+          grip.addEventListener('mousedown', function () { row.draggable = true; });
+          grip.addEventListener('mouseup', function () { row.draggable = false; });
+          row.addEventListener('dragstart', function (e) {
+            dragLista = i;
+            row.classList.add('arrastando');
+            e.dataTransfer.effectAllowed = 'move';
+            try { e.dataTransfer.setData('text/plain', String(i)); } catch (_) {}
+          });
+          row.addEventListener('dragend', function () {
+            row.draggable = false;
+            dragLista = null;
+            Array.prototype.forEach.call(lista.querySelectorAll('.ha-row'), function (r) {
+              r.classList.remove('arrastando', 'drop-alvo');
+            });
+          });
+          row.addEventListener('dragover', function (e) {
+            if (dragLista == null) return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            if (i !== dragLista) row.classList.add('drop-alvo');
+          });
+          row.addEventListener('dragleave', function () { row.classList.remove('drop-alvo'); });
+          row.addEventListener('drop', function (e) {
+            e.preventDefault();
+            var alvo = Number(row.getAttribute('data-i'));
+            if (dragLista == null || alvo === dragLista) return;
+            var movido = hs.splice(dragLista, 1)[0];
+            hs.splice(alvo, 0, movido);
+            dragLista = null;
+            desenharBoxes(); desenharLista();
           });
         });
       }
@@ -1082,7 +2035,11 @@
         var k = escala();
         var cx = Math.round((e.clientX - r.left) * k);
         var cy = Math.round((e.clientY - r.top) * k);
-        var nova = { x: Math.max(0, cx - 16), y: Math.max(0, cy - 16), w: 32, h: 32, texto: '', linkNumero: '' };
+        // A nova área herda o tamanho da última já criada (fica prático manter
+        // todas com as mesmas dimensões); 32×32 só quando é a primeira.
+        var ult = hs[hs.length - 1];
+        var nw = ult ? ult.w : 32, nh = ult ? ult.h : 32;
+        var nova = { x: Math.max(0, cx - Math.round(nw / 2)), y: Math.max(0, cy - Math.round(nh / 2)), w: nw, h: nh, texto: '', linkNumero: '' };
         hs.push(nova);
         desenharBoxes(); desenharLista();
         var ultima = lista.querySelector('.ha-row[data-i="' + (hs.length - 1) + '"] .hl');
@@ -1098,13 +2055,224 @@
 
       function prontoImg() {
         natW = img.naturalWidth || 1; natH = img.naturalHeight || 1;
+        aplicarZoom(zoomAjuste());
         desenharBoxes(); desenharLista();
       }
       if (img.complete && img.naturalWidth) prontoImg();
       else img.addEventListener('load', prontoImg);
+
+      slider.addEventListener('input', function () { aplicarZoom(Number(slider.value)); });
+      document.getElementById('ha-reset').addEventListener('click', function () { aplicarZoom(zoomAjuste()); });
+
+      var btnNums = document.getElementById('ha-nums');
+      btnNums.classList.toggle('on', mostrarNums);
+      btnNums.addEventListener('click', function () {
+        mostrarNums = !mostrarNums;
+        localStorage.setItem(NUM_KEY, mostrarNums ? '1' : '0');
+        btnNums.classList.toggle('on', mostrarNums);
+        canvas.classList.toggle('ha-nonum', !mostrarNums);
+      });
     }, function () {
       view.innerHTML = '<div class="adm-card"><div class="c-body">Seção não encontrada. <a href="#finder">Voltar</a></div></div>';
     });
+  }
+
+  /* =========================================================
+     TINY ERP — importação, sincronização em lote e log
+     ---------------------------------------------------------
+     O Tiny é a fonte de verdade dos produtos importados dele.
+     Aqui o admin: (1) importa produtos do Tiny para o catálogo,
+     (2) força a sincronização em lote dos já importados e
+     (3) confere o log (cron / importação / lote).
+     ========================================================= */
+  var TINY_LOTE = 20; // blocos por requisição — o Tiny limita o ritmo da API
+
+  function tinyPillLocal(st) {
+    if (st === 'importado') return '<span class="pill-status aprovado">Já importado</span>';
+    if (st === 'sku-existe') return '<span class="pill-status Aguardando">SKU existe — vincula</span>';
+    return '<span class="pill-status Pendente">Novo</span>';
+  }
+
+  function renderTiny() {
+    h1.textContent = 'Integração Tiny ERP'; setOn('tiny');
+    view.innerHTML =
+      '<div class="adm-bar"><span class="muted" style="font-size:13px;">O Tiny é a fonte de verdade: estoque, preço, nome, ' +
+      'descrição e foto dos produtos importados são sempre espelho do ERP — pela sincronização automática agendada na API ' +
+      '(node-cron, a cada X minutos, evento "cron" no log) ou pelo botão de sincronizar abaixo.</span></div>' +
+
+      '<div class="adm-card"><div class="c-head">Produtos no Tiny — importação</div><div class="c-body">' +
+      '<div class="fnd-add-row">' +
+      '<input id="ty-busca" type="text" placeholder="Pesquisar por nome ou código no Tiny">' +
+      '<button class="btn-line btn-mini" id="ty-buscar">Buscar</button>' +
+      '<span class="grow"></span>' +
+      '<label style="font-size:12px;">Categoria p/ novos: <select id="ty-cat">' +
+      FG.categoriasTopo().map(function (c) {
+        var opt = '<option value="' + c.id + '">' + esc(c.nome) + '</option>';
+        FG.subcategorias(c.id).forEach(function (s) { opt += '<option value="' + s.id + '">&nbsp;&nbsp;↳ ' + esc(s.nome) + '</option>'; });
+        return opt;
+      }).join('') +
+      '</select></label>' +
+      '<button class="btn-orange btn-mini" id="ty-importar">Importar selecionados</button>' +
+      '</div><div id="ty-imp" class="muted">Carregando…</div></div></div>' +
+
+      '<div class="adm-card"><div class="c-head">Produtos sincronizados com o Tiny</div><div class="c-body" id="ty-sync"></div></div>' +
+
+      // O log de sincronização fica no editor de cada produto (Catálogo) e as
+      // exportações de pedido ficam no detalhe de cada venda — sem poluir aqui.
+      '<div class="adm-bar"><span class="muted" style="font-size:12px;">ℹ O log de sincronização de cada produto está no ' +
+      'seu cadastro (Catálogo → editar) e o status de exportação de cada pedido está no detalhe da venda (Pedidos → Detalhes).</span></div>';
+
+    /* ----- importação (lista paginada do Tiny) -----
+       A API do Tiny devolve 100 produtos por página; para a visualização não
+       ficar gigante, cada página do Tiny vira 5 páginas locais de 20 itens
+       (a última página do Tiny já buscada é cacheada — navegar entre as 5
+       sub-páginas não repete a consulta). */
+    var TINY_POR_PAGINA = 100;
+    var IMP_POR_PAGINA = 20;
+    var impCache = { pesquisa: null, tinyPagina: 0, dados: null };
+
+    function carregarImportacao(pagina) {
+      var box = document.getElementById('ty-imp');
+      var pesquisa = document.getElementById('ty-busca').value.trim();
+      var subPorTiny = TINY_POR_PAGINA / IMP_POR_PAGINA; // 5
+      var tinyPag = Math.floor((pagina - 1) / subPorTiny) + 1;
+      var offset = ((pagina - 1) % subPorTiny) * IMP_POR_PAGINA;
+
+      var emCache = impCache.dados && impCache.pesquisa === pesquisa && impCache.tinyPagina === tinyPag;
+      if (!emCache) box.innerHTML = '<p class="muted">Consultando o Tiny…</p>';
+      var fonte = emCache
+        ? Promise.resolve(impCache.dados)
+        : FG.tinyProdutos(tinyPag, pesquisa).then(function (r) {
+            impCache = { pesquisa: pesquisa, tinyPagina: tinyPag, dados: r };
+            return r;
+          });
+
+      fonte.then(function (r) {
+        var itens = r.produtos.slice(offset, offset + IMP_POR_PAGINA);
+        // Total exato quando estamos na última página do Tiny; senão, estimado
+        // (páginas anteriores do Tiny vêm sempre cheias).
+        var naUltima = r.pagina >= r.totalPaginas;
+        var totalView = r.totalPaginas
+          ? (r.totalPaginas - 1) * subPorTiny +
+            (naUltima ? Math.max(1, Math.ceil(r.produtos.length / IMP_POR_PAGINA)) : subPorTiny)
+          : 1;
+        box.innerHTML =
+          '<table class="tbl"><thead><tr>' +
+          '<th><input type="checkbox" id="ty-todos" title="Selecionar todos"></th>' +
+          '<th>ID Tiny</th><th>SKU</th><th>Nome</th><th class="r">Preço</th><th>Situação no Fullgas</th></tr></thead><tbody>' +
+          (itens.length ? itens.map(function (p) {
+            var pode = p.statusLocal !== 'importado';
+            return '<tr><td>' + (pode ? '<input type="checkbox" class="ty-sel" value="' + esc(p.tinyId) + '">' : '') + '</td>' +
+              '<td class="muted">' + esc(p.tinyId) + '</td><td>' + esc(p.sku || '—') + '</td><td>' + esc(p.nome) + '</td>' +
+              '<td class="r">' + FG.fmtMoney(p.preco) + '</td><td>' + tinyPillLocal(p.statusLocal) + '</td></tr>';
+          }).join('') : '<tr><td colspan="6" class="muted">Nada encontrado no Tiny.</td></tr>') +
+          '</tbody></table>' +
+          '<div class="fnd-add-row" style="margin-top:8px;">' +
+          '<button class="btn-line btn-mini" id="ty-ant"' + (pagina <= 1 ? ' disabled' : '') + '>« Anterior</button>' +
+          '<span class="muted" style="font-size:12px;">Página ' + pagina + ' de ' + totalView + '</span>' +
+          '<button class="btn-line btn-mini" id="ty-prox"' + (pagina >= totalView ? ' disabled' : '') + '>Próxima »</button></div>';
+
+        var todos = document.getElementById('ty-todos');
+        if (todos) todos.addEventListener('change', function () {
+          Array.prototype.forEach.call(box.querySelectorAll('.ty-sel'), function (c) { c.checked = todos.checked; });
+        });
+        document.getElementById('ty-ant').addEventListener('click', function () { carregarImportacao(pagina - 1); });
+        document.getElementById('ty-prox').addEventListener('click', function () { carregarImportacao(pagina + 1); });
+      }, function (e) {
+        box.innerHTML = '<p class="muted">Erro ao consultar o Tiny: ' + esc((e && e.message) || '') + '</p>';
+      });
+    }
+
+    document.getElementById('ty-buscar').addEventListener('click', function () { carregarImportacao(1); });
+    document.getElementById('ty-busca').addEventListener('keydown', function (e) { if (e.key === 'Enter') carregarImportacao(1); });
+
+    document.getElementById('ty-importar').addEventListener('click', function () {
+      var ids = Array.prototype.map.call(view.querySelectorAll('#ty-imp .ty-sel:checked'), function (c) { return c.value; });
+      if (!ids.length) { FG.toast('Selecione ao menos um produto do Tiny.'); return; }
+      var btn = document.getElementById('ty-importar');
+      btn.disabled = true; btn.textContent = 'Importando…';
+      FG.tinyImportar(ids, document.getElementById('ty-cat').value).then(function (r) {
+        btn.disabled = false; btn.textContent = 'Importar selecionados';
+        if (r.ok === false) { FG.toast(r.msg || 'Falha na importação.', 'erro'); return; }
+        FG.toast(r.sucesso + ' importado(s)' + (r.erros ? ', ' + r.erros + ' com erro (ver log)' : '') +
+          (r.ignorados ? ', ' + r.ignorados + ' já importado(s)' : '') + '.', r.erros ? 'erro' : undefined);
+        carregarImportacao(1); desenharSync();
+      });
+    });
+
+    /* ----- sincronizados (produtos locais com TinyAtivo) ----- */
+    function desenharSync() {
+      var el = document.getElementById('ty-sync');
+      var prods = FG.all('products').filter(function (p) { return p.tinyAtivo; });
+      if (!prods.length) {
+        el.innerHTML = '<p class="muted">Nenhum produto importado do Tiny ainda. Importe pela lista acima.</p>';
+        return;
+      }
+      el.innerHTML =
+        '<div class="fnd-add-row">' +
+        '<button class="btn-orange btn-mini" id="ty-sync-sel">Sincronizar selecionados</button>' +
+        '<button class="btn-line btn-mini" id="ty-sync-all">Sincronizar todos (' + prods.length + ')</button>' +
+        '<span class="muted" style="font-size:12px;" id="ty-sync-msg"></span></div>' +
+        '<table class="tbl"><thead><tr>' +
+        '<th><input type="checkbox" id="ty-sync-todos" title="Selecionar todos"></th>' +
+        '<th>SKU</th><th>Nome</th><th class="r">Preço</th><th class="r">Estoque</th><th>Última sincronização</th></tr></thead><tbody>' +
+        prods.map(function (p) {
+          return '<tr><td><input type="checkbox" class="ty-sync-sel" value="' + esc(p.artigo) + '"></td>' +
+            '<td>' + esc(p.artigo) + '</td><td>' + esc(p.nome) + '</td>' +
+            '<td class="r">' + FG.fmtMoney(p.preco) + '</td><td class="r">' + p.estoque + '</td>' +
+            '<td>' + (p.tinySincronizadoEm ? FG.fmtDateTime(p.tinySincronizadoEm) : '—') + '</td></tr>';
+        }).join('') + '</tbody></table>';
+
+      var todos = document.getElementById('ty-sync-todos');
+      todos.addEventListener('change', function () {
+        Array.prototype.forEach.call(el.querySelectorAll('.ty-sync-sel'), function (c) { c.checked = todos.checked; });
+      });
+
+      // Envia em blocos (a API consulta o Tiny produto a produto, e o Tiny
+      // limita o ritmo — um catálogo grande leva alguns minutos).
+      function sincronizar(skus) {
+        var fila = skus.slice();
+        var soma = { total: 0, sucesso: 0, erros: 0, ignorados: 0 };
+        var msg = document.getElementById('ty-sync-msg');
+        var btns = [document.getElementById('ty-sync-sel'), document.getElementById('ty-sync-all')];
+        btns.forEach(function (b) { b.disabled = true; });
+
+        function passo() {
+          if (!fila.length) {
+            FG.toast(soma.sucesso + ' atualizado(s)' + (soma.erros ? ', ' + soma.erros + ' com erro (ver log)' : '') + '.',
+              soma.erros ? 'erro' : undefined);
+            desenharSync();
+            return;
+          }
+          msg.textContent = 'Sincronizando… ' + (skus.length - fila.length) + '/' + skus.length +
+            ' (pode levar alguns minutos)';
+          FG.tinySyncLote(fila.splice(0, TINY_LOTE)).then(function (r) {
+            if (r.ok === false) {
+              btns.forEach(function (b) { b.disabled = false; });
+              msg.textContent = '';
+              FG.toast(r.msg || 'Falha na sincronização.', 'erro');
+              return;
+            }
+            soma.total += r.total; soma.sucesso += r.sucesso;
+            soma.erros += r.erros; soma.ignorados += r.ignorados;
+            passo();
+          });
+        }
+        passo();
+      }
+
+      document.getElementById('ty-sync-sel').addEventListener('click', function () {
+        var skus = Array.prototype.map.call(el.querySelectorAll('.ty-sync-sel:checked'), function (c) { return c.value; });
+        if (!skus.length) { FG.toast('Selecione ao menos um produto.'); return; }
+        sincronizar(skus);
+      });
+      document.getElementById('ty-sync-all').addEventListener('click', function () {
+        sincronizar(prods.map(function (p) { return p.artigo; }));
+      });
+    }
+
+    carregarImportacao(1);
+    desenharSync();
   }
 
   /* =========================================================
@@ -1116,10 +2284,13 @@
     switch (seg[0]) {
       case 'dashboard': renderDash(); break;
       case 'usuarios': renderUsuarios(); break;
+      case 'chassis': renderChassis(); break;
+      case 'notificacoes': renderNotifsAdmin(); break;
       case 'produtos': renderProdutos(); break;
       case 'pedidos': renderPedidos(); break;
       case 'prevenda': renderPreVenda(); break;
       case 'reivindicacoes': renderClaims(); break;
+      case 'tiny': renderTiny(); break;
       case 'finder':
         if (seg[1] === 'modelo' && seg[2]) renderFinderModelo(decodeURIComponent(seg[2]));
         else if (seg[1] === 'secao' && seg[2]) renderFinderSecao(Number(seg[2]));

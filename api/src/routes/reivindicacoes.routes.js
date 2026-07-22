@@ -13,6 +13,9 @@ import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { query, getPool, sql } from '../db.js';
 import { requireAuth, requireAdmin } from '../auth.js';
+import {
+  exportacaoLigada, atualizarEstoqueCesta, inserirExportacao, processarExportacoes
+} from '../tiny-pedidos.js';
 
 const router = Router();
 
@@ -156,7 +159,7 @@ async function inserirPecas(tx, reivId, pecasResolvidas) {
 const SELECT_REIV =
   `SELECT r.ReivindicacaoId, r.Numero, r.Tipo, r.Status, r.Pais, r.PreAutorizacao,
           r.Devolvido, r.Reenviada, r.FaltaInformacao, r.Descricao, r.DataAbertura,
-          r.AtualizadoEm, r.ValorGarantia, r.EmpresaId,
+          r.AtualizadoEm, r.DataAprovacao, r.ValorGarantia, r.EmpresaId,
           r.NumeroPeca, r.DataDefeito, r.Horimetro, r.Quilometragem,
           e.RazaoSocial AS Empresa, v.Niv AS Niv
      FROM dbo.Reivindicacao r
@@ -201,6 +204,7 @@ function montar(r, extras, req) {
     sentBack: !!r.Devolvido,
     reenviada: !!r.Reenviada,
     atualizadoEm: toIso(r.AtualizadoEm),
+    dataAprovacao: toIso(r.DataAprovacao),
     valorGarantia: r.ValorGarantia == null ? null : Number(r.ValorGarantia),
     faltaInformacao: r.FaltaInformacao || '',
     descricao: r.Descricao || '',
@@ -397,21 +401,91 @@ router.post('/reivindicacoes/:numero/anexos', requireAuth, uploadFotos, async (r
   } catch (e) { limparArquivos(files); next(e); }
 });
 
+// ---- Pedido de garantia (reposição) ----------------------------------------
+// Reivindicação APROVADA não desconta mais da fatura do cliente (o modelo de
+// nota de crédito foi aposentado): a aprovação cria um PEDIDO DE GARANTIA —
+// as peças reclamadas, com preço R$ 0 e SEM fatura — que segue o fluxo normal
+// de pedidos: aparece na área de pedidos (pill "Garantia"), exporta ao Tiny
+// (baixa o estoque lá) e, se faltar estoque, o item entra em pré-venda e sai
+// pelo rastreador quando repor. Roda dentro da transação da aprovação.
+async function criarPedidoGarantia(tx, reiv) {
+  const pecas = (await new sql.Request(tx).input('rid', sql.Int, reiv.ReivindicacaoId)
+    .query('SELECT Sku, NomeProduto, Quantidade FROM dbo.ReivindicacaoPeca WHERE ReivindicacaoId = @rid')).recordset;
+  if (!pecas.length) return null;
+
+  const num = await new sql.Request(tx).query(`
+    SELECT '0005' + RIGHT('000000' + CAST(NEXT VALUE FOR dbo.Seq_NumeroPedido AS VARCHAR(20)), 6) AS NumeroPedido,
+           SYSUTCDATETIME() AS Agora;`);
+  const { NumeroPedido, Agora } = num.recordset[0];
+
+  const insPed = await new sql.Request(tx)
+    .input('num', sql.VarChar(20), NumeroPedido)
+    .input('uid', sql.Int, reiv.UsuarioId)
+    .input('eid', sql.Int, reiv.EmpresaId)
+    .input('data', sql.DateTime2, Agora)
+    .query(`INSERT INTO dbo.Pedido (NumeroPedido, UsuarioId, EmpresaId, DataPedido, Status, Total, Tipo)
+            OUTPUT inserted.PedidoId
+            VALUES (@num, @uid, @eid, @data, N'Em separação', 0, 'garantia')`);
+  const pedidoId = insPed.recordset[0].PedidoId;
+
+  let temEstoque = false;
+  for (const p of pecas) {
+    // Baixa atômica. Sem estoque, o item entra em PRÉ-VENDA mesmo sem previsão
+    // de chegada — garantia aprovada não é recusada por falta de estoque.
+    const dec = await new sql.Request(tx)
+      .input('sku', sql.VarChar(40), p.Sku).input('qtd', sql.Int, p.Quantidade)
+      .query(`UPDATE dbo.Produto SET Estoque = Estoque - @qtd, AtualizadoEm = SYSUTCDATETIME()
+              OUTPUT inserted.ProdutoId
+               WHERE Sku = @sku AND Estoque >= @qtd`);
+    let produtoId, backorder;
+    if (dec.recordset.length) {
+      produtoId = dec.recordset[0].ProdutoId; backorder = false; temEstoque = true;
+    } else {
+      const prod = await new sql.Request(tx).input('sku', sql.VarChar(40), p.Sku)
+        .query('SELECT ProdutoId FROM dbo.Produto WHERE Sku = @sku');
+      produtoId = prod.recordset[0]?.ProdutoId ?? null;
+      backorder = true;
+    }
+    await new sql.Request(tx)
+      .input('pid', sql.Int, pedidoId).input('prod', sql.Int, produtoId)
+      .input('sku', sql.VarChar(40), p.Sku).input('nome', sql.NVarChar(200), p.NomeProduto)
+      .input('qtd', sql.Int, p.Quantidade).input('back', sql.Bit, backorder ? 1 : 0)
+      .query(`INSERT INTO dbo.PedidoItem (PedidoId, ProdutoId, Sku, NomeProduto, PrecoUnitario, Quantidade, EmBackorder)
+              VALUES (@pid, @prod, @sku, @nome, 0, @qtd, @back)`);
+  }
+
+  // Sem fatura (garantia não cobra). Exporta ao Tiny o que tem estoque; a
+  // pré-venda vira exportação própria quando o admin liberar.
+  if (exportacaoLigada() && temEstoque) await inserirExportacao(tx, pedidoId, 'normal');
+  return NumeroPedido;
+}
+
 // PUT /api/reivindicacoes/:numero/status (admin) — muda o status.
-// Terminais (Aprovada/Recusada) não voltam a mudar. Ao APROVAR, gera uma
-// "Nota de crédito" (valor negativo = Σ preço × qtd das peças) para a empresa,
-// descontando da conta do cliente.
+// Terminais (Aprovada/Recusada) não voltam a mudar. Ao APROVAR, cria o pedido
+// de garantia (ver criarPedidoGarantia) — não há mais nota de crédito.
 router.put('/reivindicacoes/:numero/status', requireAuth, requireAdmin, async (req, res, next) => {
   const status = String(req.body?.status || '').trim();
   if (!STATUS_VALIDOS.includes(status))
     return res.status(400).json({ erro: 'Status inválido.' });
+
+  // Aprovação mexe em estoque: atualiza o espelho local com o saldo real do
+  // Tiny antes (mesma checagem do checkout). Falha não bloqueia a aprovação.
+  if (status === 'Aprovada') {
+    try {
+      const skus = await query(
+        `SELECT DISTINCT rp.Sku FROM dbo.ReivindicacaoPeca rp
+           JOIN dbo.Reivindicacao r ON r.ReivindicacaoId = rp.ReivindicacaoId
+          WHERE r.Numero = @num`, { num: req.params.numero });
+      await atualizarEstoqueCesta(skus.map(s => s.Sku));
+    } catch (e) { console.warn('⚠ Checagem de estoque no Tiny indisponível:', e.message); }
+  }
 
   const pool = await getPool();
   const tx = new sql.Transaction(pool);
   try {
     await tx.begin();
     const cur = await new sql.Request(tx).input('num', sql.VarChar(20), req.params.numero)
-      .query('SELECT ReivindicacaoId, EmpresaId, Status FROM dbo.Reivindicacao WHERE Numero = @num');
+      .query('SELECT ReivindicacaoId, EmpresaId, UsuarioId, Status FROM dbo.Reivindicacao WHERE Numero = @num');
     if (!cur.recordset.length) { await tx.rollback(); return res.status(404).json({ erro: 'Reivindicação não encontrada.' }); }
     const reiv = cur.recordset[0];
     if (STATUS_TERMINAIS.includes(reiv.Status)) {
@@ -420,23 +494,17 @@ router.put('/reivindicacoes/:numero/status', requireAuth, requireAdmin, async (r
     }
 
     let valorGarantia = null;
+    let pedidoGarantia = null;
     if (status === 'Aprovada') {
+      // Valor informativo (Σ preço × qtd das peças) — fica no registro da
+      // reivindicação; o cliente NÃO é mais creditado por ele.
       const val = await new sql.Request(tx).input('rid', sql.Int, reiv.ReivindicacaoId)
         .query(`SELECT ISNULL(SUM(rp.Quantidade * pr.Preco), 0) AS Total
                   FROM dbo.ReivindicacaoPeca rp
                   JOIN dbo.Produto pr ON pr.Sku = rp.Sku
                  WHERE rp.ReivindicacaoId = @rid`);
       valorGarantia = Number(val.recordset[0].Total) || 0;
-      if (valorGarantia > 0) {
-        // Nota de crédito com valor NEGATIVO — a financeira soma como crédito.
-        // Referencia o número da reivindicação de origem.
-        await new sql.Request(tx)
-          .input('eid', sql.Int, reiv.EmpresaId)
-          .input('val', sql.Decimal(12, 2), -valorGarantia)
-          .input('ref', sql.VarChar(20), req.params.numero)
-          .query(`INSERT INTO dbo.Fatura (NumeroFatura, Tipo, EmpresaId, Valor, ReferenciaReivindicacao)
-                  VALUES (CAST(NEXT VALUE FOR dbo.Seq_NumeroFatura AS VARCHAR(24)), 'Nota de crédito', @eid, @val, @ref)`);
-      }
+      pedidoGarantia = await criarPedidoGarantia(tx, reiv);
     }
 
     await new sql.Request(tx)
@@ -445,12 +513,18 @@ router.put('/reivindicacoes/:numero/status', requireAuth, requireAdmin, async (r
       .input('val', sql.Decimal(12, 2), valorGarantia)
       .query(`UPDATE dbo.Reivindicacao
                  SET Status = @status, Reenviada = 0, ValorGarantia = @val,
-                     AtualizadoEm = SYSUTCDATETIME()
+                     AtualizadoEm = SYSUTCDATETIME(),
+                     DataAprovacao = CASE WHEN @status = 'Aprovada'
+                                          THEN SYSUTCDATETIME() ELSE DataAprovacao END
                WHERE Numero = @num`);
 
     await tx.commit();
+    if (pedidoGarantia) processarExportacoes(); // fire-and-forget: cria/aprova no Tiny
+
     const rows = await query(SELECT_REIV + ' WHERE r.Numero = @num', { num: req.params.numero });
-    res.json((await montarLista(rows, req))[0]);
+    const corpo = (await montarLista(rows, req))[0];
+    corpo.pedidoGarantia = pedidoGarantia;
+    res.json(corpo);
   } catch (e) {
     try { await tx.rollback(); } catch { /* já desfeita */ }
     next(e);

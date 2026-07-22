@@ -8,6 +8,7 @@
   var tabCad = document.getElementById('tab-cad');
   var formLogin = document.getElementById('form-login');
   var formCad = document.getElementById('form-cad');
+  var formEsq = document.getElementById('form-esq');
   var msg = document.getElementById('auth-msg');
 
   // se já existe sessão, vai direto para o portal
@@ -18,17 +19,42 @@
     msg.className = 'auth-msg' + (texto ? ' ' + (tipo || 'err') : '');
   }
 
+  // 'login' | 'cad' | 'esq'. "Esqueci minha senha" não tem aba própria: a
+  // aba Entrar segue marcada, porque é para lá que o fluxo volta.
   function switchTab(qual) {
-    var login = qual === 'login';
-    tabLogin.classList.toggle('on', login);
-    tabCad.classList.toggle('on', !login);
-    formLogin.classList.toggle('hidden', !login);
-    formCad.classList.toggle('hidden', login);
+    tabLogin.classList.toggle('on', qual !== 'cad');
+    tabCad.classList.toggle('on', qual === 'cad');
+    formLogin.classList.toggle('hidden', qual !== 'login');
+    formCad.classList.toggle('hidden', qual !== 'cad');
+    formEsq.classList.toggle('hidden', qual !== 'esq');
     showMsg('');
   }
 
   tabLogin.addEventListener('click', function () { switchTab('login'); });
   tabCad.addEventListener('click', function () { switchTab('cad'); });
+
+  /* ---------- esqueci minha senha ---------- */
+  document.getElementById('lk-esqueci').addEventListener('click', function () {
+    document.getElementById('es-email').value = document.getElementById('lg-email').value.trim();
+    switchTab('esq');
+    document.getElementById('es-email').focus();
+  });
+  document.getElementById('lk-voltar-login').addEventListener('click', function () { switchTab('login'); });
+
+  async function doEsqueci() {
+    var b = document.getElementById('btn-esq');
+    var email = document.getElementById('es-email').value.trim();
+    if (!/^\S+@\S+\.\S+$/.test(email)) { showMsg('Informe um e-mail válido.'); return; }
+    b.disabled = true; b.textContent = 'Enviando…';
+    var r = await FG.esqueciSenha(email);
+    b.disabled = false; b.textContent = 'Enviar link de recuperação';
+    // A API responde igual exista ou não o e-mail — não confirmamos cadastro.
+    if (!r.ok) { showMsg(r.msg || 'Não foi possível enviar agora.'); return; }
+    switchTab('login');
+    showMsg(r.msg, 'ok');
+  }
+  document.getElementById('btn-esq').addEventListener('click', doEsqueci);
+  formEsq.addEventListener('keydown', function (e) { if (e.key === 'Enter') doEsqueci(); });
 
   /* ---------- login ---------- */
   async function doLogin() {
@@ -43,18 +69,76 @@
   formLogin.addEventListener('keydown', function (e) { if (e.key === 'Enter') doLogin(); });
 
   /* ---------- cadastro ---------- */
+  function val(id) { var el = document.getElementById(id); return el ? el.value.trim() : ''; }
+
+  /* ---------- máscaras (helpers em store.js — FG.mask*) ---------- */
+  FG.bindMask('cd-cnpj', FG.maskCnpj);
+  FG.bindMask('cd-ie', FG.maskIe);
+  FG.bindMask('cd-telefone', FG.maskTelefone);
+  FG.bindMask('cd-numero', FG.maskNumero);     // só dígitos
+  FG.bindMask('cd-cidade', FG.maskCidade);     // sem números/caracteres especiais
+
+  /* ---------- CEP: busca automática (ViaCEP) ----------
+     Ao completar os 8 dígitos, preenche logradouro, bairro, cidade e UF —
+     sobra só número e complemento para o cliente digitar. Os campos seguem
+     editáveis (nem todo CEP devolve logradouro, ex.: cidades com CEP único). */
+  var cepBuscado = '';
+  function buscarCep(valor) {
+    var dig = valor.replace(/\D/g, '');
+    if (dig.length !== 8 || dig === cepBuscado) return;
+    cepBuscado = dig;
+    var cepEl = document.getElementById('cd-cep');
+    cepEl.classList.add('buscando');
+    fetch('https://viacep.com.br/ws/' + dig + '/json/')
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (d.erro) { showMsg('CEP não encontrado — confira ou preencha o endereço manualmente.'); return; }
+        if (d.logradouro) document.getElementById('cd-logradouro').value = d.logradouro;
+        if (d.bairro) document.getElementById('cd-bairro').value = d.bairro;
+        if (d.localidade) document.getElementById('cd-cidade').value = d.localidade;
+        if (d.uf) document.getElementById('cd-uf').value = d.uf;
+        showMsg('');
+        document.getElementById('cd-numero').focus();
+      })
+      .catch(function () { /* sem internet p/ ViaCEP — segue manual */ })
+      .then(function () { cepEl.classList.remove('buscando'); });
+  }
+  FG.bindMask('cd-cep', FG.maskCep, buscarCep);
+
   async function doRegister() {
     var dados = {
-      nome: document.getElementById('cd-nome').value.trim(),
-      empresa: document.getElementById('cd-empresa').value.trim(),
-      email: document.getElementById('cd-email').value.trim(),
-      senha: document.getElementById('cd-senha').value
+      nome: val('cd-nome'),
+      empresa: val('cd-empresa'),
+      email: val('cd-email'),
+      senha: document.getElementById('cd-senha').value,
+      cnpj: val('cd-cnpj'),
+      inscricaoEstadual: val('cd-ie'),
+      telefone: val('cd-telefone'),
+      endereco: {
+        cep: val('cd-cep'),
+        logradouro: val('cd-logradouro'),
+        numero: val('cd-numero'),
+        complemento: val('cd-complemento'),
+        bairro: val('cd-bairro'),
+        cidade: val('cd-cidade'),
+        uf: val('cd-uf').toUpperCase()
+      }
     };
     if (!dados.nome || !dados.empresa || !dados.email || !dados.senha) {
-      showMsg('Preencha todos os campos.'); return;
+      showMsg('Preencha nome, empresa, e-mail e senha.'); return;
     }
     if (dados.senha.length < 6) { showMsg('A senha precisa de ao menos 6 caracteres.'); return; }
     if (!/^\S+@\S+\.\S+$/.test(dados.email)) { showMsg('E-mail inválido.'); return; }
+    if (dados.cnpj.replace(/\D/g, '').length !== 14) { showMsg('CNPJ incompleto — use os 14 dígitos.'); return; }
+    var telDig = dados.telefone.replace(/\D/g, '');
+    if (telDig && (telDig.length < 10 || telDig.length > 11)) { showMsg('Telefone incompleto — informe DDD + número.'); return; }
+    var e = dados.endereco;
+    if (e.cep.replace(/\D/g, '').length !== 8) { showMsg('CEP incompleto — use os 8 dígitos.'); return; }
+    if (!e.logradouro || !e.numero || !e.bairro || !e.cidade || !e.uf) {
+      showMsg('Preencha o endereço: logradouro, número, bairro, cidade e UF.'); return;
+    }
+    if (!/^\d+$/.test(e.numero)) { showMsg('Número do endereço deve conter apenas dígitos.'); return; }
+    if (/[^A-Za-zÀ-ÖØ-öø-ÿ'. -]/.test(e.cidade)) { showMsg('Cidade não pode conter números ou caracteres especiais.'); return; }
 
     var r = await FG.register(dados);
     if (!r.ok) { showMsg(r.msg); return; }

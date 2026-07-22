@@ -4,16 +4,24 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Fullgas SpareParts Finder</title>
-  <link rel="stylesheet" href="css/styles.css">
+  <link rel="icon" type="image/png" href="img/favicon.png?v=20260722d">
+  <link rel="apple-touch-icon" href="img/favicon.png?v=20260722d">
+  <link rel="stylesheet" href="css/styles.css?v=20260722b">
 </head>
 <body>
 
   <div class="finder-top">
     <div>
+      <!-- Único botão VOLTAR do finder (o comportamento está no finder.js). -->
+      <button class="btn-voltar" id="fd-voltar" type="button">Voltar</button>
       <h1>SparePartsFinder</h1>
       <div class="who" id="fd-who"></div>
     </div>
-    <span class="brand"><span class="g-badge">F</span> FULLGAS</span>
+    <div class="finder-top-right">
+      <!-- mesma cesta da loja: as peças marcadas aqui viram pedido lá -->
+      <a class="fd-cart" href="loja.html#/carrinho" title="Ir ao carrinho da loja">🛒<span class="cart-n" id="fd-cart-n">0</span></a>
+      <a href="portal.html" title="Voltar ao portal" style="text-decoration:none;"><span class="brand"><span class="g-badge">F</span> FULLGAS</span></a>
+    </div>
   </div>
 
   <button class="btn usage-btn" id="btn-usage" type="button">Usage list</button>
@@ -60,9 +68,9 @@
     <div id="fd-view"></div>
   </main>
 
-  <script src="js/config.js"></script>
-  <script src="js/store.js"></script>
-  <script src="js/api-adapter.js"></script>
-  <script src="js/finder.js"></script>
+  <script src="js/config.js?v=20260722b"></script>
+  <script src="js/store.js?v=20260722b"></script>
+  <script src="js/api-adapter.js?v=20260722b"></script>
+  <script src="js/finder.js?v=20260722b"></script>
 </body>
 </html>

@@ -11,6 +11,12 @@
   var sess = FG.guard();
   if (!sess) return;
 
+  // Conta interna (sub-dealer) sem a área "finder" volta ao portal.
+  if (!FG.temArea(sess, 'finder')) {
+    alert('Sua conta não tem acesso ao Parts Finder. Fale com o gestor da concessionária.');
+    location.href = 'portal.html'; return;
+  }
+
   // Espera o cache (produtos p/ cesta) antes de montar a tela.
   FG.pronto.then(function () {
 
@@ -19,6 +25,14 @@
   var USAGE_KEY = 'fullgas_finder_usage_v1';
 
   document.getElementById('fd-who').textContent = sess.email + ' - ' + sess.empresa;
+
+  /* carrinho da loja no topo — o finder envia peças à mesma cesta da loja,
+     então o contador acompanha cada "ADD ITEM(S) TO BASKET" */
+  function refreshCart() {
+    var el = document.getElementById('fd-cart-n');
+    if (el) el.textContent = FG.cartCount();
+  }
+  refreshCart();
 
   /* estado atual: modelo (código) + lado (chassi/engine) */
   var atual = { modelo: null, lado: 'chassi' };
@@ -142,7 +156,7 @@
       '</div></div>';
     document.body.appendChild(back);
     back.querySelector('.x').addEventListener('click', function () { back.remove(); });
-    back.addEventListener('click', function (e) { if (e.target === back) back.remove(); });
+    // Clicar fora NÃO fecha — pop-ups só fecham no X (pedido do dono).
     Array.prototype.forEach.call(back.querySelectorAll('a'), function (a) {
       a.addEventListener('click', function () { back.remove(); });
     });
@@ -205,7 +219,7 @@
           '<img src="' + esc(m.imagem) + '" alt="' + esc(m.label) + '"></div></div>';
         document.body.appendChild(back);
         back.querySelector('.x').addEventListener('click', function () { back.remove(); });
-        back.addEventListener('click', function (e) { if (e.target === back) back.remove(); });
+        // Clicar fora NÃO fecha — pop-ups só fecham no X (pedido do dono).
       });
       document.getElementById('fl-doc').addEventListener('click', function () {
         if (m.docTecnica) window.open(m.docTecnica, '_blank', 'noopener');
@@ -227,15 +241,39 @@
       document.getElementById('ms-input').value = s.modelo.label;
       var outro = s.lado === 'chassi' ? 'engine' : 'chassi';
 
+      // Cabeçalho (legenda das colunas). Alinha com o grid do .part-row: as
+      // duas primeiras colunas (checkbox e nº) ficam sem rótulo.
+      var cabecalho = '<div class="part-head">' +
+        '<span></span><span></span>' +
+        '<span>SKU</span><span>Descrição</span>' +
+        '<span>Status</span><span>Quantidade</span><span></span></div>';
+
+      // Status de compra da peça — mesmo princípio de cores da loja:
+      // verde = em estoque, amarelo = pré-venda (com previsão), vermelho =
+      // indisponível (não pode ser comprada; o campo de quantidade trava).
+      function statusPeca(p) {
+        if (p.estoque > 0) return '<span class="pt-status ok">● Em estoque</span>';
+        if (p.previsao) return '<span class="pt-status pre">● Pré-venda · ' + esc(p.previsao) + '</span>';
+        return '<span class="pt-status out">● Indisponível</span>';
+      }
+
       var linhas = s.pecas.map(function (p, i) {
         var marcada = p.quantidadePadrao > 0;
+        var indisp = !(p.estoque > 0) && !p.previsao;
+        // Em estoque: quantidade limitada ao saldo (mesma regra do carrinho
+        // da loja). Pré-venda não limita aqui — vai para o backorder.
+        var max = p.estoque > 0 ? p.estoque : null;
+        var vIni = indisp ? 0 : (max ? Math.min(p.quantidadePadrao, max) : p.quantidadePadrao);
+        // Ver a peça na loja abre em NOVA aba: o cliente não perde o finder.
+        var link = 'loja.html#/produto/' + encodeURIComponent(p.sku);
         return '<div class="part-row' + (marcada ? ' sel' : '') + '" data-row="' + i + '" data-num="' + esc(p.numeroImagem) + '">' +
           '<input type="checkbox" class="pr-chk" data-row="' + i + '"' + (marcada ? ' checked' : '') + '>' +
           '<span>' + (i + 1) + '</span>' +
-          '<a href="loja.html#/produto/' + encodeURIComponent(p.sku) + '">' + esc(p.sku) + '</a>' +
-          '<b><a href="loja.html#/produto/' + encodeURIComponent(p.sku) + '">' + esc(p.nome) + '</a></b>' +
-          '<input class="cm" type="text" placeholder="Comment">' +
-          '<input class="qn" type="number" min="0" value="' + p.quantidadePadrao + '" data-art="' + esc(p.sku) + '">' +
+          '<a href="' + link + '" target="_blank" rel="noopener">' + esc(p.sku) + '</a>' +
+          '<b><a href="' + link + '" target="_blank" rel="noopener">' + esc(p.nome) + '</a></b>' +
+          statusPeca(p) +
+          '<input class="qn" type="number" min="0"' + (max ? ' max="' + max + '"' : '') + ' value="' + vIni + '"' +
+          ' data-art="' + esc(p.sku) + '"' + (indisp ? ' disabled title="Peça indisponível para compra"' : '') + '>' +
           '<span>(' + p.quantidade + ')</span>' +
           '</div>';
       }).join('');
@@ -252,7 +290,7 @@
         '<div>' +
         '<div class="part-toolbar"><span class="muted">' + esc(s.numero) + ' — ' + esc(s.nome) + '</span>' +
         '<button class="btn" id="fa-cart">🛒 ADD ITEM(S) TO BASKET</button></div>' +
-        (linhas || '<p class="muted">Nenhuma peça cadastrada nesta seção ainda.</p>') +
+        (linhas ? cabecalho + linhas : '<p class="muted">Nenhuma peça cadastrada nesta seção ainda.</p>') +
         '</div>' +
         '<div class="diagram-box">' +
         (s.imagem
@@ -301,18 +339,37 @@
         });
       });
 
-      /* adicionar selecionados à cesta da loja */
+      /* Quantidade limitada ao estoque enquanto digita (peças em estoque). */
+      Array.prototype.forEach.call(fdView.querySelectorAll('.qn[max]'), function (qn) {
+        qn.addEventListener('input', function () {
+          var max = Number(qn.getAttribute('max'));
+          if (Number(qn.value) > max) { qn.value = max; FG.toast('Estoque disponível: ' + max + ' un.', 'erro'); }
+        });
+      });
+
+      /* adicionar selecionados à cesta da loja — mesma regra do carrinho:
+         nunca passa do estoque disponível (contando o que JÁ está na cesta) */
       document.getElementById('fa-cart').addEventListener('click', function () {
-        var add = 0, recusadas = 0;
+        var add = 0, recusadas = 0, ajustadas = 0;
         Array.prototype.forEach.call(fdView.querySelectorAll('.part-row.sel .qn'), function (qn) {
           var qtd = Math.max(0, Number(qn.value) || 0);
           if (qtd <= 0) return;
-          if (FG.cartAdd(qn.getAttribute('data-art'), qtd)) add += qtd;
-          else recusadas++;
+          var art = qn.getAttribute('data-art');
+          var lim = FG.limiteCompra(art);
+          var ja = (FG.cart().find(function (c) { return c.artigo === art; }) || {}).qtd || 0;
+          if (!FG.cartAdd(art, qtd)) { recusadas++; return; }
+          var cabia = Math.max(0, Math.min(qtd, lim - ja));
+          if (cabia < qtd) ajustadas++;
+          add += cabia;
         });
-        if (add) FG.toast(add + ' item(ns) enviados à cesta da loja.' + (recusadas ? ' ' + recusadas + ' indisponível(is).' : ''));
+        if (add) FG.toast(add + ' item(ns) enviados à cesta da loja.' +
+          (ajustadas ? ' ' + ajustadas + ' ajustado(s) ao estoque disponível.' : '') +
+          (recusadas ? ' ' + recusadas + ' indisponível(is).' : ''),
+          (ajustadas || recusadas) ? 'erro' : undefined);
+        else if (ajustadas) FG.toast('A cesta já tem todo o estoque disponível dessa(s) peça(s).', 'erro');
         else if (recusadas) FG.toast('Peça(s) indisponível(is) no momento — sem estoque e sem previsão.', 'erro');
         else FG.toast('Marque ao menos uma peça com quantidade.');
+        refreshCart();
       });
 
       /* ---------- diagrama: zoom + hotspots ---------- */
@@ -328,10 +385,14 @@
         slider.value = z;
         canvas.style.width = Math.round(natW * z) + 'px';
       }
+      // Ajuste automático: a imagem INTEIRA cabe no quadro (largura E altura),
+      // qualquer que seja o tamanho enviado pelo admin — o padrão dos diagramas
+      // é 750×1080 (retrato), que sem o limite de altura estouraria o quadro.
       function zoomAjuste() {
         if (!natW) return 0.6;
-        var fit = (viewport.clientWidth - 2) / natW;
-        return Math.max(0.1, Math.min(1.6, Math.round(fit * 20) / 20));
+        var fit = Math.min((viewport.clientWidth - 2) / natW,
+                           (viewport.clientHeight - 2) / natH);
+        return Math.max(0.1, Math.min(1.6, Math.floor(fit * 20) / 20));
       }
 
       function montarHotspots() {
@@ -339,18 +400,24 @@
           var el = document.createElement('button');
           el.className = 'hotspot';
           el.type = 'button';
+          // data-num continua no elemento (usado para casar com as peças e para
+          // o realce ao passar o mouse), mas o NÚMERO não é exibido: é um dado
+          // interno do administrador — o cliente vê só a área clicável.
           el.setAttribute('data-num', h.linkNumero || '');
-          el.title = (h.texto ? h.texto + ' — ' : '') + (h.linkNumero ? 'nº ' + h.linkNumero + ' na imagem' : '');
+          el.title = h.texto || 'Selecionar peça(s) desta área';
           el.style.left = (h.x / natW * 100) + '%';
           el.style.top = (h.y / natH * 100) + '%';
           el.style.width = (h.w / natW * 100) + '%';
           el.style.height = (h.h / natH * 100) + '%';
+          // Clicar no quadrado marca a(s) peça(s) daquele número na lista.
+          // Compara como String: o data-num do row é string e o linkNumero
+          // pode vir número da API (evita "1" === 1 dar falso).
           el.addEventListener('click', function () {
-            var num = h.linkNumero;
+            var num = h.linkNumero != null ? String(h.linkNumero) : '';
             if (!num) { if (h.texto) FG.toast(h.texto); return; }
             var alvo = null;
             Array.prototype.forEach.call(fdView.querySelectorAll('.part-row'), function (row) {
-              if (row.getAttribute('data-num') === num) {
+              if (String(row.getAttribute('data-num')) === num) {
                 var chk = row.querySelector('.pr-chk');
                 chk.checked = true;
                 row.classList.add('sel');
@@ -415,9 +482,22 @@
     var p = h.split('/');
     if (p[0] === 'modelo' && p[1]) renderModelo(decodeURIComponent(p[1]), p[2] === 'engine' ? 'engine' : 'chassi');
     else if (p[0] === 'secao' && p[1]) renderSecao(Number(p[1]));
-    else fdView.innerHTML = '';
+    else {
+      // Tela inicial: limpa o resultado e reabre o painel de busca — é o que
+      // o VOLTAR encontra ao sair de um modelo/seção.
+      fdView.innerHTML = '';
+      spBody.classList.remove('hidden');
+      spToggle.textContent = '▾ Search';
+    }
     window.scrollTo(0, 0);
   }
+
+  // Botão VOLTAR único do finder: dentro de um modelo/seção volta um passo na
+  // navegação; já na tela de busca, sai para o portal.
+  document.getElementById('fd-voltar').addEventListener('click', function () {
+    if ((location.hash || '').replace('#', '') && history.length > 1) history.back();
+    else location.href = 'portal.html';
+  });
 
   /* carrega os modelos (árvore) e só então liga o router */
   FG.finderModelos().then(function (lista) {

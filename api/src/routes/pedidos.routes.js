@@ -2,17 +2,21 @@
 // Rotas de pedidos (e itens).
 // Cria pedido a partir da cesta (aceitando itens em pré-venda/backorder
 // quando não há estoque), lista, detalha e controla o envio — que pode ser
-// segmentado por escopo (itens normais vs. itens em pré-venda), gerando uma
-// Entrega + Fatura próprias por envio.
+// segmentado por escopo (itens normais vs. itens em pré-venda). O pedido tem
+// UM código (NumeroPedido) e UMA fatura; entregas/rastreios saíram do fluxo.
 // ============================================================
 import { Router } from 'express';
 import { query, getPool, sql } from '../db.js';
 import { requireAuth, requireAdmin } from '../auth.js';
+import {
+  exportacaoLigada, atualizarEstoqueCesta, inserirExportacao,
+  processarExportacoes, cancelarExportacoesDoPedido
+} from '../tiny-pedidos.js';
 
 const router = Router();
 
 // Status válidos (espelham o CHECK constraint da tabela Pedido).
-const STATUS_VALIDOS = ['Pendente', 'Processando', 'Enviado', 'Entregue', 'Cancelado'];
+const STATUS_VALIDOS = ['Pendente', 'Em separação', 'Enviado', 'Entregue', 'Cancelado'];
 // Status terminais: uma vez aqui, o pedido não muda mais.
 const STATUS_FINAIS = ['Entregue', 'Cancelado'];
 // Escopos de envio aceitos.
@@ -49,10 +53,10 @@ function montarPedidos(pedidoRows, itemRows) {
     const somaEnv = itens.reduce((s, i) => s + i.qtdEnviada, 0);
     return {
       id: p.NumeroPedido,
-      cx: p.CodigoCx,
       data: toIso(p.DataPedido),
       usuario: p.UsuarioEmail,
       empresa: p.Empresa,
+      garantia: p.Tipo === 'garantia',
       itens,
       total: Number(p.Total),
       status: p.Status,
@@ -68,7 +72,7 @@ function montarPedidos(pedidoRows, itemRows) {
 }
 
 const SELECT_PEDIDO =
-  `SELECT p.PedidoId, p.NumeroPedido, p.CodigoCx, p.DataPedido, p.Status, p.Total,
+  `SELECT p.PedidoId, p.NumeroPedido, p.DataPedido, p.Status, p.Total, p.Tipo,
           u.Email AS UsuarioEmail, e.RazaoSocial AS Empresa
      FROM dbo.Pedido p
      JOIN dbo.Usuario u ON u.UsuarioId = p.UsuarioId
@@ -95,41 +99,9 @@ async function gerarFaturaPedido(tx, pedidoId, empresaId, total) {
   return { faturaId: FaturaId, numeroFatura: NumeroFatura };
 }
 
-// Acha a fatura original do pedido (cria se faltar — ex.: pedidos antigos sem
-// fatura no momento do pedido). Usada pelo envio para ligar a Entrega.
-async function faturaDoPedido(tx, pedidoId, empresaId, totalFallback) {
-  const r = await new sql.Request(tx)
-    .input('pid', sql.Int, pedidoId)
-    .query(`SELECT TOP 1 f.FaturaId FROM dbo.PedidoFatura pf
-              JOIN dbo.Fatura f ON f.FaturaId = pf.FaturaId
-             WHERE pf.PedidoId=@pid AND f.Tipo='Fatura' AND f.Status <> 'Anulada'
-             ORDER BY f.FaturaId`);
-  if (r.recordset.length) return r.recordset[0].FaturaId;
-  const nova = await gerarFaturaPedido(tx, pedidoId, empresaId, totalFallback || 0);
-  return nova.faturaId;
-}
-
-// Gera uma Entrega (remessa) + rastreio ligada a uma fatura existente (a do
-// pedido). NÃO cria fatura nova — a cobrança é sempre a fatura do pedido.
-async function gerarEntrega(tx, pedidoId, empresaId, faturaId) {
-  const ent = await new sql.Request(tx)
-    .input('eid', sql.Int, empresaId).input('fid', sql.Int, faturaId)
-    .query(`INSERT INTO dbo.Entrega (NumeroEntrega, EmpresaId, FaturaId)
-            OUTPUT inserted.EntregaId, inserted.NumeroEntrega
-            VALUES (RIGHT('0000000000' + CAST(NEXT VALUE FOR dbo.Seq_NumeroEntrega AS VARCHAR(20)), 10), @eid, @fid)`);
-  const { EntregaId, NumeroEntrega } = ent.recordset[0];
-
-  await new sql.Request(tx)
-    .input('entid', sql.Int, EntregaId).input('pid', sql.Int, pedidoId)
-    .query('INSERT INTO dbo.EntregaPedido (EntregaId, PedidoId) VALUES (@entid, @pid)');
-
-  await new sql.Request(tx)
-    .input('entid', sql.Int, EntregaId)
-    .query(`INSERT INTO dbo.RastreioEntrega (EntregaId, Codigo)
-            VALUES (@entid, '000' + RIGHT('000000' + CAST(NEXT VALUE FOR dbo.Seq_RastreioEntrega AS VARCHAR(20)), 6))`);
-
-  return { numeroEntrega: NumeroEntrega };
-}
+/* Entregas e rastreios foram RETIRADOS do fluxo (não há módulo de entrega no
+   projeto): o envio só atualiza itens e status. As tabelas Entrega/Rastreio
+   continuam no banco por causa dos pedidos antigos, mas nada novo é gerado. */
 
 // GET /api/pedidos — cliente vê os da sua empresa; admin vê todos.
 router.get('/pedidos', requireAuth, async (req, res, next) => {
@@ -182,56 +154,33 @@ router.get('/pedidos/:numero', requireAuth, async (req, res, next) => {
       estoque: r.EstoqueAtual == null ? null : r.EstoqueAtual
     }));
 
-    const entregaRows = await query(
-      `SELECT e.NumeroEntrega, e.DataEntrega, e.Status AS EntregaStatus,
-              f.NumeroFatura, f.Valor AS FaturaValor, f.Status AS FaturaStatus
-         FROM dbo.EntregaPedido ep
-         JOIN dbo.Entrega e ON e.EntregaId = ep.EntregaId
-         LEFT JOIN dbo.Fatura f ON f.FaturaId = e.FaturaId
-         JOIN dbo.Pedido p ON p.PedidoId = ep.PedidoId
+    // Faturas do pedido (via PedidoFatura). Entregas/rastreios saíram do fluxo.
+    const faturaRows = await query(
+      `SELECT f.NumeroFatura, f.DataEmissao, f.Valor, f.Status
+         FROM dbo.PedidoFatura pf
+         JOIN dbo.Fatura f ON f.FaturaId = pf.FaturaId
+         JOIN dbo.Pedido p ON p.PedidoId = pf.PedidoId
         WHERE p.NumeroPedido = @num
-        ORDER BY e.EntregaId`,
+        ORDER BY f.FaturaId`,
       { num }
     );
-    const rastreioRows = await query(
-      `SELECT e.NumeroEntrega, r.Codigo
-         FROM dbo.RastreioEntrega r
-         JOIN dbo.Entrega e ON e.EntregaId = r.EntregaId
-         JOIN dbo.EntregaPedido ep ON ep.EntregaId = e.EntregaId
-         JOIN dbo.Pedido p ON p.PedidoId = ep.PedidoId
-        WHERE p.NumeroPedido = @num`,
-      { num }
-    );
-    const rastPorEnt = {};
-    for (const r of rastreioRows) {
-      (rastPorEnt[r.NumeroEntrega] = rastPorEnt[r.NumeroEntrega] || []).push(r.Codigo);
-    }
-    const entregas = entregaRows.map(e => ({
-      numero: e.NumeroEntrega,
-      data: toIso(e.DataEntrega),
-      status: e.EntregaStatus,
-      fatura: e.NumeroFatura,
-      faturaValor: e.FaturaValor == null ? null : Number(e.FaturaValor),
-      faturaStatus: e.FaturaStatus,
-      rastreios: rastPorEnt[e.NumeroEntrega] || []
+    const faturas = faturaRows.map(f => ({
+      numero: f.NumeroFatura, data: toIso(f.DataEmissao),
+      valor: Number(f.Valor), status: f.Status
     }));
-    const faturas = entregaRows
-      .filter(e => e.NumeroFatura)
-      .map(e => ({ numero: e.NumeroFatura, valor: Number(e.FaturaValor), status: e.FaturaStatus }));
 
     const somaQtd = itens.reduce((s, i) => s + i.qtd, 0);
     const somaEnv = itens.reduce((s, i) => s + i.qtdEnviada, 0);
 
     res.json({
       id: p.NumeroPedido,
-      cx: p.CodigoCx,
       data: toIso(p.DataPedido),
       usuario: p.UsuarioEmail,
       empresa: p.Empresa,
+      garantia: p.Tipo === 'garantia',
       total: Number(p.Total),
       status: p.Status,
       itens,
-      entregas,
       faturas,
       progresso: {
         qtd: somaQtd,
@@ -261,6 +210,13 @@ router.post('/pedidos', requireAuth, async (req, res, next) => {
       return res.status(400).json({ erro: 'Item inválido na cesta.' });
     merged.set(skuItem, (merged.get(skuItem) || 0) + qtd);
   }
+
+  // O estoque é compartilhado com outro e-commerce via Tiny: antes de baixar o
+  // estoque local, consulta o saldo REAL no Tiny para cada item da cesta (se a
+  // integração estiver ligada). Se o Magento acabou de vender a peça, o cliente
+  // é barrado aqui — e não descobre depois. Tiny fora do ar não trava a venda.
+  try { await atualizarEstoqueCesta([...merged.keys()]); }
+  catch (e) { console.warn('⚠ Checagem de estoque no Tiny indisponível:', e.message); }
 
   const pool = await getPool();
   const tx = new sql.Transaction(pool);
@@ -320,31 +276,23 @@ router.post('/pedidos', requireAuth, async (req, res, next) => {
       total += preco * qtd;
     }
 
-    // Numeração no banco. NumeroPedido por SEQUENCE global ('0005' + 6 dígitos).
-    // CodigoCx: 'CX' + AAMMDD + 7 dígitos sequenciais que reiniciam por dia.
+    // Numeração no banco: NumeroPedido por SEQUENCE global ('0005' + 6 dígitos)
+    // — o ÚNICO código do pedido (o antigo CodigoCx "CX..." foi aposentado).
     const num = await new sql.Request(tx).query(`
-      DECLARE @now DATETIME2(0) = SYSUTCDATETIME();
-      DECLARE @dia DATE = CAST(@now AS DATE);
-      DECLARE @seqDia INT;
-      SELECT @seqDia = COUNT(*) + 1
-        FROM dbo.Pedido WITH (UPDLOCK, HOLDLOCK)
-       WHERE CAST(DataPedido AS DATE) = @dia;
       SELECT
         '0005' + RIGHT('000000' + CAST(NEXT VALUE FOR dbo.Seq_NumeroPedido AS VARCHAR(20)), 6) AS NumeroPedido,
-        'CX' + FORMAT(@now, 'yyMMdd') + RIGHT('0000000' + CAST(@seqDia AS VARCHAR(7)), 7) AS CodigoCx,
-        @now AS Agora;`);
-    const { NumeroPedido, CodigoCx, Agora } = num.recordset[0];
+        SYSUTCDATETIME() AS Agora;`);
+    const { NumeroPedido, Agora } = num.recordset[0];
 
     const insPed = await new sql.Request(tx)
       .input('num', sql.VarChar(20), NumeroPedido)
-      .input('cx', sql.VarChar(24), CodigoCx)
       .input('uid', sql.Int, req.user.id)
       .input('eid', sql.Int, req.user.empresaId)
       .input('data', sql.DateTime2, Agora)
       .input('total', sql.Decimal(12, 2), total)
-      .query(`INSERT INTO dbo.Pedido (NumeroPedido, CodigoCx, UsuarioId, EmpresaId, DataPedido, Status, Total)
+      .query(`INSERT INTO dbo.Pedido (NumeroPedido, UsuarioId, EmpresaId, DataPedido, Status, Total)
               OUTPUT inserted.PedidoId
-              VALUES (@num, @cx, @uid, @eid, @data, 'Pendente', @total)`);
+              VALUES (@num, @uid, @eid, @data, 'Pendente', @total)`);
     const pedidoId = insPed.recordset[0].PedidoId;
 
     for (const it of itensSnap) {
@@ -365,7 +313,18 @@ router.post('/pedidos', requireAuth, async (req, res, next) => {
     // pré-venda são acompanhadas pelo rastreador de envio (sem cobrança própria).
     await gerarFaturaPedido(tx, pedidoId, req.user.empresaId, total);
 
+    // Agenda a exportação ao Tiny na MESMA transação: ou o pedido nasce com a
+    // exportação agendada, ou nada. Só os itens em estoque — a pré-venda vira
+    // exportação própria quando o admin liberar o envio (escopo 'backorder').
+    if (exportacaoLigada() && itensSnap.some(i => !i.backorder)) {
+      await inserirExportacao(tx, pedidoId, 'normal');
+    }
+
     await tx.commit();
+
+    // Fire-and-forget: cria e aprova o pedido no Tiny (baixa o estoque lá).
+    // Falha não afeta a resposta — a linha fica 'erro' e o cron re-tenta.
+    processarExportacoes();
 
     const emp = await query('SELECT RazaoSocial FROM dbo.Empresa WHERE EmpresaId = @id', { id: req.user.empresaId });
     const itensEmBackorder = itensSnap.filter(i => i.backorder)
@@ -373,7 +332,6 @@ router.post('/pedidos', requireAuth, async (req, res, next) => {
 
     res.status(201).json({
       id: NumeroPedido,
-      cx: CodigoCx,
       data: toIso(Agora),
       usuario: req.user.email,
       empresa: emp[0]?.RazaoSocial || '',
@@ -391,13 +349,13 @@ router.post('/pedidos', requireAuth, async (req, res, next) => {
 // PUT /api/pedidos/:numero/status (admin) — controla status e envio.
 // Body: { status?, escopo? }.
 //  - status 'Cancelado'  -> cancela: devolve ao estoque só o que foi baixado
-//    (itens normais: Quantidade; pré-venda: só a parte já enviada) e anula as
-//    faturas/entregas geradas.
-//  - escopo presente OU status 'Enviado' -> ENVIO segmentado: gera Entrega +
-//    Fatura próprias cobrindo apenas os itens do escopo que ainda faltam enviar
-//    (pré-venda só envia o que já tem estoque, baixando-o agora). O status do
-//    pedido vira 'Enviado' se tudo foi enviado, senão 'Processando'.
-//  - demais status (Pendente/Processando/Entregue) -> apenas muda o status.
+//    (itens normais: Quantidade; pré-venda: só a parte já enviada) e anula a
+//    fatura do pedido.
+//  - escopo presente OU status 'Enviado' -> ENVIO segmentado: marca como
+//    enviados os itens do escopo que ainda faltam (pré-venda só envia o que já
+//    tem estoque, baixando-o agora). O status do pedido vira 'Enviado' se tudo
+//    foi enviado, senão 'Em separação'.
+//  - demais status (Pendente/Em separação/Entregue) -> apenas muda o status.
 router.put('/pedidos/:numero/status', requireAuth, requireAdmin, async (req, res, next) => {
   const status = String(req.body?.status || '').trim();
   let escopo = String(req.body?.escopo || '').trim().toLowerCase();
@@ -461,6 +419,10 @@ router.put('/pedidos/:numero/status', requireAuth, requireAdmin, async (req, res
         .query("UPDATE dbo.Pedido SET Status = 'Cancelado', AtualizadoEm = SYSUTCDATETIME() WHERE PedidoId = @pid");
 
       await tx.commit();
+
+      // Cancela também no Tiny (devolve o estoque lá). Fire-and-forget.
+      cancelarExportacoesDoPedido(ped.PedidoId);
+
       return res.json({ ok: true, status: 'Cancelado' });
     }
 
@@ -475,12 +437,14 @@ router.put('/pedidos/:numero/status', requireAuth, requireAdmin, async (req, res
         .input('pid', sql.Int, ped.PedidoId)
         .input('alvo', sql.Bit, alvoBackorder)
         .query(`SELECT pi.PedidoItemId, pi.ProdutoId, pi.Quantidade,
-                       pi.QuantidadeEnviada, pi.EmBackorder
+                       pi.QuantidadeEnviada, pi.EmBackorder,
+                       pi.Sku, pi.NomeProduto, pi.PrecoUnitario
                   FROM dbo.PedidoItem pi
                  WHERE pi.PedidoId = @pid AND pi.Quantidade > pi.QuantidadeEnviada
                    AND pi.EmBackorder = @alvo`);
 
       let enviados = 0;
+      const liberados = []; // snapshot da pré-venda liberada agora (p/ Tiny)
       for (const it of cand.recordset) {
         const restante = it.Quantidade - it.QuantidadeEnviada;
         if (it.EmBackorder) {
@@ -491,6 +455,7 @@ router.put('/pedidos/:numero/status', requireAuth, requireAdmin, async (req, res
             .query(`UPDATE dbo.Produto SET Estoque = Estoque - @rem, AtualizadoEm = SYSUTCDATETIME()
                      WHERE ProdutoId = @prod AND Estoque >= @rem`);
           if (!dec.rowsAffected[0]) continue; // sem estoque: fica pendente
+          liberados.push({ sku: it.Sku, nome: it.NomeProduto, preco: Number(it.PrecoUnitario), qtd: restante });
         }
         await new sql.Request(tx)
           .input('iid', sql.Int, it.PedidoItemId)
@@ -529,35 +494,32 @@ router.put('/pedidos/:numero/status', requireAuth, requireAdmin, async (req, res
         });
       }
 
-      // Remessa (Entrega) do que foi enviado, ligada à fatura ÚNICA do pedido —
-      // sem gerar fatura nova (a cobrança é sempre a fatura original do pedido).
-      let numeroEntrega = null;
-      if (enviados) {
-        const fid = await faturaDoPedido(tx, ped.PedidoId, ped.EmpresaId, ped.Total);
-        const d = await gerarEntrega(tx, ped.PedidoId, ped.EmpresaId, fid);
-        numeroEntrega = d.numeroEntrega;
-      }
-
       // Pedido com peças em estoque: status considera só elas (a pré-venda segue
-      // no rastreador, à parte). Pedido só de pré-venda: só vira 'Enviado' quando
-      // TODAS as peças saírem (o que exige estoque).
+      // no rastreador, à parte). LIBERAR pré-venda (escopo 'backorder') nunca
+      // marca o pedido como 'Enviado' — a peça só foi liberada para SEPARAÇÃO;
+      // o envio de verdade é o admin quem confirma depois, mudando o status.
       const faltam = totNormais > 0 ? pendNormais > 0 : pendTotal > 0;
-      const novoStatus = faltam ? 'Processando' : 'Enviado';
+      const novoStatus = (alvoBackorder || faltam) ? 'Em separação' : 'Enviado';
       await new sql.Request(tx)
         .input('pid', sql.Int, ped.PedidoId)
-        .input('st', sql.VarChar(14), novoStatus)
+        .input('st', sql.NVarChar(14), novoStatus)  // NVarChar: preserva "Em separação" (o server converte p/ o varchar Latin1)
         .query('UPDATE dbo.Pedido SET Status = @st, AtualizadoEm = SYSUTCDATETIME() WHERE PedidoId = @pid');
 
+      // Pré-venda liberada agora vira um pedido próprio no Tiny (baixa o
+      // estoque lá): snapshot do que saiu NESTA liberação, na mesma transação.
+      if (exportacaoLigada() && liberados.length) {
+        await inserirExportacao(tx, ped.PedidoId, 'backorder', liberados);
+      }
+
       await tx.commit();
-      return res.json({
-        ok: true, status: novoStatus, parcial: faltam, entrega: numeroEntrega
-      });
+      if (liberados.length) processarExportacoes(); // fire-and-forget
+      return res.json({ ok: true, status: novoStatus, parcial: faltam });
     }
 
-    // ---- Mudança simples de status (Pendente/Processando/Entregue) ----
+    // ---- Mudança simples de status (Pendente/Em separação/Entregue) ----
     await new sql.Request(tx)
       .input('num', sql.VarChar(20), req.params.numero)
-      .input('st', sql.VarChar(14), status)
+      .input('st', sql.NVarChar(14), status)  // NVarChar: preserva "Em separação"
       .query('UPDATE dbo.Pedido SET Status = @st, AtualizadoEm = SYSUTCDATETIME() WHERE NumeroPedido = @num');
 
     await tx.commit();
@@ -584,7 +546,8 @@ router.put('/pedidos/:numero/itens/:itemId/enviado', requireAuth, requireAdmin, 
     const cur = await new sql.Request(tx)
       .input('num', sql.VarChar(20), req.params.numero)
       .input('iid', sql.Int, Number(req.params.itemId))
-      .query(`SELECT pi.PedidoItemId, pi.ProdutoId, pi.Quantidade, pi.QuantidadeEnviada, pi.EmBackorder
+      .query(`SELECT pi.PedidoId, pi.PedidoItemId, pi.ProdutoId, pi.Quantidade, pi.QuantidadeEnviada,
+                     pi.EmBackorder, pi.Sku, pi.NomeProduto, pi.PrecoUnitario, p.Status
                 FROM dbo.PedidoItem pi
                 JOIN dbo.Pedido p ON p.PedidoId = pi.PedidoId
                WHERE p.NumeroPedido = @num AND pi.PedidoItemId = @iid`);
@@ -593,6 +556,13 @@ router.put('/pedidos/:numero/itens/:itemId/enviado', requireAuth, requireAdmin, 
       return res.status(404).json({ erro: 'Item não encontrado neste pedido.' });
     }
     const it = cur.recordset[0];
+    // Pedido entregue ou cancelado está fechado — nem o painel admin mexe.
+    if (STATUS_FINAIS.includes(it.Status)) {
+      await tx.rollback();
+      return res.status(409).json({
+        erro: `Pedido ${it.Status.toLowerCase()} — as peças não podem mais ser alteradas.`
+      });
+    }
     if (qtd > it.Quantidade) {
       await tx.rollback();
       return res.status(400).json({ erro: 'Quantidade enviada não pode exceder a pedida.' });
@@ -617,7 +587,19 @@ router.put('/pedidos/:numero/itens/:itemId/enviado', requireAuth, requireAdmin, 
       .input('q', sql.Int, qtd)
       .query('UPDATE dbo.PedidoItem SET QuantidadeEnviada = @q WHERE PedidoItemId = @iid');
 
+    // Aumento em item de pré-venda consumiu estoque local: espelha no Tiny
+    // como liberação (pedido próprio lá). Redução não é desfeita no Tiny —
+    // ajuste manualmente por lá se a liberação já tiver sido exportada.
+    if (exportacaoLigada() && it.EmBackorder && delta > 0) {
+      await inserirExportacao(tx, it.PedidoId, 'backorder',
+        [{ sku: it.Sku, nome: it.NomeProduto, preco: Number(it.PrecoUnitario), qtd: delta }]);
+    } else if (it.EmBackorder && delta < 0) {
+      console.warn(`⚠ Quantidade enviada reduzida no item ${it.Sku} (pedido ${req.params.numero}): ` +
+        'se a liberação já foi exportada ao Tiny, ajuste o pedido lá manualmente.');
+    }
+
     await tx.commit();
+    if (exportacaoLigada() && it.EmBackorder && delta > 0) processarExportacoes();
     res.json({ ok: true, itemId: it.PedidoItemId, qtdEnviada: qtd });
   } catch (e) {
     try { await tx.rollback(); } catch { /* já desfeita */ }

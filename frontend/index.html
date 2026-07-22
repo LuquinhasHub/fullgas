@@ -4,7 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>FULLGAS B2B — Acesso</title>
-  <link rel="stylesheet" href="css/styles.css">
+  <link rel="icon" type="image/png" href="img/favicon.png?v=20260722d">
+  <link rel="apple-touch-icon" href="img/favicon.png?v=20260722d">
+  <link rel="stylesheet" href="css/styles.css?v=20260722b">
 </head>
 <body>
   <div class="auth-wrap">
@@ -32,6 +34,24 @@
             <input id="lg-senha" type="password" autocomplete="current-password" placeholder="••••••••">
           </div>
           <button class="btn red" id="btn-login" type="button" style="width:100%;justify-content:center;">Entrar no portal</button>
+          <p style="margin:12px 0 0;text-align:center;">
+            <button class="link-btn" id="lk-esqueci" type="button">Esqueci minha senha</button>
+          </p>
+        </div>
+
+        <!-- ESQUECI MINHA SENHA — pede o e-mail cadastrado e manda o link -->
+        <div id="form-esq" class="hidden">
+          <p class="muted" style="font-size:13px;margin-top:0;">
+            Informe o e-mail cadastrado. Enviaremos um link para você criar uma senha nova.
+          </p>
+          <div class="field">
+            <label for="es-email">E-mail cadastrado</label>
+            <input id="es-email" type="email" autocomplete="username" placeholder="voce@suaempresa.com.br">
+          </div>
+          <button class="btn red" id="btn-esq" type="button" style="width:100%;justify-content:center;">Enviar link de recuperação</button>
+          <p style="margin:12px 0 0;text-align:center;">
+            <button class="link-btn" id="lk-voltar-login" type="button">← Voltar para o login</button>
+          </p>
         </div>
 
         <!-- CADASTRO -->
@@ -44,14 +64,67 @@
             <label for="cd-empresa">Empresa / Razão social</label>
             <input id="cd-empresa" type="text" placeholder="Nome da concessionária">
           </div>
-          <div class="field">
-            <label for="cd-email">E-mail</label>
-            <input id="cd-email" type="email" placeholder="voce@suaempresa.com.br">
+          <div class="field-row">
+            <div class="field">
+              <label for="cd-cnpj">CNPJ</label>
+              <input id="cd-cnpj" type="text" inputmode="numeric" maxlength="18" placeholder="00.000.000/0000-00">
+            </div>
+            <div class="field">
+              <label for="cd-ie">Inscrição estadual <span class="muted">(opcional)</span></label>
+              <input id="cd-ie" type="text" maxlength="20" placeholder="000.000.000.000 ou ISENTO">
+            </div>
+          </div>
+          <div class="field-row">
+            <div class="field">
+              <label for="cd-telefone">Telefone</label>
+              <input id="cd-telefone" type="text" inputmode="tel" placeholder="(00) 00000-0000">
+            </div>
+            <div class="field">
+              <label for="cd-email">E-mail</label>
+              <input id="cd-email" type="email" placeholder="voce@suaempresa.com.br">
+            </div>
           </div>
           <div class="field">
             <label for="cd-senha">Senha</label>
             <input id="cd-senha" type="password" placeholder="Mínimo 6 caracteres">
           </div>
+
+          <div class="field-title">Endereço da empresa</div>
+          <div class="field-row">
+            <div class="field" style="flex:0 0 40%;">
+              <label for="cd-cep">CEP</label>
+              <input id="cd-cep" type="text" inputmode="numeric" maxlength="9" placeholder="00000-000">
+            </div>
+            <div class="field">
+              <label for="cd-logradouro">Logradouro</label>
+              <input id="cd-logradouro" type="text" placeholder="Rua / Avenida">
+            </div>
+          </div>
+          <div class="field-row">
+            <div class="field" style="flex:0 0 30%;">
+              <label for="cd-numero">Número</label>
+              <input id="cd-numero" type="text" placeholder="123">
+            </div>
+            <div class="field">
+              <label for="cd-complemento">Complemento</label>
+              <input id="cd-complemento" type="text" placeholder="Sala, bloco (opcional)">
+            </div>
+          </div>
+          <div class="field">
+            <label for="cd-bairro">Bairro</label>
+            <input id="cd-bairro" type="text" placeholder="Bairro">
+          </div>
+          <div class="field-row">
+            <div class="field">
+              <label for="cd-cidade">Cidade</label>
+              <input id="cd-cidade" type="text" placeholder="Cidade">
+            </div>
+            <div class="field" style="flex:0 0 90px;">
+              <label for="cd-uf">UF</label>
+              <input id="cd-uf" type="text" maxlength="2" placeholder="SP" style="text-transform:uppercase;">
+            </div>
+          </div>
+
           <button class="btn red" id="btn-cad" type="button" style="width:100%;justify-content:center;">Enviar cadastro para aprovação</button>
           <p class="muted" style="font-size:12px;margin-top:10px;">Novos cadastros entram como <b>cliente</b> e precisam ser aprovados por um administrador antes do primeiro acesso.</p>
         </div>
@@ -66,9 +139,9 @@
     </div>
   </div>
 
-  <script src="js/config.js"></script>
-  <script src="js/store.js"></script>
-  <script src="js/api-adapter.js"></script>
-  <script src="js/auth.js"></script>
+  <script src="js/config.js?v=20260722b"></script>
+  <script src="js/store.js?v=20260722b"></script>
+  <script src="js/api-adapter.js?v=20260722b"></script>
+  <script src="js/auth.js?v=20260722b"></script>
 </body>
 </html>

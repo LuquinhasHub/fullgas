@@ -1,41 +1,117 @@
 // ============================================================
 // Rotas de faturas — superfície da "Conta financeira".
-// Devolve apenas faturas reais (cobrança): a fatura "original" do pedido
-// (Tipo 'Fatura', valor cheio = todas as peças) e eventuais 'Nota de crédito'.
-// A pré-venda NÃO é fatura — vive no rastreador (GET /api/prevenda).
+// Devolve apenas faturas reais de cobrança (Tipo 'Fatura'): a fatura do
+// pedido, com valor cheio = todas as peças. A antiga 'Nota de crédito' saiu
+// do fluxo (garantia aprovada vira pedido de garantia, não crédito) e não é
+// mais listada. A pré-venda NÃO é fatura — vive no rastreador (/api/prevenda).
+//
+// Cada fatura vem ENRIQUECIDA para o PDF detalhado do portal:
+//   - itens[]   linhas dos pedidos ligados (sku, nome, preço, qtd, subtotal)
+//   - pedidos[] números dos pedidos que a fatura cobre
+//   - empresa   razão social + cnpj + país + endereço principal (destinatário)
 // ============================================================
 import { Router } from 'express';
 import { query } from '../db.js';
-import { requireAuth } from '../auth.js';
+import { requireAuth, requireArea } from '../auth.js';
 
 const router = Router();
 
+// Agrupa as linhas de pedido (PedidoItem) por FaturaId, para todas as faturas
+// da lista de uma vez (evita N+1). Devolve Map<FaturaId, item[]>.
+async function itensPorFatura(faturaIds) {
+  const map = new Map();
+  if (!faturaIds.length) return map;
+  const params = {};
+  const marks = faturaIds.map((id, i) => { params['f' + i] = id; return '@f' + i; });
+  const rows = await query(
+    `SELECT pf.FaturaId, p.NumeroPedido,
+            pi.Sku, pi.NomeProduto, pi.PrecoUnitario, pi.Quantidade, pi.Subtotal
+       FROM dbo.PedidoFatura pf
+       JOIN dbo.PedidoItem pi ON pi.PedidoId = pf.PedidoId
+       JOIN dbo.Pedido p ON p.PedidoId = pf.PedidoId
+      WHERE pf.FaturaId IN (${marks.join(',')})
+      ORDER BY pf.FaturaId, pi.PedidoItemId`,
+    params
+  );
+  for (const r of rows) {
+    if (!map.has(r.FaturaId)) map.set(r.FaturaId, []);
+    map.get(r.FaturaId).push(r);
+  }
+  return map;
+}
+
+// Dados do destinatário (empresa + endereço principal) por EmpresaId, em lote.
+async function empresasPorId(empresaIds) {
+  const map = new Map();
+  if (!empresaIds.length) return map;
+  const params = {};
+  const marks = empresaIds.map((id, i) => { params['e' + i] = id; return '@e' + i; });
+  const rows = await query(
+    `SELECT e.EmpresaId, e.RazaoSocial, e.NomeFantasia, e.Cnpj, e.Pais,
+            en.Logradouro, en.Numero, en.Complemento, en.Bairro,
+            en.Cidade, en.Uf, en.Cep, en.Pais AS EnderecoPais
+       FROM dbo.Empresa e
+       OUTER APPLY (
+         SELECT TOP 1 * FROM dbo.Endereco en
+          WHERE en.EmpresaId = e.EmpresaId
+          ORDER BY en.Principal DESC, en.EnderecoId ASC
+       ) en
+      WHERE e.EmpresaId IN (${marks.join(',')})`,
+    params
+  );
+  for (const r of rows) map.set(r.EmpresaId, r);
+  return map;
+}
+
 // GET /api/faturas — cliente vê as da própria empresa; admin vê todas.
-router.get('/faturas', requireAuth, async (req, res, next) => {
+// Conta interna (sub-dealer) sem a área 'financeiro' recebe 403.
+router.get('/faturas', requireAuth, requireArea('financeiro'), async (req, res, next) => {
   try {
     const eid = req.user.papel === 'admin' ? null : req.user.empresaId;
     const faturas = await query(
-      `SELECT f.NumeroFatura, f.Tipo, f.DataEmissao, f.Valor, f.Moeda, f.Status,
-              f.EmpresaId, f.ReferenciaReivindicacao, e.RazaoSocial AS Empresa
+      `SELECT f.FaturaId, f.NumeroFatura, f.Tipo, f.DataEmissao, f.Valor, f.Moeda,
+              f.Status, f.EmpresaId, f.ReferenciaReivindicacao
          FROM dbo.Fatura f
-         LEFT JOIN dbo.Empresa e ON e.EmpresaId = f.EmpresaId
-        WHERE f.Tipo IN ('Fatura', 'Nota de crédito')
+        WHERE f.Tipo = 'Fatura'
           AND (@eid IS NULL OR f.EmpresaId = @eid)
         ORDER BY f.DataEmissao DESC, f.FaturaId DESC`,
       { eid }
     );
-    res.json(faturas.map(f => ({
-      id: f.NumeroFatura,
-      numero: f.NumeroFatura,
-      tipo: f.Tipo,
-      data: f.DataEmissao instanceof Date ? f.DataEmissao.toISOString() : f.DataEmissao,
-      valor: Number(f.Valor),
-      moeda: f.Moeda,
-      status: f.Status,
-      referencia: f.ReferenciaReivindicacao || null,
-      empresa: f.Empresa || '',
-      empresaId: f.EmpresaId
-    })));
+
+    const [itens, empresas] = await Promise.all([
+      itensPorFatura(faturas.map(f => f.FaturaId)),
+      empresasPorId([...new Set(faturas.map(f => f.EmpresaId))])
+    ]);
+
+    res.json(faturas.map(f => {
+      const linhas = itens.get(f.FaturaId) || [];
+      const emp = empresas.get(f.EmpresaId) || {};
+      const pedidos = [...new Set(linhas.map(l => l.NumeroPedido))];
+      return {
+        id: f.NumeroFatura,
+        numero: f.NumeroFatura,
+        tipo: f.Tipo,
+        data: f.DataEmissao instanceof Date ? f.DataEmissao.toISOString() : f.DataEmissao,
+        valor: Number(f.Valor),
+        moeda: f.Moeda,
+        status: f.Status,
+        referencia: f.ReferenciaReivindicacao || null,
+        empresa: emp.RazaoSocial || '',
+        empresaId: f.EmpresaId,
+        cnpj: emp.Cnpj || '',
+        pais: emp.Pais || '',
+        pedidos,
+        endereco: emp.Logradouro ? {
+          logradouro: emp.Logradouro, numero: emp.Numero || '', complemento: emp.Complemento || '',
+          bairro: emp.Bairro || '', cidade: emp.Cidade || '', uf: emp.Uf || '',
+          cep: emp.Cep || '', pais: emp.EnderecoPais || emp.Pais || ''
+        } : null,
+        itens: linhas.map(l => ({
+          sku: l.Sku, nome: l.NomeProduto || '', preco: Number(l.PrecoUnitario),
+          qtd: l.Quantidade, subtotal: Number(l.Subtotal)
+        }))
+      };
+    }));
   } catch (e) { next(e); }
 });
 

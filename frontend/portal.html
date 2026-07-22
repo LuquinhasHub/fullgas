@@ -4,13 +4,15 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Fullgas DealerNet — Portal B2B</title>
-  <link rel="stylesheet" href="css/styles.css">
+  <link rel="icon" type="image/png" href="img/favicon.png?v=20260722d">
+  <link rel="apple-touch-icon" href="img/favicon.png?v=20260722d">
+  <link rel="stylesheet" href="css/styles.css?v=20260722b">
 </head>
 <body>
 
   <!-- ====== barra superior ====== -->
   <header class="topbar">
-    <span class="logo">Fullgas<span>Net</span></span>
+    <a href="portal.html" title="Página principal" style="text-decoration:none;"><span class="logo">Fullgas<span>Net</span></span></a>
 
     <form class="searchbox" id="search-form">
       <input id="search-input" type="text" placeholder="Pesquisar por NIV, Motos, Artigos">
@@ -19,7 +21,7 @@
 
     <button class="icon-btn" id="btn-notif" title="Notificações">
       <span class="pill" id="notif-pill">0</span>
-      <span style="font-size:22px;">✉️</span>
+      <span style="font-size:26px;">✉️</span>
     </button>
 
     <a class="pf-link" href="finder.html">
@@ -28,7 +30,7 @@
     </a>
 
     <span class="spacer"></span>
-    <span class="brand"><span class="g-badge">F</span> FULLGAS</span>
+    <a href="portal.html" title="Página principal" style="text-decoration:none;"><span class="brand"><span class="g-badge">F</span> FULLGAS</span></a>
   </header>
 
   <div class="userline">
@@ -62,6 +64,7 @@
         <a href="#financeiro">Resumo financeiro</a>
       </div>
     </div>
+    <a href="#conta" data-rota="conta">Minha conta</a>
   </nav>
 
   <div class="crumb" id="crumb"><a href="#home">Página inicial</a></div>
@@ -70,9 +73,11 @@
 
   <div id="print-area" class="hidden" aria-hidden="true"></div>
 
-  <script src="js/config.js"></script>
-  <script src="js/store.js"></script>
-  <script src="js/api-adapter.js"></script>
-  <script src="js/portal.js"></script>
+  <script src="js/vendor/html2pdf.bundle.min.js"></script>
+  <script src="js/logo-data.js?v=20260722b"></script>
+  <script src="js/config.js?v=20260722b"></script>
+  <script src="js/store.js?v=20260722b"></script>
+  <script src="js/api-adapter.js?v=20260722b"></script>
+  <script src="js/portal.js?v=20260722c"></script>
 </body>
 </html>

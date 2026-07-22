@@ -2,9 +2,15 @@
    FULLGAS B2B — estilos (auth + portal + loja + finder)
    ========================================================= */
 :root {
-  --red: #d20a11;
-  --red-dark: #a50d14;
-  --red-soft: #fbe3dc;
+  /* Cores da MARCA (amarelo Fullgas — ver docs/referencias). Os nomes
+     "--red*" são históricos, da época em que o tema era vermelho: --red é o
+     amarelo de fundos/bordas/destaques; --red-dark é o dourado escuro usado
+     em TEXTOS (amarelo puro sobre branco não tem contraste) e hovers;
+     --red-soft é o fundo suave. Vermelho de verdade ficou só nos estados
+     semânticos (erro/crítico/bloqueado), hardcoded onde é usado. */
+  --red: #e5b100;
+  --red-dark: #c69a00;
+  --red-soft: #fdf3d3;
   --ink: #1c1c1c;
   --gray: #6e6e6e;
   --tab: #e9e9e9;
@@ -18,7 +24,11 @@
 
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; }
-body { font-family: var(--font); font-size: 14px; color: var(--ink); background: var(--bg); }
+/* Escala geral da interface — deixa fontes, espaçamentos e ícones ~15% maiores
+   de forma proporcional (o layout é quase todo em px, então `zoom` é o jeito
+   confiável de ampliar tudo de uma vez no Chrome/Edge). A impressão e a geração
+   de PDF resetam para 1 (ver @media print e baixarFaturaPDF). */
+body { font-family: var(--font); font-size: 14px; color: var(--ink); background: var(--bg); zoom: 1.15; }
 a { color: var(--red); text-decoration: none; }
 a:hover { text-decoration: underline; }
 img, svg { vertical-align: middle; }
@@ -28,6 +38,19 @@ input, select, textarea { font-family: inherit; font-size: 14px; }
 h1, h2, h3 { margin: 0 0 .5em; }
 .hidden { display: none !important; }
 .muted { color: var(--gray); }
+
+/* Botão "Voltar" padrão da aplicação — sempre visível, no início da trilha
+   de navegação (loja, portal e finder usam o mesmo estilo). */
+.btn-voltar {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: var(--ink); color: #fff; border: none; border-radius: 18px;
+  padding: 7px 16px 7px 12px; font-size: 12px; font-weight: 700;
+  letter-spacing: .5px; cursor: pointer; text-decoration: none;
+  text-transform: uppercase; transition: background .12s, transform .1s;
+}
+.btn-voltar::before { content: "←"; font-size: 14px; line-height: 1; }
+.btn-voltar:hover { background: #000; text-decoration: none; transform: translateX(-2px); }
+.btn-voltar + * { margin-left: 6px; }
 .right { text-align: right; }
 .nowrap { white-space: nowrap; }
 
@@ -43,7 +66,7 @@ h1, h2, h3 { margin: 0 0 .5em; }
   font-style: italic; font-weight: 900; font-size: 17px; color: var(--red);
 }
 .brand.big { font-size: 26px; }
-.brand.white, .brand.white .g-badge { color: #fff; border-color: #fff; }
+.brand.white, .brand.white .g-badge { color: var(--ink); border-color: var(--ink); }
 
 /* ---------- botões ---------- */
 .btn {
@@ -52,7 +75,7 @@ h1, h2, h3 { margin: 0 0 .5em; }
   padding: 7px 14px; font-size: 13px; border-radius: 2px;
 }
 .btn:hover { background: #e8e8e8; }
-.btn.red { background: var(--red); border-color: var(--red); color: #fff; font-weight: 600; }
+.btn.red { background: var(--red); border-color: var(--red); color: var(--ink); font-weight: 600; }
 .btn.red:hover { background: var(--red-dark); }
 .btn.dark { background: #4a4a4a; border-color: #4a4a4a; color: #fff; text-transform: uppercase; font-weight: 600; }
 .btn.dark:hover { background: #333; }
@@ -72,6 +95,35 @@ h1, h2, h3 { margin: 0 0 .5em; }
 .field input:focus, .field select:focus, .field textarea:focus,
 .btn:focus-visible, a:focus-visible {
   outline: 2px solid var(--red); outline-offset: 1px;
+}
+/* Duas colunas de campos lado a lado (ex.: CNPJ + Telefone, Cidade + UF). */
+.field-row { display: flex; gap: 12px; }
+.field-row .field { flex: 1; }
+/* ---------- Minha conta (cadastro da empresa + contas internas) ---------- */
+.conta-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0 16px; max-width: 980px;
+}
+.conta-nova { border-top: 1px solid var(--line); margin-top: 18px; }
+.perm-list { display: flex; flex-wrap: wrap; gap: 8px 14px; padding: 6px 0; }
+.perm-chk {
+  display: inline-flex; align-items: center; gap: 6px; font-size: 13px;
+  border: 1px solid var(--line); padding: 6px 10px; background: #fff; cursor: pointer;
+}
+.perm-chk:hover { border-color: var(--red); }
+.perm-chk input { accent-color: var(--red); }
+
+/* CEP consultando o ViaCEP — listra animada na borda inferior. */
+.field input.buscando {
+  background-image: linear-gradient(90deg, var(--red) 0 30%, transparent 30% 100%);
+  background-size: 200% 2px; background-repeat: no-repeat; background-position: 0 100%;
+  animation: cep-busca .8s linear infinite;
+}
+@keyframes cep-busca { from { background-position: -100% 100%; } to { background-position: 200% 100%; } }
+/* Subtítulo separador dentro de um formulário (ex.: "Endereço da empresa"). */
+.field-title {
+  font-size: 12px; font-weight: 700; color: var(--red); text-transform: uppercase;
+  letter-spacing: .04em; margin: 6px 0 10px; padding-top: 10px; border-top: 1px solid var(--line);
 }
 
 /* ---------- tabelas ---------- */
@@ -93,14 +145,14 @@ h1, h2, h3 { margin: 0 0 .5em; }
 }
 .badge.proc { border-color: #999; }
 .badge.ok { border-color: var(--green); color: var(--green); }
-.badge.bad { border-color: var(--red); color: var(--red); }
+.badge.bad { border-color: #b91c1c; color: #b91c1c; } /* estado ruim: vermelho semântico */
 .badge.draft { border-color: var(--yellow); color: #9c7e00; }
 
 .stock-ok { color: var(--green); font-weight: 600; }
 .stock-ok::before { content: "■ "; }
 .stock-date { color: var(--yellow); font-weight: 600; }
 .stock-date::before { content: "■ "; }
-.stock-out { color: var(--red); font-weight: 600; }
+.stock-out { color: #b91c1c; font-weight: 600; } /* sem estoque: vermelho semântico */
 
 /* ---------- toast ---------- */
 #toast { position: fixed; right: 16px; bottom: 16px; z-index: 999; display: flex; flex-direction: column; gap: 8px; }
@@ -122,6 +174,10 @@ h1, h2, h3 { margin: 0 0 .5em; }
 .pill-status { display: inline-block; font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 2px; background: #eee; color: #555; text-transform: uppercase; }
 .pill-status.Pendente { background: #fff3cd; color: #8a6d00; }
 .pill-status.Processando { background: #dbeafe; color: #1d4ed8; }
+/* "Em separação": o status tem espaço/acento, então o nome vira classes soltas.
+   O seletor por atributo pega tanto o slug do admin (ps-Em-separacao) quanto o
+   texto cru "Em separação" usado na loja/portal. */
+.pill-status[class*="separa"] { background: #dbeafe; color: #1d4ed8; }
 .pill-status.Enviado { background: #ede9fe; color: #6d28d9; }
 .pill-status.Entregue { background: #dcfce7; color: #15803d; }
 .pill-status.Cancelado, .pill-status.Recusada, .pill-status.bloqueado { background: #fee2e2; color: #b91c1c; }
@@ -131,10 +187,17 @@ h1, h2, h3 { margin: 0 0 .5em; }
 .pill-status.cliente { background: #e5e7eb; color: #374151; }
 .pill-status.Parcial { background: #fde68a; color: #92400e; }
 .pill-status.PreVenda { background: #ffe1cf; color: #9a3412; }
+.pill-status.Garantia { background: #dbeafe; color: #1d4ed8; }
 .pill-status.Emitida { background: #dcfce7; color: #15803d; }
 .pill-status.Anulada { background: #fee2e2; color: #b91c1c; }
 .pill-status.Aguardando { background: #e2e8f0; color: #475569; }
 .pill-status.Disponivel { background: #ccfbf1; color: #0f766e; }
+.pill-status.Tiny { background: #cffafe; color: #0e7490; }
+/* Chassis — esquema de cores pedido: Disponível = amarelo da marca, Vendido =
+   verde. Miram a classe slug (ps-<slug>), que é só do status do veículo: a
+   .Disponivel sem prefixo é a peça de pré-venda "disponível p/ envio". */
+.pill-status.ps-Disponivel { background: var(--red); color: var(--ink); }
+.pill-status.ps-Vendido { background: #15803d; color: #fff; }
 
 /* ---------- pré-venda (admin e cliente) ---------- */
 .fin-prevenda { border: 1px solid #e6e6e6; border-radius: 6px; margin: 10px 0; overflow: hidden; }
@@ -156,7 +219,15 @@ h1, h2, h3 { margin: 0 0 .5em; }
 .item-dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; vertical-align: middle; }
 .item-dot.dot-ok { background: #15803d; }
 .item-dot.dot-parcial { background: #d99a00; }
-.item-dot.dot-pendente { background: #cbd5e1; }
+.item-dot.dot-pendente { background: #cbd5e1; border: 1px solid #94a3b8; }
+.item-dot.dot-cancelado { background: #b91c1c; }
+/* Legenda das bolinhas, abaixo da tabela de itens do pedido. */
+.dot-legenda {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 18px;
+  margin: 8px 0 4px; font-size: 12px; color: var(--gray);
+}
+.dot-legenda strong { color: var(--ink); font-size: 12px; }
+.dot-legenda > span { display: inline-flex; align-items: center; gap: 6px; }
 
 /* ---------- modal ---------- */
 .modal-back {
@@ -166,6 +237,7 @@ h1, h2, h3 { margin: 0 0 .5em; }
 .modal {
   background: #fff; width: 560px; max-width: 100%; box-shadow: var(--shadow);
   border-top: 4px solid var(--red); max-height: 85vh; overflow: auto;
+  position: relative; /* âncora da cortina de envio (.claim-envio) */
 }
 .modal header { display: flex; justify-content: space-between; align-items: center; padding: 14px 18px; border-bottom: 1px solid var(--line); }
 .modal header h3 { margin: 0; font-size: 16px; }
@@ -196,8 +268,36 @@ h1, h2, h3 { margin: 0 0 .5em; }
 .auth-tabs button.on { background: #fff; color: var(--ink); border-top-color: var(--red); }
 .auth-body { padding: 22px; }
 .auth-msg { font-size: 13px; margin: 0 0 12px; padding: 9px 12px; display: none; }
-.auth-msg.err { display: block; background: var(--red-soft); color: var(--red-dark); }
+.auth-msg.err { display: block; background: #fbe3dc; color: #a50d14; } /* erro: vermelho semântico */
 .auth-msg.ok { display: block; background: #e6f5ea; color: #1d6b32; }
+/* =========================================================
+   Tarja de identidade assumida (admin usando a conta do cliente).
+   Injetada pelo api-adapter.js em qualquer página. Fica grudada no topo
+   justamente para ser impossível esquecer que se está agindo pelo cliente.
+   ========================================================= */
+.imp-bar {
+  position: sticky; top: 0; z-index: 200;
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  background: #1c1c1c; color: #fff; padding: 9px 16px; font-size: 13px;
+  border-bottom: 3px solid var(--red);
+}
+.imp-bar .imp-ico { font-size: 15px; }
+.imp-bar .imp-txt { flex: 1; min-width: 200px; }
+.imp-bar b { color: var(--red); }
+.imp-bar .imp-emp { color: #ddd; }
+.imp-bar .imp-sair {
+  background: var(--red); color: var(--ink); border: none; border-radius: 3px;
+  padding: 6px 14px; font-size: 12px; font-weight: 700; cursor: pointer; white-space: nowrap;
+}
+.imp-bar .imp-sair:hover { background: var(--red-dark); }
+@media print { .imp-bar { display: none; } }
+
+/* Link-botão discreto do card de acesso ("Esqueci minha senha", "Voltar"). */
+.link-btn {
+  background: none; border: none; padding: 0; cursor: pointer;
+  font: inherit; font-size: 13px; color: var(--gray); text-decoration: underline;
+}
+.link-btn:hover { color: var(--ink); }
 .auth-hint { margin-top: 18px; width: 420px; max-width: 100%; font-size: 12px; color: var(--gray); background: #fff; border: 1px dashed var(--line); padding: 12px 14px; }
 .auth-hint code { background: #f2f2f2; padding: 1px 5px; }
 
@@ -210,10 +310,18 @@ h1, h2, h3 { margin: 0 0 .5em; }
 .searchbox { display: flex; }
 .searchbox input { width: 340px; max-width: 56vw; padding: 8px 10px; border: 1px solid var(--line); border-right: none; color: #555; }
 .searchbox button { border: 1px solid var(--line); background: #fff; padding: 0 13px; cursor: pointer; }
-.icon-btn { position: relative; background: none; border: none; cursor: pointer; padding: 4px 6px; }
+.icon-btn {
+  position: relative; background: none; border: none; cursor: pointer;
+  width: 42px; height: 42px;
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: transform .1s;
+}
+.icon-btn:hover { transform: scale(1.08); }
+/* Badge de quantidade idêntico ao do carrinho da loja (.shop-head .cart-n). */
 .icon-btn .pill {
-  position: absolute; top: -7px; left: 50%; transform: translateX(-50%);
-  border: 1px solid var(--ink); border-radius: 10px; font-size: 10px; padding: 0 6px; background: #fff;
+  position: absolute; top: -4px; right: -4px; left: auto; transform: none;
+  background: var(--red); color: var(--ink); border: 1px solid var(--ink);
+  border-radius: 9px; font-size: 10px; font-weight: 800; padding: 0 5px;
 }
 .pf-link { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 700; color: var(--ink); }
 .pf-link:hover { text-decoration: none; color: var(--red); }
@@ -229,7 +337,7 @@ h1, h2, h3 { margin: 0 0 .5em; }
   font-size: 14px; border: none; cursor: pointer; text-decoration: none;
 }
 .tabs a:hover, .tabs .drop > button:hover { background: #ddd; text-decoration: none; }
-.tabs a.on, .tabs .drop > button.on { background: var(--red); color: #fff; font-weight: 600; }
+.tabs a.on, .tabs .drop > button.on { background: var(--red); color: var(--ink); font-weight: 600; }
 .tabs .drop { position: relative; }
 .tabs .drop > button::after { content: " ▾"; font-size: 11px; }
 .tabs .drop .menu {
@@ -240,22 +348,22 @@ h1, h2, h3 { margin: 0 0 .5em; }
 .tabs .drop .menu a { display: block; background: none; padding: 9px 16px; color: var(--ink); font-size: 13px; }
 .tabs .drop .menu a:hover { background: #f4f4f4; }
 
-.crumb { padding: 6px 22px 14px; font-size: 13px; }
+.crumb { padding: 6px 22px 14px; font-size: 13px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .crumb a { color: var(--red); }
 .crumb span { color: var(--ink); }
 
 main.portal { padding: 0 22px 60px; }
 
-.banner-crit {
-  background: var(--red-soft); padding: 16px 20px; display: flex; justify-content: space-between;
+.banner-crit { /* aviso crítico: vermelho semântico */
+  background: #fbe3dc; padding: 16px 20px; display: flex; justify-content: space-between;
   align-items: center; cursor: pointer; margin-bottom: 26px;
 }
 .banner-crit:hover { background: #f7d6cc; }
-.banner-crit .arrow { color: var(--red); font-size: 20px; font-weight: 700; }
+.banner-crit .arrow { color: #b91c1c; font-size: 20px; font-weight: 700; }
 
 .home-cards { display: flex; gap: 60px; flex-wrap: wrap; justify-content: center; margin-bottom: 36px; }
 .card-title { color: var(--red); font-weight: 700; margin-bottom: 8px; }
-.stock-card { background: var(--red); color: #fff; width: 180px; height: 140px; padding: 10px 14px; position: relative; }
+.stock-card { background: var(--red); color: var(--ink); width: 180px; height: 140px; padding: 10px 14px; position: relative; }
 .stock-card .lbl { font-weight: 700; font-size: 13px; }
 .stock-card .num { position: absolute; right: 16px; bottom: 38px; font-size: 26px; font-weight: 800; }
 .stock-card .sub { position: absolute; right: 16px; bottom: 16px; font-size: 13px; font-weight: 600; }
@@ -264,7 +372,7 @@ main.portal { padding: 0 22px 60px; }
 .claims-mini { border-collapse: collapse; font-size: 12px; }
 .claims-mini th { background: #ddd; padding: 4px 8px; border: 1px solid #ccc; font-size: 11px; }
 .claims-mini td { border: 1px solid #ddd; padding: 4px 8px; }
-.claims-mini td.hq { background: var(--red); color: #fff; font-weight: 700; text-align: center; }
+.claims-mini td.hq { background: var(--red); color: var(--ink); font-weight: 700; text-align: center; }
 .claims-mini td.num { text-align: center; }
 .claims-mini tr td:first-child { border-top: 2px solid var(--red); border-top-width: 0; }
 .claims-mini thead tr { border-bottom: 2px solid var(--red); }
@@ -288,12 +396,18 @@ main.portal { padding: 0 22px 60px; }
   display: block; width: 100%; text-align: left; background: var(--tab); border: none;
   padding: 11px 14px; margin-bottom: 6px; font-size: 13px; cursor: pointer;
 }
-.side-nav button.on { background: var(--red); color: #fff; font-weight: 600; }
+.side-nav button.on { background: var(--red); color: var(--ink); font-weight: 600; }
 
 .toolbar { display: flex; align-items: center; gap: 18px; margin-bottom: 12px; flex-wrap: wrap; }
 .toolbar .tool { background: none; border: none; cursor: pointer; font-size: 13px; color: var(--ink); padding: 0; }
-.toolbar .tool.red { color: var(--red); }
+.toolbar .tool.red { color: var(--red-dark); }
 .toolbar .tool:hover { text-decoration: underline; }
+
+/* Ações em linha dentro de tabelas (ex.: contas internas em "Minha conta"):
+   botões-link discretos; .danger em vermelho semântico (excluir). */
+.table .tool { background: none; border: none; cursor: pointer; font-size: 12px; color: var(--ink); padding: 2px 4px; }
+.table .tool:hover { text-decoration: underline; }
+.table .tool.danger { color: #b91c1c; }
 .toolbar .grow { flex: 1; }
 .toolbar .mini-search input { padding: 6px 9px; border: 1px solid var(--line); }
 
@@ -302,7 +416,7 @@ main.portal { padding: 0 22px 60px; }
 .cl-num { font-weight: 700; color: var(--red); }
 .row-claim .cl-num { font-size: 15px; }
 .row-claim[data-cid] { cursor: pointer; transition: background .12s; }
-.row-claim[data-cid]:hover { background: #fdecec; }
+.row-claim[data-cid]:hover { background: #fdf6dd; }
 .row-claim .chev { color: var(--red); font-size: 30px; font-weight: 700; line-height: 1; justify-self: end; align-self: center; transition: transform .12s; }
 .row-claim[data-cid]:hover .chev { transform: translateX(3px); }
 .claim-head { display: grid; grid-template-columns: .9fr 1fr 1fr 1.6fr .9fr 1.3fr 40px; gap: 8px; background: #ececec; border: 1px solid var(--line); padding: 9px 10px; font-size: 12px; font-weight: 600; }
@@ -312,7 +426,7 @@ main.portal { padding: 0 22px 60px; }
 
 /* notificações */
 .notif { border: 1px solid var(--line); border-left: 4px solid #bbb; padding: 13px 16px; margin-bottom: 10px; display: flex; gap: 14px; align-items: flex-start; background: #fff; }
-.notif.critica { border-left-color: var(--red); }
+.notif.critica { border-left-color: #b91c1c; } /* crítica: vermelho semântico */
 .notif.unread { background: #fdf6f4; }
 .notif .nt-body { flex: 1; }
 .notif .nt-title { font-weight: 700; }
@@ -332,18 +446,47 @@ main.portal { padding: 0 22px 60px; }
 /* =========================================================
    LOJA (loja.html)
    ========================================================= */
-.shop-head { background: var(--red); color: #fff; display: flex; align-items: center; gap: 20px; padding: 10px 18px; flex-wrap: wrap; position: relative; }
+.shop-head { background: var(--red); color: var(--ink); display: flex; align-items: center; gap: 20px; padding: 10px 18px; flex-wrap: wrap; position: relative; }
 .shop-head .sh-title { font-weight: 800; font-size: 19px; }
 .shop-head .sh-user { font-size: 11px; opacity: .95; }
 .shop-head a { color: #fff; }
-.shop-head .menu-btn { background: none; border: none; color: #fff; font-weight: 700; cursor: pointer; font-size: 14px; letter-spacing: 1px; display: flex; align-items: center; gap: 8px; }
-.shop-head .sh-search { display: flex; align-items: center; border-bottom: 1px solid #fff; }
-.shop-head .sh-search input { background: transparent; border: none; color: #fff; padding: 6px 4px; width: 200px; }
-.shop-head .sh-search input::placeholder { color: #ffd9d9; }
-.shop-head .sh-search button { background: none; border: none; color: #fff; cursor: pointer; }
-.shop-head .sh-icons { display: flex; align-items: center; gap: 20px; margin-left: auto; }
-.shop-head .sh-icons a, .shop-head .sh-icons button { background: none; border: none; color: #fff; cursor: pointer; font-size: 17px; position: relative; }
-.shop-head .cart-n { position: absolute; top: -7px; right: -10px; background: #fff; color: var(--red); border-radius: 9px; font-size: 10px; font-weight: 800; padding: 0 5px; }
+.shop-head .menu-btn { background: none; border: none; color: var(--ink); font-weight: 700; cursor: pointer; font-size: 14px; letter-spacing: 1px; display: flex; align-items: center; gap: 8px; }
+.shop-head .sh-search { display: flex; align-items: center; border-bottom: 1px solid var(--ink); }
+.shop-head .sh-search input { background: transparent; border: none; color: var(--ink); padding: 6px 4px; width: 200px; }
+.shop-head .sh-search input::placeholder { color: rgba(28, 28, 28, .55); }
+.shop-head .sh-search button { background: none; border: none; color: var(--ink); cursor: pointer; }
+.shop-head .sh-icons { display: flex; align-items: center; gap: 12px; margin-left: auto; }
+/* Ícones do cabeçalho em CÍRCULOS PRETOS — sobre o amarelo eles sumiam;
+   o que era preto/escuro dentro do círculo vira branco. */
+.shop-head .sh-icons a, .shop-head .sh-icons button {
+  background: var(--ink); border: none; color: #fff; cursor: pointer; font-size: 16px;
+  position: relative; width: 38px; height: 38px; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center; text-decoration: none;
+  transition: transform .1s;
+}
+.shop-head .sh-icons a:hover, .shop-head .sh-icons button:hover { transform: scale(1.08); text-decoration: none; }
+.shop-head .sh-icons a.sh-brand { width: auto; background: none; border-radius: 0; }
+.shop-head .sh-icons a.sh-brand:hover { transform: none; }
+.shop-head .cart-n { position: absolute; top: -4px; right: -4px; background: var(--red); color: var(--ink); border: 1px solid var(--ink); border-radius: 9px; font-size: 10px; font-weight: 800; padding: 0 5px; }
+
+/* Carrinho flutuante — canto inferior direito, sempre à vista na loja. */
+.cart-fab {
+  position: fixed; right: 22px; bottom: 22px; z-index: 200;
+  width: 60px; height: 60px; border-radius: 50%;
+  background: var(--red); color: var(--ink);
+  display: inline-flex; align-items: center; justify-content: center;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, .28); border: 2px solid var(--ink);
+  text-decoration: none; transition: transform .12s, box-shadow .12s;
+}
+.cart-fab:hover { transform: scale(1.08); box-shadow: 0 6px 20px rgba(0, 0, 0, .34); text-decoration: none; }
+.cart-fab .cart-fab-ico { font-size: 27px; line-height: 1; }
+.cart-fab .cart-n {
+  position: absolute; top: -3px; right: -3px;
+  background: var(--ink); color: #fff; border: 2px solid var(--red);
+  border-radius: 11px; min-width: 20px; height: 20px; padding: 0 5px;
+  font-size: 11px; font-weight: 800; line-height: 18px; text-align: center;
+}
+.cart-fab.empty .cart-n { display: none; }
 .shop-mega { position: absolute; top: 100%; left: 0; background: #fff; color: var(--ink); width: 330px; box-shadow: var(--shadow); z-index: 60; display: none; }
 .shop-mega.open { display: block; }
 .shop-mega a { display: flex; justify-content: space-between; padding: 13px 16px; color: var(--ink); border-bottom: 1px solid #eee; font-size: 12px; font-weight: 700; text-transform: uppercase; }
@@ -351,7 +494,7 @@ main.portal { padding: 0 22px 60px; }
 .shop-mega a span { color: #999; }
 
 .page-band { display: flex; justify-content: space-between; align-items: stretch; margin-bottom: 22px; }
-.page-band .bc { padding: 14px 18px; font-size: 11px; font-weight: 700; letter-spacing: .5px; }
+.page-band .bc { padding: 14px 18px; font-size: 11px; font-weight: 700; letter-spacing: .5px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .page-band .bc a { color: var(--red); }
 .page-band .title { background: #111; color: #fff; font-size: 21px; font-weight: 800; letter-spacing: 1px; padding: 12px 60px 12px 40px; clip-path: polygon(22px 0, 100% 0, 100% 100%, 0 100%); text-transform: uppercase; }
 
@@ -359,10 +502,20 @@ main.shop { padding: 0 18px 70px; }
 
 .cat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 40px 26px; max-width: 1180px; margin: 50px auto; }
 .cat-tile { text-align: center; cursor: pointer; background: none; border: none; padding: 10px; }
-.cat-tile:hover .cat-name { color: var(--red); }
+.cat-tile:hover .cat-name { color: var(--red-dark); }
+.cat-tile:hover .cat-ico { transform: scale(1.05); }
 .cat-tile .cat-name { margin-top: 16px; font-size: 13px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; color: var(--ink); }
 .cat-ico { stroke: #9a9a9a; fill: none; stroke-width: 2.4; }
 .cat-ico .acc { stroke: var(--red); }
+/* Na grade de categorias o ícone ganha CÍRCULO PRETO para destacar (os
+   traços cinza sumiam no fundo branco): dentro do círculo o traço é branco
+   e o acento fica amarelo. Os placeholders de produto (mesma classe, fora
+   do tile) continuam discretos. */
+.cat-tile .cat-ico {
+  stroke: #fff; background: var(--ink); border-radius: 50%; padding: 22px;
+  width: 120px; height: 120px; box-sizing: border-box;
+  transition: transform .12s;
+}
 
 .shop-layout { display: grid; grid-template-columns: 280px 1fr; gap: 34px; align-items: start; }
 @media (max-width: 940px) { .shop-layout { grid-template-columns: 1fr; } }
@@ -371,6 +524,17 @@ main.shop { padding: 0 18px 70px; }
 .shop-side .cat-link.on { color: var(--red); }
 .shop-side .cat-link.on::before { content: "● "; font-size: 9px; vertical-align: 2px; }
 .shop-side .cat-link span { color: #999; font-weight: 400; }
+.shop-side .cat-link.sub { padding-left: 18px; font-size: 11px; text-transform: none; font-weight: 500; color: #555; }
+.shop-side .cat-link.sub.on { color: var(--red); font-weight: 700; }
+
+/* chips de subcategoria acima da lista de produtos (drill-in rápido) */
+.subcat-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
+.subcat-chips .chip { display: inline-block; padding: 5px 12px; font-size: 12px; font-weight: 600; border: 1px solid #ccc; border-radius: 999px; color: var(--ink); text-decoration: none; background: #fff; }
+.subcat-chips .chip:hover { border-color: var(--ink); }
+.subcat-chips .chip.on { background: var(--ink); color: #fff; border-color: var(--ink); }
+
+/* rótulo "N subcategorias" no card da grade de categorias */
+.cat-tile .cat-sub { margin-top: 6px; font-size: 11px; }
 
 .shop-tools { display: flex; align-items: center; gap: 22px; flex-wrap: wrap; margin-bottom: 20px; font-size: 12px; }
 .shop-tools .avail { display: inline-flex; align-items: center; gap: 8px; font-weight: 700; text-transform: uppercase; cursor: pointer; }
@@ -386,10 +550,16 @@ main.shop { padding: 0 18px 70px; }
 .prod-row { display: grid; grid-template-columns: 200px 1fr; gap: 26px; padding: 26px 0; border-bottom: 1px solid #eee; }
 @media (max-width: 700px) { .prod-row { grid-template-columns: 1fr; } }
 .prod-img { background: #fafafa; border: 1px solid #eee; height: 170px; display: flex; align-items: center; justify-content: center; }
+/* foto real do produto (upload/Tiny) dentro dos quadros da loja —
+   o clique abre a foto ampliada num modal (ver shop.js) */
+.prod-img img, .prod-page .big-img img { max-width: 100%; max-height: 100%; object-fit: contain; cursor: zoom-in; }
 .prod-name { color: var(--red); font-size: 18px; font-weight: 800; text-transform: uppercase; letter-spacing: .5px; }
 .prod-name a { color: var(--red); }
-.prod-desc { margin: 8px 0 16px; color: #333; font-size: 13px; }
+/* white-space: pre-line preserva as quebras de linha da descrição (listas do
+   Tiny viram uma linha por item, com marcador "• " já embutido no texto) */
+.prod-desc { margin: 8px 0 16px; color: #333; font-size: 13px; white-space: pre-line; }
 .prod-desc li { margin-bottom: 3px; }
+.prod-desc-full { font-size: 14px; line-height: 1.5; }
 .prod-meta { display: flex; gap: 50px; flex-wrap: wrap; border-top: 1px solid #ddd; padding-top: 10px; font-size: 12px; align-items: center; }
 .prod-meta .m b { display: block; font-weight: 600; color: #777; border-bottom: 1px solid #ddd; margin-bottom: 5px; padding-bottom: 4px; }
 .prod-buy { margin-left: auto; display: flex; align-items: center; gap: 10px; }
@@ -403,12 +573,16 @@ main.shop { padding: 0 18px 70px; }
 /* quick order */
 .qo-row { display: grid; grid-template-columns: 240px 1fr 130px 40px; gap: 18px; align-items: center; padding: 16px 0; border-bottom: 1px solid #eee; }
 .qo-row input.art { border: none; border-bottom: 1px solid #999; padding: 7px 2px; }
-.qo-row .del { background: none; border: none; color: var(--red); font-size: 18px; cursor: pointer; }
+.qo-row .del { background: none; border: none; color: #b91c1c; font-size: 18px; cursor: pointer; } /* remover: vermelho semântico */
 .qo-head { display: flex; justify-content: space-between; align-items: center; margin: 8px 0 4px; }
 
 /* carrinho */
 .cart-line { display: grid; grid-template-columns: 110px 1fr 120px 110px 120px 36px; gap: 16px; align-items: center; padding: 14px 0; border-bottom: 1px solid #eee; }
 @media (max-width: 800px) { .cart-line { grid-template-columns: 1fr 1fr; } }
+/* Foto do item contida na célula (sem isso, a foto real do Tiny transborda a
+   coluna de 110px e "engole" o nome/link do produto ao lado). */
+.cart-line .cart-img { background: #fafafa; border: 1px solid #eee; width: 110px; height: 74px; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.cart-line .cart-img img { max-width: 100%; max-height: 100%; object-fit: contain; cursor: zoom-in; }
 .cart-tot { display: flex; justify-content: flex-end; gap: 40px; align-items: center; padding: 20px 0; font-size: 16px; }
 .cart-tot .v { font-size: 22px; font-weight: 800; }
 
@@ -427,8 +601,13 @@ main.shop { padding: 0 18px 70px; }
    ========================================================= */
 main.finder { padding: 8px 28px 70px; }
 .finder-top { display: flex; align-items: flex-start; justify-content: space-between; padding: 20px 28px 0; }
+.finder-top .btn-voltar { margin-bottom: 12px; }
 .finder-top h1 { font-size: 25px; margin: 0; }
 .finder-top .who { font-size: 13px; font-weight: 700; margin-top: 6px; }
+/* carrinho da loja no topo do finder (mesma cesta da loja) */
+.finder-top-right { display: flex; align-items: center; gap: 22px; }
+.fd-cart { position: relative; font-size: 22px; text-decoration: none; line-height: 1; }
+.fd-cart .cart-n { position: absolute; top: -7px; right: -12px; background: var(--red); color: var(--ink); border-radius: 9px; font-size: 10px; font-weight: 800; padding: 0 5px; }
 .usage-btn { margin: 14px 28px 0 auto; display: block; }
 
 .search-panel { border: 1px solid #ccc; border-bottom: 6px solid #e6e6e6; margin: 16px 0 22px; padding: 14px 26px 22px; position: relative; }
@@ -454,15 +633,17 @@ main.finder { padding: 8px 28px 70px; }
 .model-tree .leaf:hover { color: var(--red); }
 
 .finder-model-name { color: var(--red); font-weight: 600; margin: 6px 0 10px; }
-.finder-links { display: flex; gap: 28px; margin-bottom: 20px; font-size: 13px; flex-wrap: wrap; }
-.finder-links a, .finder-links button { color: var(--red); background: none; border: none; cursor: pointer; font-size: 13px; padding: 0; }
-.finder-links a:hover, .finder-links button:hover { text-decoration: underline; }
+.finder-links { display: flex; gap: 28px; margin-bottom: 20px; font-size: 13px; flex-wrap: wrap; align-items: center; }
+/* :not(.btn-voltar): o botão VOLTAR tem estilo próprio (pílula preta) e não
+   pode herdar o visual de link destas regras. */
+.finder-links a:not(.btn-voltar), .finder-links button:not(.btn-voltar) { color: var(--red); background: none; border: none; cursor: pointer; font-size: 13px; padding: 0; }
+.finder-links a:not(.btn-voltar):hover, .finder-links button:not(.btn-voltar):hover { text-decoration: underline; }
 
 .finder-layout { display: grid; grid-template-columns: 430px 1fr; gap: 40px; align-items: start; }
 @media (max-width: 980px) { .finder-layout { grid-template-columns: 1fr; } }
 .sec-list .sec-item { display: flex; align-items: center; gap: 16px; width: 100%; background: #fff; border: none; border-bottom: 1px solid #e6e6e6; padding: 15px 14px; cursor: pointer; font-size: 13px; text-align: left; }
 .sec-list .sec-item:nth-child(even) { background: #f4f4f4; }
-.sec-list .sec-item:hover { background: #fdeeee; }
+.sec-list .sec-item:hover { background: #fdf3d3; } /* hover no amarelo da marca (tom suave) */
 .sec-list .sec-item .n { width: 26px; color: #555; }
 .sec-list .sec-item .chev { margin-left: auto; color: var(--red); font-weight: 800; }
 .thumb-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
@@ -474,15 +655,24 @@ main.finder { padding: 8px 28px 70px; }
 
 .part-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 36px; align-items: start; }
 @media (max-width: 1020px) { .part-layout { grid-template-columns: 1fr; } }
-.part-row { display: grid; grid-template-columns: 26px 26px 150px 1fr 150px 70px 44px; gap: 8px; align-items: center; border-bottom: 1px solid #e3e3e3; padding: 9px 8px; font-size: 12px; }
+/* grid compartilhado pela legenda (.part-head) e pelas linhas (.part-row):
+   checkbox | nº | SKU | descrição | quantidade | (qtd de referência) */
+.part-head, .part-row { display: grid; grid-template-columns: 26px 26px 150px 1fr 130px 70px 44px; gap: 8px; align-items: center; }
+.part-head { padding: 6px 8px; border-bottom: 2px solid #ccc; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: #666; }
+.part-row { border-bottom: 1px solid #e3e3e3; padding: 9px 8px; font-size: 12px; }
 .part-row:nth-child(even) { background: #f6f6f6; }
-.part-row.sel { background: var(--red); color: #fff; }
-.part-row.sel a, .part-row.sel .pr-min { color: #fff; }
+.part-row.sel { background: var(--red); color: var(--ink); }
+.part-row.sel a { color: #fff; }
 .part-row b a { color: var(--ink); }
 .part-row b a:hover { color: var(--red); }
-.part-row .pr-min { grid-column: 5 / 8; text-align: right; color: #555; font-size: 11px; }
-.part-row input.cm { border: 1px solid #ddd; padding: 5px 7px; font-size: 11px; width: 100%; }
 .part-row input.qn { width: 100%; border: 1px solid #ddd; padding: 5px 4px; text-align: center; }
+.part-row input.qn:disabled { background: #f3f3f3; color: #aaa; cursor: not-allowed; }
+/* status de compra da peça (verde / amarelo / vermelho) */
+.pt-status { font-size: 11px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pt-status.ok { color: var(--green); }
+.pt-status.pre { color: #b45309; }
+.pt-status.out { color: #b91c1c; } /* indisponível: vermelho semântico */
+.part-row.sel .pt-status { color: #fff; }
 .diagram-box { border: 1px solid #ccc; min-height: 460px; display: flex; flex-direction: column; gap: 0; padding: 0; }
 .diagram-box .cap { font-size: 11px; color: var(--gray); }
 .fnd-actions { display: flex; gap: 12px; margin: 14px 0 22px; }
@@ -508,15 +698,20 @@ main.finder { padding: 8px 28px 70px; }
 .diag-tools .dg-btn:disabled { opacity: .4; cursor: default; }
 .diag-tools input[type="range"] { width: 130px; accent-color: var(--red); }
 .diag-tools .dg-marks { font-size: 10px; color: #555; letter-spacing: .02em; }
-.diag-viewport { overflow: auto; max-height: 560px; min-height: 420px; background: #fff; flex: 1; }
+/* altura FIXA: é a referência do ajuste automático do zoom (finder.js encaixa
+   a imagem inteira — largura e altura — dentro deste quadro) */
+.diag-viewport { overflow: auto; height: 560px; background: #fff; flex: 1; }
 .diag-canvas { position: relative; width: 100%; }
 .diag-canvas img { display: block; width: 100%; height: auto; user-select: none; }
 .diag-vazio { display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 10px; padding: 20px; min-height: 420px; }
 
-/* hotspot: área clicável invisível que "acende" no hover/seleção */
-.hotspot { position: absolute; background: transparent; border: 1px solid transparent; cursor: pointer; padding: 0; border-radius: 3px; }
-.hotspot:hover, .hotspot.hover { border-color: var(--red); background: rgba(210, 10, 17, .10); }
-.hotspot.on { border-color: var(--red); background: rgba(210, 10, 17, .18); box-shadow: 0 0 0 1px rgba(210, 10, 17, .35); }
+/* hotspot: área clicável SEMPRE visível (quadrado amarelo, como no editor do
+   admin); "acende" em PRETO no hover/seleção (o fundo já é amarelo — a
+   seleção precisa contrastar). O número da peça NÃO é exibido ao cliente —
+   é um dado interno do administrador. */
+.hotspot { position: absolute; background: rgba(229, 177, 0, .14); border: 2px solid var(--red); cursor: pointer; padding: 0; border-radius: 3px; }
+.hotspot:hover, .hotspot.hover { border-color: var(--ink); background: rgba(229, 177, 0, .28); }
+.hotspot.on { border-color: var(--ink); background: rgba(229, 177, 0, .38); box-shadow: 0 0 0 1px rgba(28, 28, 28, .45); }
 
 /* modal com a foto do modelo (Show Image) */
 .modal.modal-img { max-width: 720px; }
@@ -524,13 +719,15 @@ main.finder { padding: 8px 28px 70px; }
 
 /* impressão de fatura */
 @media print {
+  body { zoom: 1; }               /* fatura sai no tamanho projetado, sem a escala da tela */
   body * { visibility: hidden; }
   #print-area, #print-area * { visibility: visible; }
   #print-area { position: absolute; inset: 0; padding: 30px; }
+  .cart-fab { display: none !important; }
   /* finder: imprime a tela da seção (lista de peças + diagrama) */
   main.finder, main.finder * { visibility: visible; }
   main.finder .search-panel, main.finder .fnd-actions, main.finder .diag-tools { display: none; }
-  main.finder .diag-viewport { max-height: none; overflow: visible; }
+  main.finder .diag-viewport { height: auto; overflow: visible; }
 }
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; transition: none !important; }
@@ -569,8 +766,56 @@ main.finder { padding: 8px 28px 70px; }
 
 /* Reivindicação: adicionar peças (código + quantidade) e lista de peças */
 .peca-add { display: flex; gap: 8px; align-items: center; }
-.peca-add #nc-peca { flex: 1; }
+.peca-add #nc-peca { width: 100%; }
 .peca-add #nc-peca-qtd { width: 72px; }
+
+/* autocomplete próprio das peças defeituosas — substitui o datalist nativo,
+   que herdava o visual do sistema operacional */
+.ac-wrap { position: relative; flex: 1; min-width: 0; }
+.ac-list {
+  position: absolute; top: 100%; left: 0; right: 0; z-index: 60;
+  background: #fff; border: 1px solid #ccc; border-top: none;
+  max-height: 264px; overflow: auto; box-shadow: 0 10px 22px rgba(0, 0, 0, .14);
+}
+.ac-list.hidden { display: none; }
+.ac-item {
+  display: flex; gap: 8px; align-items: baseline; padding: 8px 10px;
+  font-size: 12px; cursor: pointer; border-bottom: 1px solid #f2f2f2;
+}
+.ac-item:last-child { border-bottom: none; }
+.ac-item b { white-space: nowrap; }
+.ac-item .ac-nome { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #555; }
+.ac-item .ac-preco { color: #999; font-size: 11px; white-space: nowrap; }
+.ac-item:hover, .ac-item.on { background: #fdf6dd; }
+
+/* cortina de envio da garantia: cobre o overlay inteiro (não o .modal, que
+   rola) para a mensagem ficar sempre centralizada na tela. */
+.claim-envio {
+  position: fixed; inset: 0; z-index: 95; background: rgba(0, 0, 0, .5);
+  display: flex; align-items: center; justify-content: center; padding: 24px;
+  animation: claim-fade .2s ease;
+}
+@keyframes claim-fade { from { opacity: 0; } to { opacity: 1; } }
+.claim-envio-card {
+  background: #fff; border-radius: 12px; padding: 32px 28px; text-align: center;
+  max-width: 400px; width: 100%; box-shadow: 0 18px 50px rgba(0, 0, 0, .3);
+  display: flex; flex-direction: column; align-items: center; gap: 14px;
+}
+.claim-envio-card p { margin: 0; color: #555; font-size: 14px; line-height: 1.5; }
+.claim-envio-card.ok { animation: claim-pop .28s ease; }
+@keyframes claim-pop { from { transform: scale(.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+.claim-envio-card h3 { margin: 0; font-size: 19px; }
+.claim-envio-card .btn { margin-top: 4px; }
+.fg-spinner {
+  width: 46px; height: 46px; border-radius: 50%;
+  border: 4px solid #eee; border-top-color: var(--red);
+  animation: fg-girar .8s linear infinite;
+}
+@keyframes fg-girar { to { transform: rotate(360deg); } }
+.claim-ok {
+  width: 60px; height: 60px; border-radius: 50%; background: var(--green, #16a34a);
+  color: #fff; font-size: 32px; display: flex; align-items: center; justify-content: center;
+}
 .pecas-list { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
 .peca-row {
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
@@ -594,23 +839,23 @@ main.finder { padding: 8px 28px 70px; }
 .tr-reenviada > td { background: #eefaf0; }
 .reenviada-aviso { margin: 0 0 12px; padding: 8px 10px; background: #e6f4ea; border: 1px solid #b7e0c2; border-radius: 6px; color: #1e7e34; font-size: 13px; font-weight: 600; }
 .adm-claim-row { cursor: pointer; transition: background .12s; }
-.adm-claim-row:hover > td { background: #fdecec; }
+.adm-claim-row:hover > td { background: #fdf6dd; }
 .rasc-acoes { display: flex; gap: 8px; align-items: center; }
 
 /* Botão "Nova reivindicação" — compacto, alinhado com os botões de navegação */
 .btn-nova-reiv {
   display: inline-flex; align-items: center; gap: 8px; margin-bottom: 18px;
   padding: 8px 14px; border: 1px solid var(--red); border-radius: 8px;
-  background: #fff5f5; color: var(--red); font-size: 13px; font-weight: 600;
+  background: var(--red-soft); color: var(--ink); font-size: 13px; font-weight: 600;
   cursor: pointer; transition: background .12s, color .12s;
 }
-.btn-nova-reiv:hover { background: var(--red); color: #fff; }
+.btn-nova-reiv:hover { background: var(--red); color: var(--ink); }
 .btn-nova-reiv .plus {
   font-size: 16px; font-weight: 700; width: 20px; height: 20px; flex: 0 0 20px;
   display: flex; align-items: center; justify-content: center; border-radius: 50%;
-  background: var(--red); color: #fff;
+  background: var(--red); color: var(--ink);
 }
-.btn-nova-reiv:hover .plus { background: #fff; color: var(--red); }
+.btn-nova-reiv:hover .plus { background: var(--ink); color: var(--red); }
 
 /* Grade do modal de detalhe da reivindicação */
 .det-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 16px; margin-bottom: 12px; }
@@ -621,3 +866,27 @@ main.finder { padding: 8px 28px 70px; }
 /* Seleção de reivindicações para exportar */
 .cl-selall { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--ink); cursor: pointer; }
 .cl-check { cursor: pointer; }
+
+/* =========================================================
+   TEXTOS AMARELOS: sempre em NEGRITO (sem contorno — o dono
+   pediu a remoção das bordas pretas em 2026-07-16).
+   Agrupa os seletores que usam o amarelo como cor de TEXTO;
+   toda UI nova com texto amarelo deve entrar nesta lista.
+   ========================================================= */
+.brand, .brand .g-badge, .field-title, .topbar .logo span, .pf-link:hover,
+.crumb a, .card-title, .cl-num, .row-claim .chev, .fin-card .v, .pdf-ico,
+.page-band .bc a, .table td a, .shop-side .cat-link.on, .pager button.on,
+.prod-name, .prod-name a, .search-panel .sp-title, .model-tree .leaf:hover,
+.finder-model-name, .finder-links a:not(.btn-voltar),
+.finder-links button:not(.btn-voltar), .sec-list .sec-item .chev,
+.thumb .tn, .part-row b a:hover, .finder-crumb, .finder-crumb a,
+.finder-crumb .crumb-print, .btn.ghost, .link-action, .veh-card h3 {
+  font-weight: 700;
+}
+/* No cabeçalho AMARELO da loja o hover amarelo sumiria — lá o hover do
+   link do finder fica preto sublinhado (sem contorno). */
+.shop-head .pf-link:hover { color: var(--ink); text-decoration: underline; }
+
+/* Anexos nas notificações do portal (enviados pelo admin). */
+.notif .nt-img { max-width: 340px; max-height: 240px; display: block; margin: 8px 0 2px; border: 1px solid var(--line); border-radius: 4px; }
+.notif .nt-video { max-width: 420px; width: 100%; display: block; margin: 8px 0 2px; border-radius: 4px; background: #000; }

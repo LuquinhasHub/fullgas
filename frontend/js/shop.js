@@ -7,6 +7,12 @@
   var sess = FG.guard();
   if (!sess) return;
 
+  // Conta interna (sub-dealer) sem a área "loja" volta ao portal.
+  if (!FG.temArea(sess, 'loja')) {
+    alert('Sua conta não tem acesso à Loja. Fale com o gestor da concessionária.');
+    location.href = 'portal.html'; return;
+  }
+
   // Espera o cache (carregado de forma assíncrona via fetch) antes de montar a
   // tela — nada de renderizar com dados vazios.
   FG.pronto.then(function () {
@@ -33,12 +39,25 @@
   }
 
   /* ---------- cabeçalho ---------- */
-  function refreshCart() { document.getElementById('cart-n').textContent = FG.cartCount(); }
+  function refreshCart() {
+    var n = FG.cartCount();
+    var head = document.getElementById('cart-n');
+    if (head) head.textContent = n;
+    var fabN = document.getElementById('cart-fab-n');
+    if (fabN) fabN.textContent = n;
+    var fab = document.getElementById('cart-fab');
+    if (fab) fab.classList.toggle('empty', !n);
+  }
+
+  // Conta produtos de uma categoria incluindo os das suas subcategorias.
+  function contaCategoria(catId) {
+    var ids = FG.categoriaEDescendentes(catId);
+    return FG.all('products').filter(function (p) { return ids.indexOf(p.cat) >= 0; }).length;
+  }
 
   var mega = document.getElementById('shop-mega');
-  mega.innerHTML = FG.all('categories').map(function (c) {
-    var n = FG.all('products').filter(function (p) { return p.cat === c.id; }).length;
-    return '<a href="#/categoria/' + c.id + '">' + esc(c.nome) + ' <span>' + n + ' ›</span></a>';
+  mega.innerHTML = FG.categoriasTopo().map(function (c) {
+    return '<a href="#/categoria/' + c.id + '">' + esc(c.nome) + ' <span>' + contaCategoria(c.id) + ' ›</span></a>';
   }).join('');
 
   var menuBtn = document.getElementById('menu-btn');
@@ -60,11 +79,21 @@
 
   function setBand(titulo, trilha) {
     document.getElementById('page-title').textContent = titulo.toUpperCase();
-    var bc = '<a href="#/">LOJA</a>';
+    // Botão VOLTAR sempre visível no início da trilha: na home leva ao
+    // portal; nas demais telas volta um passo na navegação.
+    var home = !(trilha || []).length;
+    var bc = home
+      ? '<a class="btn-voltar" href="portal.html">Portal</a>'
+      : '<button class="btn-voltar" id="bt-voltar" type="button">Voltar</button>';
+    bc += '<a href="#/">LOJA</a>';
     (trilha || []).forEach(function (t) {
       bc += ' › ' + (t.href ? '<a href="' + t.href + '">' + esc(t.nome).toUpperCase() + '</a>' : '<span>' + esc(t.nome).toUpperCase() + '</span>');
     });
     document.getElementById('page-bc').innerHTML = bc;
+    var bv = document.getElementById('bt-voltar');
+    if (bv) bv.addEventListener('click', function () {
+      if (history.length > 1) history.back(); else location.hash = '#/';
+    });
   }
 
   function stockHTML(p) {
@@ -73,20 +102,41 @@
     return '<span class="stock-out">Indisponível</span>';
   }
 
+  // Foto real do produto quando houver (upload do admin ou espelhada do Tiny
+  // ERP); sem foto, cai no desenho esquemático da categoria.
   function prodImg(p, w) {
+    if (p.imagem) return '<img src="' + esc(p.imagem) + '" alt="' + esc(p.nome) + '" loading="lazy">';
     var key = { tecnicos: 'escape', vestuario: 'oculos', balance: 'bike', kits: 'kit', retail: 'loja', marketing: 'sacola', ferramentas: 'ferramenta' }[p.cat];
     if (p.cat === 'pecas') return FG.bikeSVG('frame', w || 120, { cls: 'lite' });
     return catIcon(key || 'engrenagem', w || 95);
   }
+
+  /* clique na foto do produto abre em tamanho grande (lightbox) — listener
+     delegado no container, porque as telas são re-renderizadas a cada rota */
+  view.addEventListener('click', function (e) {
+    var img = e.target.closest('.prod-img img, .prod-page .big-img img, .cart-img img');
+    if (!img) return;
+    var back = document.createElement('div');
+    back.className = 'modal-back';
+    back.innerHTML = '<div class="modal modal-img"><header><h3>' + esc(img.alt || 'Foto do produto') + '</h3>' +
+      '<button class="x">×</button></header><div class="modal-body">' +
+      '<img src="' + esc(img.src) + '" alt="' + esc(img.alt || '') + '"></div></div>';
+    document.body.appendChild(back);
+    back.querySelector('.x').addEventListener('click', function () { back.remove(); });
+    // Clicar fora NÃO fecha — pop-ups só fecham no X (pedido do dono).
+  });
 
   /* =========================================================
      ROTA: grade de categorias
      ========================================================= */
   function renderCats() {
     setBand('Categorias', []);
-    view.innerHTML = '<div class="cat-grid">' + FG.all('categories').map(function (c) {
+    view.innerHTML = '<div class="cat-grid">' + FG.categoriasTopo().map(function (c) {
+      var subs = FG.subcategorias(c.id);
       return '<button class="cat-tile" data-cat="' + c.id + '">' + catIcon(c.icone) +
-        '<div class="cat-name">' + esc(c.nome) + '</div></button>';
+        '<div class="cat-name">' + esc(c.nome) + '</div>' +
+        (subs.length ? '<div class="cat-sub muted">' + subs.length + ' subcategoria' + (subs.length > 1 ? 's' : '') + '</div>' : '') +
+        '</button>';
     }).join('') + '</div>';
     Array.prototype.forEach.call(view.querySelectorAll('.cat-tile'), function (b) {
       b.addEventListener('click', function () { location.hash = '#/categoria/' + b.getAttribute('data-cat'); });
@@ -104,14 +154,23 @@
   function renderCategoria(catId, termoBusca) {
     var cat = FG.category(catId);
     var titulo = termoBusca != null ? 'Resultado da busca' : (cat ? cat.nome : 'Categoria');
-    setBand(titulo, cat ? [{ nome: cat.nome }] : [{ nome: 'Busca' }]);
+    // Trilha: subcategoria mostra "Pai › Subcategoria"; topo mostra só o nome.
+    var trilha;
+    if (termoBusca != null) trilha = [{ nome: 'Busca' }];
+    else if (cat && cat.pai) {
+      var paiCat = FG.category(cat.pai);
+      trilha = [{ nome: paiCat ? paiCat.nome : cat.pai, href: '#/categoria/' + cat.pai }, { nome: cat.nome }];
+    } else trilha = cat ? [{ nome: cat.nome }] : [{ nome: 'Categoria' }];
+    setBand(titulo, trilha);
 
+    // Numa categoria de topo, inclui os produtos das suas subcategorias.
+    var catIds = (termoBusca != null || !cat) ? null : FG.categoriaEDescendentes(catId);
     var artigosModelo = motoFiltro ? FG.modelArticles(motoFiltro) : null;
     var todos = FG.all('products').filter(function (p) {
       if (termoBusca != null) {
         var t = termoBusca.toLowerCase();
         if (p.artigo.toLowerCase().indexOf(t) < 0 && p.nome.toLowerCase().indexOf(t) < 0) return false;
-      } else if (p.cat !== catId) return false;
+      } else if (catIds && catIds.indexOf(p.cat) < 0) return false;
       if (soDisponiveis && p.estoque <= 0) return false;
       if (artigosModelo && artigosModelo.indexOf(p.artigo) < 0) return false;
       return true;
@@ -122,12 +181,44 @@
     if (pagina > totalPag) pagina = totalPag;
     var lista = todos.slice((pagina - 1) * POR_PAGINA, pagina * POR_PAGINA);
 
+    // Sidebar em árvore: categorias de topo sempre; subcategorias aparecem
+    // expandidas sob a categoria ativa (a atual ou a mãe da subcategoria atual).
+    function contaCat(id) {
+      var ids = FG.categoriaEDescendentes(id);
+      return FG.all('products').filter(function (p) { return ids.indexOf(p.cat) >= 0; }).length;
+    }
     var side = '<aside class="shop-side"><h4>CATEGORIAS</h4>' +
-      FG.all('categories').map(function (c) {
-        var n = FG.all('products').filter(function (p) { return p.cat === c.id; }).length;
-        return '<button class="cat-link' + (c.id === catId ? ' on' : '') + '" data-cat="' + c.id + '">' +
-          esc(c.nome) + ' <span>(' + n + ')</span></button>';
+      FG.categoriasTopo().map(function (c) {
+        var ativa = c.id === catId || (cat && cat.pai === c.id);
+        var html = '<button class="cat-link' + (c.id === catId ? ' on' : '') + '" data-cat="' + c.id + '">' +
+          esc(c.nome) + ' <span>(' + contaCat(c.id) + ')</span></button>';
+        var subs = FG.subcategorias(c.id);
+        if (subs.length && ativa) {
+          html += subs.map(function (s) {
+            var ns = FG.all('products').filter(function (p) { return p.cat === s.id; }).length;
+            return '<button class="cat-link sub' + (s.id === catId ? ' on' : '') + '" data-cat="' + s.id + '">↳ ' +
+              esc(s.nome) + ' <span>(' + ns + ')</span></button>';
+          }).join('');
+        }
+        return html;
       }).join('') + '</aside>';
+
+    // Chips de subcategoria acima da lista (drill-in rápido).
+    var subChips = '';
+    if (termoBusca == null && cat && !cat.pai) {
+      var subsTopo = FG.subcategorias(catId);
+      if (subsTopo.length) {
+        subChips = '<div class="subcat-chips"><a class="chip on" href="#/categoria/' + catId + '">Todos</a>' +
+          subsTopo.map(function (s) { return '<a class="chip" href="#/categoria/' + s.id + '">' + esc(s.nome) + '</a>'; }).join('') +
+          '</div>';
+      }
+    } else if (termoBusca == null && cat && cat.pai) {
+      var paiChip = FG.category(cat.pai);
+      subChips = '<div class="subcat-chips"><a class="chip" href="#/categoria/' + cat.pai + '">↩ ' + esc(paiChip ? paiChip.nome : 'Todos') + '</a>' +
+        FG.subcategorias(cat.pai).map(function (s) {
+          return '<a class="chip' + (s.id === catId ? ' on' : '') + '" href="#/categoria/' + s.id + '">' + esc(s.nome) + '</a>';
+        }).join('') + '</div>';
+    }
 
     var tools =
       '<div class="shop-tools">' +
@@ -143,7 +234,7 @@
       return '<div class="prod-row">' +
         '<div class="prod-img">' + prodImg(p) + '</div>' +
         '<div><div class="prod-name"><a href="#/produto/' + p.artigo + '">' + esc(p.nome) + '</a></div>' +
-        '<ul class="prod-desc"><li>' + esc(p.descricao) + '</li></ul>' +
+        '<div class="prod-desc">' + esc(p.descricao) + '</div>' +
         '<div class="prod-meta">' +
         '<div class="m"><b>Article No.</b>' + p.artigo + '</div>' +
         '<div class="m"><b>Stock</b>' + stockHTML(p) + '</div>' +
@@ -156,7 +247,7 @@
     }).join('');
     if (!lista.length) rows = '<div class="empty-box">Nenhum artigo encontrado com os filtros atuais.</div>';
 
-    view.innerHTML = '<div class="shop-layout">' + side + '<section>' + tools + rows + '</section></div>';
+    view.innerHTML = '<div class="shop-layout">' + side + '<section>' + subChips + tools + rows + '</section></div>';
 
     /* sidebar */
     Array.prototype.forEach.call(view.querySelectorAll('.cat-link'), function (b) {
@@ -228,7 +319,7 @@
       '<div class="big-img">' + prodImg(p, 240) + '</div>' +
       '<div><div class="prod-name">' + esc(p.nome) + '</div>' +
       '<p class="muted">Article No. ' + p.artigo + '</p>' +
-      '<p>' + esc(p.descricao) + '</p>' +
+      '<div class="prod-desc prod-desc-full">' + esc(p.descricao) + '</div>' +
       '<div class="price-big">' + FG.fmtMoney(p.preco) + '</div>' +
       '<p><b>Stock:</b> ' + stockHTML(p) + (p.estoque > 0 ? ' <span class="muted">(' + p.estoque + ' un.)</span>' : '') + '</p>' +
       (FG.compravel(p.artigo)
@@ -323,7 +414,7 @@
     cart.forEach(function (i) {
       var p = FG.product(i.artigo); if (!p) return;
       html += '<div class="cart-line">' +
-        '<span>' + prodImg(p, 70) + '</span>' +
+        '<span class="cart-img">' + prodImg(p, 70) + '</span>' +
         '<span><b><a href="#/produto/' + p.artigo + '">' + esc(p.nome) + '</a></b><br><span class="muted">' + p.artigo + '</span>' +
         '<br>' + stockHTML(p) + '</span>' +
         '<span>' + FG.fmtMoney(p.preco) + '</span>' +
@@ -383,13 +474,12 @@
       if (!o) return;
       var backHTML = (o.itensEmBackorder && o.itensEmBackorder.length) ?
         '<div class="backorder-aviso" style="max-width:540px;margin:14px auto;text-align:left;">' +
-        '<b>⚠ Itens em pré-venda:</b> serão enviados quando o estoque for reposto, ' +
-        'em uma entrega/fatura separada.<ul>' +
+        '<b>⚠ Itens em pré-venda:</b> serão enviados quando o estoque for reposto.<ul>' +
         o.itensEmBackorder.map(function (b) {
           return '<li>' + esc(b.nome) + ' <span class="muted">(' + b.sku + ')</span> — ' + b.quantidade + ' un.</li>';
         }).join('') + '</ul></div>' : '';
       view.innerHTML = '<div class="empty-box"><h2 style="color:var(--green);">✔ Pedido enviado!</h2>' +
-        '<p>Número do pedido: <b>' + o.cx + ' / ' + o.id + '</b></p>' +
+        '<p>Número do pedido: <b>' + o.id + '</b></p>' +
         backHTML +
         '<p class="muted">Acompanhe o andamento no histórico de pedidos.</p>' +
         '<a class="btn red" href="#/pedidos">Ver histórico</a> <a class="btn" href="#/">Continuar comprando</a></div>';
@@ -397,65 +487,43 @@
   }
 
   /* =========================================================
-     ROTA: históricos (pedidos / entregas)
+     ROTA: histórico de pedidos (entregas saíram do fluxo —
+     não há módulo de entrega no projeto)
      ========================================================= */
-  var histAba = 'order';
   var verEmpresa = false;
 
   function renderHistorico() {
-    setBand(histAba === 'order' ? 'Order History' : 'Delivery History', [{ nome: 'Histórico' }]);
-    var html = '<div class="hist-tabs">' +
-      '<button class="' + (histAba === 'order' ? 'on' : '') + '" data-t="order">ORDER HISTORY</button>' +
-      '<button class="' + (histAba === 'delivery' ? 'on' : '') + '" data-t="delivery">DELIVERY HISTORY</button></div>' +
-      '<div id="hist-body"></div>';
-    view.innerHTML = html;
-    Array.prototype.forEach.call(view.querySelectorAll('.hist-tabs button'), function (b) {
-      b.addEventListener('click', function () { histAba = b.getAttribute('data-t'); renderHistorico(); });
-    });
+    setBand('Order History', [{ nome: 'Histórico' }]);
+    view.innerHTML = '<div id="hist-body"></div>';
     var body = document.getElementById('hist-body');
 
-    if (histAba === 'order') {
-      var orders = FG.all('orders').filter(function (o) {
-        return verEmpresa ? o.empresa === sess.empresa : o.usuario === sess.email;
-      });
-      if (sess.papel === 'admin' && !orders.length && !verEmpresa) orders = FG.all('orders');
-      if (!orders.length) {
-        body.innerHTML = '<div class="empty-box">No Orders Found<br>' +
-          '<button class="btn red" id="ho-all">Show all orders of company</button></div>';
-        document.getElementById('ho-all').addEventListener('click', function () { verEmpresa = true; renderHistorico(); });
-        return;
-      }
-      body.innerHTML =
-        '<p class="right muted" style="font-size:11px;">SHOW ALL ORDERS OF COMPANY ' +
-        '<input type="checkbox" id="ho-chk"' + (verEmpresa ? ' checked' : '') + '></p>' +
-        orders.map(function (o) {
-          return '<div class="order-card"><div class="oc-head">' +
-            '<span><b>' + o.cx + ' / ' + o.id + '</b></span>' +
-            '<span>' + FG.fmtDateTime(o.data) + '</span>' +
-            '<span><span class="pill-status ' + esc(o.status) + '">' + esc(o.status) + '</span></span>' +
-            '<span style="margin-left:auto;"><b>' + FG.fmtMoney(o.total) + '</b></span></div>' +
-            '<div class="oc-items">' + o.itens.map(function (it) {
-              return '<div>' + it.qtd + '× <a href="#/produto/' + it.artigo + '">' + esc(it.nome) + '</a> ' +
-                '<span class="muted">(' + it.artigo + ')</span> — ' + FG.fmtMoney(it.preco * it.qtd) + '</div>';
-            }).join('') + '</div></div>';
-        }).join('');
-      document.getElementById('ho-chk').addEventListener('change', function (e) { verEmpresa = e.target.checked; renderHistorico(); });
+    var orders = FG.all('orders').filter(function (o) {
+      return verEmpresa ? o.empresa === sess.empresa : o.usuario === sess.email;
+    });
+    if (sess.papel === 'admin' && !orders.length && !verEmpresa) orders = FG.all('orders');
+    if (!orders.length) {
+      body.innerHTML = '<div class="empty-box">No Orders Found<br>' +
+        '<button class="btn red" id="ho-all">Show all orders of company</button></div>';
+      document.getElementById('ho-all').addEventListener('click', function () { verEmpresa = true; renderHistorico(); });
       return;
     }
-
-    /* delivery history */
-    var dels = FG.all('deliveries');
-    body.innerHTML = dels.length ?
-      '<table class="table"><thead><tr><th>Delivery Number</th><th>Delivery Date</th><th>Tracking Number</th>' +
-      '<th>Order Number(s)</th><th>Invoice Date</th><th>Invoice Number</th></tr></thead><tbody>' +
-      dels.map(function (d) {
-        return '<tr><td>' + d.numero + '</td><td>' + FG.fmtDate(d.data) + '</td>' +
-          '<td>' + d.rastreios.join('<br>') + '</td>' +
-          '<td style="color:var(--red);font-weight:600;">' + d.pedidos.map(esc).join('<br>') + '</td>' +
-          '<td>' + FG.fmtDate(d.dataFatura) + '</td>' +
-          '<td><a href="portal.html#financeiro">' + d.fatura + '</a></td></tr>';
-      }).join('') + '</tbody></table>'
-      : '<div class="empty-box">Nenhuma entrega registrada.</div>';
+    body.innerHTML =
+      '<p class="right muted" style="font-size:11px;">SHOW ALL ORDERS OF COMPANY ' +
+      '<input type="checkbox" id="ho-chk"' + (verEmpresa ? ' checked' : '') + '></p>' +
+      orders.map(function (o) {
+        // O número linka direto para o detalhe do pedido na aba Pedidos do portal.
+        return '<div class="order-card"><div class="oc-head">' +
+          '<span><b><a href="portal.html#pedido/' + esc(o.id) + '" title="Ver detalhes do pedido">' + esc(o.id) + '</a></b>' +
+          (o.garantia ? ' <span class="pill-status Garantia">Garantia</span>' : '') + '</span>' +
+          '<span>' + FG.fmtDateTime(o.data) + '</span>' +
+          '<span><span class="pill-status ' + esc(o.status) + '">' + esc(o.status) + '</span></span>' +
+          '<span style="margin-left:auto;"><b>' + FG.fmtMoney(o.total) + '</b></span></div>' +
+          '<div class="oc-items">' + o.itens.map(function (it) {
+            return '<div>' + it.qtd + '× <a href="#/produto/' + it.artigo + '">' + esc(it.nome) + '</a> ' +
+              '<span class="muted">(' + it.artigo + ')</span> — ' + FG.fmtMoney(it.preco * it.qtd) + '</div>';
+          }).join('') + '</div></div>';
+      }).join('');
+    document.getElementById('ho-chk').addEventListener('change', function (e) { verEmpresa = e.target.checked; renderHistorico(); });
   }
 
   /* =========================================================
