@@ -205,10 +205,30 @@ fgsql -Q "SELECT @@VERSION"
 > `-C` confia no certificado autoassinado do container. Se a imagem for antiga e
 > não tiver `mssql-tools18`, troque por `/opt/mssql-tools/bin/sqlcmd` (sem `-C`).
 
-### 3.3 Enviar os scripts do projeto pro VPS
-Do **seu PC** (não do VPS), copie a pasta `database/`:
+> ### ⚠️ Arquivo vai por `<`, nunca por `-i`
+>
+> O `fgsql` executa o sqlcmd **dentro do container**, e o container não enxerga
+> o disco do servidor. Passar `-i /var/www/.../arquivo.sql` faz o sqlcmd
+> procurar esse caminho no sistema de arquivos **dele**, que não existe:
+>
+> ```
+> Sqlcmd: 'fullgas_schema_sqlserver.sql': Invalid filename.
+> ```
+>
+> O jeito certo é mandar o conteúdo pela entrada padrão — o `docker exec -i`
+> repassa o stdin e o sqlcmd lê comandos dali quando não recebe `-i`:
+>
+> ```bash
+> fgsql < arquivo.sql            # ✅
+> fgsql -i arquivo.sql           # ❌ Invalid filename
+> ```
+
+### 3.3 Ter os scripts no servidor
+Eles vêm junto no `git clone` da Parte 4 — a pasta é
+`/var/www/fullgas-app/database`. Se preferir adiantar o banco antes de clonar,
+copie só ela, do **seu PC**:
 ```bash
-scp -r database fullgas@143.95.221.45:/home/fullgas/database
+scp -P 22022 -r database fullgas@143.95.221.45:/home/fullgas/database
 ```
 
 ### 3.4 Criar o banco, tabelas, seeds e o usuário da aplicação
@@ -230,19 +250,19 @@ scp -r database fullgas@143.95.221.45:/home/fullgas/database
 
 No VPS, rode **nesta ordem** (usando o `fgsql` do passo 3.2):
 ```bash
-cd /home/fullgas/database
-fgsql -i fullgas_schema_sqlserver.sql
+cd /var/www/fullgas-app/database
+fgsql < fullgas_schema_sqlserver.sql
 
 # TODAS as migrações, em ordem numérica, parando no primeiro erro:
 for f in $(ls migrations/*.sql | sort); do
   echo ">> $f"
-  fgsql -b -i "$f" || { echo "FALHOU em $f — pare e investigue"; break; }
+  fgsql -b < "$f" || { echo "FALHOU em $f — pare e investigue"; break; }
 done
 
-fgsql -i criar_usuario_app.sql        # cria o usuário fullgas_app
+fgsql < criar_usuario_app.sql        # cria o usuário fullgas_app
 
 # Parts Finder: modelos e seções (estrutura + diagramas), sem os produtos.
-fgsql -d FullgasB2B -i seed_partsfinder.sql
+fgsql -d FullgasB2B < seed_partsfinder.sql
 ```
 
 > **Seeds:** `fullgas_seeds.sql` traz dados de demonstração (empresas e
@@ -543,7 +563,7 @@ sudo cp -r /var/www/fullgas-app/frontend/* /var/www/fullgas/
 > já usa isso pra furar cache do navegador).
 
 **Nova mudança no banco:** crie uma migração numerada em `database/migrations/` e
-rode com o `fgsql -i migrations/0XX_....sql` (nunca edite o schema original).
+rode com o `fgsql < migrations/0XX_....sql` (nunca edite o schema original).
 
 **Backup do banco (faça periodicamente):**
 ```bash
