@@ -159,7 +159,7 @@ async function inserirPecas(tx, reivId, pecasResolvidas) {
 const SELECT_REIV =
   `SELECT r.ReivindicacaoId, r.Numero, r.Tipo, r.Status, r.Pais, r.PreAutorizacao,
           r.Devolvido, r.Reenviada, r.FaltaInformacao, r.Descricao, r.DataAbertura,
-          r.AtualizadoEm, r.ValorGarantia, r.EmpresaId,
+          r.AtualizadoEm, r.DataAprovacao, r.ValorGarantia, r.EmpresaId,
           r.NumeroPeca, r.DataDefeito, r.Horimetro, r.Quilometragem,
           e.RazaoSocial AS Empresa, v.Niv AS Niv
      FROM dbo.Reivindicacao r
@@ -204,6 +204,7 @@ function montar(r, extras, req) {
     sentBack: !!r.Devolvido,
     reenviada: !!r.Reenviada,
     atualizadoEm: toIso(r.AtualizadoEm),
+    dataAprovacao: toIso(r.DataAprovacao),
     valorGarantia: r.ValorGarantia == null ? null : Number(r.ValorGarantia),
     faltaInformacao: r.FaltaInformacao || '',
     descricao: r.Descricao || '',
@@ -424,7 +425,7 @@ async function criarPedidoGarantia(tx, reiv) {
     .input('data', sql.DateTime2, Agora)
     .query(`INSERT INTO dbo.Pedido (NumeroPedido, UsuarioId, EmpresaId, DataPedido, Status, Total, Tipo)
             OUTPUT inserted.PedidoId
-            VALUES (@num, @uid, @eid, @data, 'Pendente', 0, 'garantia')`);
+            VALUES (@num, @uid, @eid, @data, N'Em separação', 0, 'garantia')`);
   const pedidoId = insPed.recordset[0].PedidoId;
 
   let temEstoque = false;
@@ -512,7 +513,9 @@ router.put('/reivindicacoes/:numero/status', requireAuth, requireAdmin, async (r
       .input('val', sql.Decimal(12, 2), valorGarantia)
       .query(`UPDATE dbo.Reivindicacao
                  SET Status = @status, Reenviada = 0, ValorGarantia = @val,
-                     AtualizadoEm = SYSUTCDATETIME()
+                     AtualizadoEm = SYSUTCDATETIME(),
+                     DataAprovacao = CASE WHEN @status = 'Aprovada'
+                                          THEN SYSUTCDATETIME() ELSE DataAprovacao END
                WHERE Numero = @num`);
 
     await tx.commit();

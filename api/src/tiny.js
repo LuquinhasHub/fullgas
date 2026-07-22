@@ -220,6 +220,32 @@ export async function incluirContato(contato) {
   return { id: String(reg.id) };
 }
 
+// Altera um contato JÁ existente no Tiny (contato.alterar.php). Recebe o objeto
+// no formato v2 COM o `id` do contato; mesmo envelope do incluir. Sentido
+// Fullgas → Tiny quando o cadastro da empresa muda no portal.
+export async function alterarContato(contato) {
+  const ret = await tinyPost('contato.alterar.php',
+    { contato: JSON.stringify({ contatos: [{ contato }] }) }, { prioritario: true });
+  const regs = ret.registros;
+  const reg = Array.isArray(regs) ? regs[0]?.registro : (regs?.registro ?? regs);
+  if (String(reg?.status).toLowerCase() === 'erro') {
+    const msg = (reg.erros || []).map(e => e?.erro).filter(Boolean).join('; ')
+      || 'Erro não especificado ao alterar o contato.';
+    throw new TinyError(`Tiny: ${msg}`, reg.codigo_erro);
+  }
+  return { id: String(reg?.id || contato.id) };
+}
+
+// Lê um contato do Tiny pelo id (contato.obter.php). Devolve o objeto contato
+// (nome, fantasia, cpf_cnpj, ie, email, fone, endereco, numero...) ou null.
+// Sentido Tiny → Fullgas: alimenta o espelho do cadastro no cron.
+export async function obterContato(tinyId) {
+  const ret = await tinyPost('contato.obter.php', { id: tinyId });
+  const c = ret.contato
+    || (Array.isArray(ret.registros) ? ret.registros[0]?.registro?.contato || ret.registros[0]?.registro : null);
+  return c || null;
+}
+
 /* ---------------- pedidos no Tiny (escrita) ---------------- */
 
 // Saldo atual de um produto no Tiny — usado pela checagem em tempo real do
@@ -251,6 +277,18 @@ export async function incluirPedido(pedido) {
 export async function alterarSituacaoPedido(tinyPedidoId, situacao) {
   await tinyPost('pedido.alterar.situacao.php',
     { id: tinyPedidoId, situacao }, { prioritario: true });
+}
+
+// Lê a situação atual de um pedido no Tiny (pedido.obter.php). Devolve o texto
+// da situação em minúsculas (ex.: 'aprovado', 'faturado', 'enviado', 'entregue',
+// 'cancelado') ou null se não vier. Usada para refletir Enviado/Entregue no
+// status local (tiny-pedidos.js → sincronizarSituacaoPedidos).
+export async function obterSituacaoPedido(tinyPedidoId) {
+  const ret = await tinyPost('pedido.obter.php', { id: tinyPedidoId });
+  const ped = ret.pedido
+    || (Array.isArray(ret.registros) ? ret.registros[0]?.registro?.pedido || ret.registros[0]?.registro : null);
+  const sit = ped?.situacao;
+  return sit != null && sit !== '' ? String(sit).trim().toLowerCase() : null;
 }
 
 // Vendas do Fullgas ainda não registradas no Tiny (exportação pendente ou com

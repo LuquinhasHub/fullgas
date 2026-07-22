@@ -30,8 +30,10 @@
 import 'dotenv/config';
 import { query, sql } from './db.js';
 import {
-  incluirPedido, alterarSituacaoPedido, obterSaldoAtual, reservaPendente
+  incluirPedido, alterarSituacaoPedido, obterSaldoAtual, reservaPendente,
+  obterSituacaoPedido
 } from './tiny.js';
+import { atualizarContatoTiny, clientesLigado } from './tiny-contatos.js';
 
 // Depois disso o cron para de insistir; o admin pode reexportar pelo painel
 // (o botão zera as tentativas).
@@ -211,6 +213,19 @@ export async function exportarPedido(exportId) {
           SET Status = 'enviado', ExportadoEm = SYSUTCDATETIME(), UltimoErro = NULL
         WHERE ExportId = @id`, { id: exportId });
     console.log(`✓ Exportação Tiny #${exportId}: pedido ${tinyId} criado e aprovado no Tiny.`);
+
+    // O pedido.incluir casa o cliente pelo CNPJ POR CONTA PRÓPRIA e, se não
+    // achar, CRIA um contato — sem avisar e sem respeitar o nosso vínculo.
+    // Foi assim que nasceram contatos duplicados presos ao cadastro antigo.
+    // Reconcilia logo depois: confere quem detém o CNPJ, re-aponta o vínculo
+    // se mudou e empurra o cadastro atual. Nunca derruba a exportação — o
+    // pedido já está no Tiny; isto é só o cadastro acompanhando.
+    if (clientesLigado()) {
+      const emp = (await query(
+        'SELECT EmpresaId FROM dbo.Pedido WHERE PedidoId = @pid', { pid: exp.PedidoId }
+      ))[0];
+      if (emp) await atualizarContatoTiny(emp.EmpresaId).catch(() => { });
+    }
     return 'enviado';
   } catch (e) {
     await query(
@@ -241,6 +256,44 @@ export async function processarExportacoes() {
     console.error('✗ Fila de exportação Tiny falhou:', e.message);
   } finally {
     processando = false;
+  }
+}
+
+/* ---------------- status Tiny → Fullgas ---------------- */
+
+// Situações do Tiny que REFLETIMOS no status local do pedido. Só interessa ao
+// negócio saber quando o Tiny marcou como enviado ou entregue; as demais
+// (aprovado, preparando envio, FATURADO, pronto p/ envio...) são ignoradas.
+const MAPA_SITUACAO_TINY = { enviado: 'Enviado', entregue: 'Entregue' };
+
+// Puxa do Tiny a situação dos pedidos já exportados (escopo 'normal') que ainda
+// não foram finalizados aqui e reflete 'Enviado'/'Entregue' no status local.
+// Nunca regride (Entregue não volta a Enviado) nem toca pedidos já terminais.
+// Chamada pelo cron, depois de reprocessar a fila de exportação.
+export async function sincronizarSituacaoPedidos() {
+  if (!exportacaoLigada()) return;
+  const rows = await query(
+    `SELECT e.TinyPedidoId, p.PedidoId, p.NumeroPedido, p.Status
+       FROM dbo.TinyPedidoExport e
+       JOIN dbo.Pedido p ON p.PedidoId = e.PedidoId
+      WHERE e.Escopo = 'normal' AND e.Status = 'enviado' AND e.TinyPedidoId IS NOT NULL
+        AND p.Status NOT IN (N'Entregue', N'Cancelado')`);
+  for (const r of rows) {
+    try {
+      const sit = await obterSituacaoPedido(r.TinyPedidoId);
+      const alvo = sit ? MAPA_SITUACAO_TINY[sit] : null;
+      // Ignora situações não mapeadas (faturado, aprovado...) e o que já bate;
+      // nunca volta de Entregue para Enviado.
+      if (!alvo || alvo === r.Status) continue;
+      if (r.Status === 'Entregue' && alvo === 'Enviado') continue;
+      await query(
+        `UPDATE dbo.Pedido SET Status = @st, AtualizadoEm = SYSUTCDATETIME()
+          WHERE PedidoId = @pid AND Status NOT IN (N'Entregue', N'Cancelado')`,
+        { st: alvo, pid: r.PedidoId });
+      console.log(`✓ Status Tiny→Fullgas: pedido ${r.NumeroPedido} → '${alvo}' (Tiny: '${sit}').`);
+    } catch (e) {
+      console.warn(`⚠ Situação Tiny do pedido ${r.NumeroPedido} indisponível: ${e.message}`);
+    }
   }
 }
 

@@ -16,7 +16,7 @@ import {
 const router = Router();
 
 // Status válidos (espelham o CHECK constraint da tabela Pedido).
-const STATUS_VALIDOS = ['Pendente', 'Processando', 'Enviado', 'Entregue', 'Cancelado'];
+const STATUS_VALIDOS = ['Pendente', 'Em separação', 'Enviado', 'Entregue', 'Cancelado'];
 // Status terminais: uma vez aqui, o pedido não muda mais.
 const STATUS_FINAIS = ['Entregue', 'Cancelado'];
 // Escopos de envio aceitos.
@@ -354,8 +354,8 @@ router.post('/pedidos', requireAuth, async (req, res, next) => {
 //  - escopo presente OU status 'Enviado' -> ENVIO segmentado: marca como
 //    enviados os itens do escopo que ainda faltam (pré-venda só envia o que já
 //    tem estoque, baixando-o agora). O status do pedido vira 'Enviado' se tudo
-//    foi enviado, senão 'Processando'.
-//  - demais status (Pendente/Processando/Entregue) -> apenas muda o status.
+//    foi enviado, senão 'Em separação'.
+//  - demais status (Pendente/Em separação/Entregue) -> apenas muda o status.
 router.put('/pedidos/:numero/status', requireAuth, requireAdmin, async (req, res, next) => {
   const status = String(req.body?.status || '').trim();
   let escopo = String(req.body?.escopo || '').trim().toLowerCase();
@@ -499,10 +499,10 @@ router.put('/pedidos/:numero/status', requireAuth, requireAdmin, async (req, res
       // marca o pedido como 'Enviado' — a peça só foi liberada para SEPARAÇÃO;
       // o envio de verdade é o admin quem confirma depois, mudando o status.
       const faltam = totNormais > 0 ? pendNormais > 0 : pendTotal > 0;
-      const novoStatus = (alvoBackorder || faltam) ? 'Processando' : 'Enviado';
+      const novoStatus = (alvoBackorder || faltam) ? 'Em separação' : 'Enviado';
       await new sql.Request(tx)
         .input('pid', sql.Int, ped.PedidoId)
-        .input('st', sql.VarChar(14), novoStatus)
+        .input('st', sql.NVarChar(14), novoStatus)  // NVarChar: preserva "Em separação" (o server converte p/ o varchar Latin1)
         .query('UPDATE dbo.Pedido SET Status = @st, AtualizadoEm = SYSUTCDATETIME() WHERE PedidoId = @pid');
 
       // Pré-venda liberada agora vira um pedido próprio no Tiny (baixa o
@@ -516,10 +516,10 @@ router.put('/pedidos/:numero/status', requireAuth, requireAdmin, async (req, res
       return res.json({ ok: true, status: novoStatus, parcial: faltam });
     }
 
-    // ---- Mudança simples de status (Pendente/Processando/Entregue) ----
+    // ---- Mudança simples de status (Pendente/Em separação/Entregue) ----
     await new sql.Request(tx)
       .input('num', sql.VarChar(20), req.params.numero)
-      .input('st', sql.VarChar(14), status)
+      .input('st', sql.NVarChar(14), status)  // NVarChar: preserva "Em separação"
       .query('UPDATE dbo.Pedido SET Status = @st, AtualizadoEm = SYSUTCDATETIME() WHERE NumeroPedido = @num');
 
     await tx.commit();
@@ -547,7 +547,7 @@ router.put('/pedidos/:numero/itens/:itemId/enviado', requireAuth, requireAdmin, 
       .input('num', sql.VarChar(20), req.params.numero)
       .input('iid', sql.Int, Number(req.params.itemId))
       .query(`SELECT pi.PedidoId, pi.PedidoItemId, pi.ProdutoId, pi.Quantidade, pi.QuantidadeEnviada,
-                     pi.EmBackorder, pi.Sku, pi.NomeProduto, pi.PrecoUnitario
+                     pi.EmBackorder, pi.Sku, pi.NomeProduto, pi.PrecoUnitario, p.Status
                 FROM dbo.PedidoItem pi
                 JOIN dbo.Pedido p ON p.PedidoId = pi.PedidoId
                WHERE p.NumeroPedido = @num AND pi.PedidoItemId = @iid`);
@@ -556,6 +556,13 @@ router.put('/pedidos/:numero/itens/:itemId/enviado', requireAuth, requireAdmin, 
       return res.status(404).json({ erro: 'Item não encontrado neste pedido.' });
     }
     const it = cur.recordset[0];
+    // Pedido entregue ou cancelado está fechado — nem o painel admin mexe.
+    if (STATUS_FINAIS.includes(it.Status)) {
+      await tx.rollback();
+      return res.status(409).json({
+        erro: `Pedido ${it.Status.toLowerCase()} — as peças não podem mais ser alteradas.`
+      });
+    }
     if (qtd > it.Quantidade) {
       await tx.rollback();
       return res.status(400).json({ erro: 'Quantidade enviada não pode exceder a pedida.' });
