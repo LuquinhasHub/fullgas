@@ -381,6 +381,22 @@
     category: function (id) {
       return FG.all('categories').find(function (c) { return c.id === id; }) || null;
     },
+    /* ---- categorias hierárquicas (máx. 2 níveis) ---- */
+    // Categorias de topo (sem pai). `c.pai` ausente/null = topo.
+    categoriasTopo: function () {
+      return FG.all('categories').filter(function (c) { return !c.pai; });
+    },
+    // Subcategorias diretas de uma categoria de topo.
+    subcategorias: function (catId) {
+      return FG.all('categories').filter(function (c) { return c.pai === catId; });
+    },
+    // A própria categoria + os códigos das suas subcategorias — usado para
+    // listar, numa categoria de topo, também os produtos das subcategorias.
+    categoriaEDescendentes: function (catId) {
+      var ids = [catId];
+      FG.all('categories').forEach(function (c) { if (c.pai === catId) ids.push(c.id); });
+      return ids;
+    },
     model: function (id) {
       return FG.all('models').find(function (m) { return m.id === id; }) || null;
     },

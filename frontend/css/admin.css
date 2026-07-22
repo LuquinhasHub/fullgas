@@ -69,6 +69,89 @@ body.admin { background: var(--adm-bg); color: var(--adm-ink); display: flex; mi
 .tbl tr:hover td { background: #fafafa; }
 .tbl .r { text-align: right; }
 
+/* ---------- painel de gestão do usuário (modal) ---------- */
+.usr-modal { width: 620px; }
+.usr-alerta {
+  display: inline-block; width: 17px; height: 17px; line-height: 17px; text-align: center;
+  border-radius: 50%; background: #b91c1c; color: #fff; font-size: 11px; font-weight: 700;
+}
+.usr-ficha { display: flex; gap: 14px; align-items: center; padding-bottom: 14px; border-bottom: 1px solid var(--adm-line); }
+.usr-avatar {
+  width: 52px; height: 52px; flex: 0 0 52px; border-radius: 50%;
+  background: var(--adm-orange); color: #1c1c1c;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 22px; font-weight: 800;
+}
+.usr-ficha-nome { font-size: 16px; font-weight: 700; }
+.usr-ficha-mail { font-size: 12px; color: #666; }
+.usr-ficha-tags { display: flex; gap: 5px; flex-wrap: wrap; margin: 6px 0 3px; }
+.usr-ficha-emp { font-size: 12px; }
+.pill-status.ps-interna { background: #e5e7eb; color: #374151; }
+.pill-status.ps-gestor { background: #dbeafe; color: #1d4ed8; }
+
+.usr-acoes { display: flex; flex-direction: column; gap: 9px; margin-top: 14px; }
+.usr-acao {
+  display: flex; align-items: center; gap: 12px;
+  border: 1px solid var(--adm-line); border-left: 4px solid #d4d4d4;
+  border-radius: 4px; padding: 11px 13px; background: #fff; transition: background .15s, border-color .15s;
+}
+.usr-acao:hover { background: #fafafa; }
+.usr-acao-ico { font-size: 20px; flex: 0 0 26px; text-align: center; }
+.usr-acao-txt { flex: 1; min-width: 0; }
+.usr-acao-txt b { display: block; font-size: 13px; margin-bottom: 2px; }
+.usr-acao-txt span { display: block; font-size: 11.5px; color: #666; line-height: 1.45; }
+.usr-acao-btn {
+  flex: 0 0 auto; border: 1px solid #bbb; background: #f4f4f4; color: #333;
+  padding: 7px 14px; font-size: 12px; font-weight: 600; border-radius: 3px; cursor: pointer;
+}
+.usr-acao-btn:hover { background: #eaeaea; }
+.usr-acao-btn:disabled { opacity: .55; cursor: default; }
+/* Tons por gravidade: destaque (identidade), ok, aviso, perigo. */
+.usr-acao.destaque { border-left-color: var(--adm-orange); background: #fffdf3; }
+.usr-acao.destaque .usr-acao-btn { background: var(--adm-orange); border-color: var(--adm-orange); color: #1c1c1c; }
+.usr-acao.destaque .usr-acao-btn:hover { background: #cf9f00; }
+.usr-acao.ok { border-left-color: #15803d; }
+.usr-acao.ok .usr-acao-btn { background: #15803d; border-color: #15803d; color: #fff; }
+.usr-acao.aviso { border-left-color: #c2410c; }
+.usr-acao.aviso .usr-acao-btn { color: #c2410c; border-color: #e7bda6; }
+.usr-acao.perigo { border-left-color: #b91c1c; }
+.usr-acao.perigo .usr-acao-btn { color: #b91c1c; border-color: #e8b4b4; }
+.usr-acao.perigo .usr-acao-btn:hover { background: #fee2e2; }
+
+/* Barra de filtros das abas (Vendas, Pré-venda, Catálogo, Chassis, Clientes). */
+.adm-filtros {
+  gap: 14px; margin: 0 0 14px; padding: 10px 12px;
+  background: #fafafa; border: 1px solid var(--adm-line);
+}
+.adm-filtros label { font-size: 12px; color: #555; }
+.adm-filtros select {
+  border: 1px solid #ccc; border-radius: 3px; background: #fff;
+  padding: 5px 8px; font-size: 12px; min-width: 150px; max-width: 260px;
+}
+.adm-filtros .f-busca {
+  flex: 1; min-width: 200px; padding: 6px 10px;
+  border: 1px solid #ccc; border-radius: 3px; font-size: 12px;
+}
+
+/* Pré-venda quebrada por mês (só quando a fila passa de um mês). */
+.pv-mes { margin-bottom: 22px; }
+.pv-mes-head {
+  font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em;
+  padding: 8px 12px; background: #f2f4f7; border-left: 4px solid var(--adm-orange);
+  display: flex; align-items: center; gap: 10px;
+}
+.pv-mes.atrasado .pv-mes-head { border-left-color: #b91c1c; }
+.pv-mes-head .muted { text-transform: none; letter-spacing: 0; font-weight: 400; }
+.pv-atraso {
+  margin-left: auto; font-size: 11px; font-weight: 600; text-transform: none;
+  letter-spacing: 0; color: #b91c1c;
+}
+
+/* Controle de envio por peça (detalhe do pedido). */
+.it-ctrl { white-space: nowrap; }
+.it-ctrl input { padding: 3px 6px; border: 1px solid #ccc; border-radius: 3px; font-size: 12px; }
+.it-ctrl .btn-mini { margin-left: 4px; }
+
 .chart-tabs { display: flex; gap: 4px; margin-bottom: 14px; }
 .chart-tabs button { border: 1px solid #ccc; background: #f1f1f1; padding: 9px 18px; font-size: 13px; cursor: pointer; }
 .chart-tabs button.on { background: #fff; border-bottom-color: #fff; font-weight: 600; }
@@ -215,11 +298,14 @@ span.fnd-thumb.vazio { display: inline-flex; align-items: center; justify-conten
 .ch-form .field { margin: 0; }
 .ch-livre { color: #92600a; font-weight: 600; font-size: 12px; }
 
-/* Textos amarelos do admin: negrito + contorno preto (mesma regra do
-   styles.css — ver o bloco "TEXTOS AMARELOS" lá). */
+/* Textos amarelos do admin: só NEGRITO (contorno removido a pedido do
+   dono — ver o bloco "TEXTOS AMARELOS" no styles.css). */
 .kpi .k-val, .chart-stats .s .v, .adm-side .logo-cell .g-badge {
   font-weight: 700;
-  text-shadow:
-    -1px 0 #000, 1px 0 #000, 0 -1px #000, 0 1px #000,
-    -1px -1px #000, 1px -1px #000, -1px 1px #000, 1px 1px #000;
 }
+
+/* ---- aba Notificações: formulário de envio ---- */
+.nt-form { display: grid; grid-template-columns: 1fr 220px; gap: 10px 14px; }
+@media (max-width: 700px) { .nt-form { grid-template-columns: 1fr; } }
+.nt-form .field, .adm-card .c-body > .field { margin-bottom: 10px; }
+.adm-card textarea { width: 100%; border: 1px solid #ccc; padding: 8px 10px; font-size: 13px; font-family: inherit; resize: vertical; }

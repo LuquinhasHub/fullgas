@@ -39,12 +39,25 @@
   }
 
   /* ---------- cabeçalho ---------- */
-  function refreshCart() { document.getElementById('cart-n').textContent = FG.cartCount(); }
+  function refreshCart() {
+    var n = FG.cartCount();
+    var head = document.getElementById('cart-n');
+    if (head) head.textContent = n;
+    var fabN = document.getElementById('cart-fab-n');
+    if (fabN) fabN.textContent = n;
+    var fab = document.getElementById('cart-fab');
+    if (fab) fab.classList.toggle('empty', !n);
+  }
+
+  // Conta produtos de uma categoria incluindo os das suas subcategorias.
+  function contaCategoria(catId) {
+    var ids = FG.categoriaEDescendentes(catId);
+    return FG.all('products').filter(function (p) { return ids.indexOf(p.cat) >= 0; }).length;
+  }
 
   var mega = document.getElementById('shop-mega');
-  mega.innerHTML = FG.all('categories').map(function (c) {
-    var n = FG.all('products').filter(function (p) { return p.cat === c.id; }).length;
-    return '<a href="#/categoria/' + c.id + '">' + esc(c.nome) + ' <span>' + n + ' ›</span></a>';
+  mega.innerHTML = FG.categoriasTopo().map(function (c) {
+    return '<a href="#/categoria/' + c.id + '">' + esc(c.nome) + ' <span>' + contaCategoria(c.id) + ' ›</span></a>';
   }).join('');
 
   var menuBtn = document.getElementById('menu-btn');
@@ -118,9 +131,12 @@
      ========================================================= */
   function renderCats() {
     setBand('Categorias', []);
-    view.innerHTML = '<div class="cat-grid">' + FG.all('categories').map(function (c) {
+    view.innerHTML = '<div class="cat-grid">' + FG.categoriasTopo().map(function (c) {
+      var subs = FG.subcategorias(c.id);
       return '<button class="cat-tile" data-cat="' + c.id + '">' + catIcon(c.icone) +
-        '<div class="cat-name">' + esc(c.nome) + '</div></button>';
+        '<div class="cat-name">' + esc(c.nome) + '</div>' +
+        (subs.length ? '<div class="cat-sub muted">' + subs.length + ' subcategoria' + (subs.length > 1 ? 's' : '') + '</div>' : '') +
+        '</button>';
     }).join('') + '</div>';
     Array.prototype.forEach.call(view.querySelectorAll('.cat-tile'), function (b) {
       b.addEventListener('click', function () { location.hash = '#/categoria/' + b.getAttribute('data-cat'); });
@@ -138,14 +154,23 @@
   function renderCategoria(catId, termoBusca) {
     var cat = FG.category(catId);
     var titulo = termoBusca != null ? 'Resultado da busca' : (cat ? cat.nome : 'Categoria');
-    setBand(titulo, cat ? [{ nome: cat.nome }] : [{ nome: 'Busca' }]);
+    // Trilha: subcategoria mostra "Pai › Subcategoria"; topo mostra só o nome.
+    var trilha;
+    if (termoBusca != null) trilha = [{ nome: 'Busca' }];
+    else if (cat && cat.pai) {
+      var paiCat = FG.category(cat.pai);
+      trilha = [{ nome: paiCat ? paiCat.nome : cat.pai, href: '#/categoria/' + cat.pai }, { nome: cat.nome }];
+    } else trilha = cat ? [{ nome: cat.nome }] : [{ nome: 'Categoria' }];
+    setBand(titulo, trilha);
 
+    // Numa categoria de topo, inclui os produtos das suas subcategorias.
+    var catIds = (termoBusca != null || !cat) ? null : FG.categoriaEDescendentes(catId);
     var artigosModelo = motoFiltro ? FG.modelArticles(motoFiltro) : null;
     var todos = FG.all('products').filter(function (p) {
       if (termoBusca != null) {
         var t = termoBusca.toLowerCase();
         if (p.artigo.toLowerCase().indexOf(t) < 0 && p.nome.toLowerCase().indexOf(t) < 0) return false;
-      } else if (p.cat !== catId) return false;
+      } else if (catIds && catIds.indexOf(p.cat) < 0) return false;
       if (soDisponiveis && p.estoque <= 0) return false;
       if (artigosModelo && artigosModelo.indexOf(p.artigo) < 0) return false;
       return true;
@@ -156,12 +181,44 @@
     if (pagina > totalPag) pagina = totalPag;
     var lista = todos.slice((pagina - 1) * POR_PAGINA, pagina * POR_PAGINA);
 
+    // Sidebar em árvore: categorias de topo sempre; subcategorias aparecem
+    // expandidas sob a categoria ativa (a atual ou a mãe da subcategoria atual).
+    function contaCat(id) {
+      var ids = FG.categoriaEDescendentes(id);
+      return FG.all('products').filter(function (p) { return ids.indexOf(p.cat) >= 0; }).length;
+    }
     var side = '<aside class="shop-side"><h4>CATEGORIAS</h4>' +
-      FG.all('categories').map(function (c) {
-        var n = FG.all('products').filter(function (p) { return p.cat === c.id; }).length;
-        return '<button class="cat-link' + (c.id === catId ? ' on' : '') + '" data-cat="' + c.id + '">' +
-          esc(c.nome) + ' <span>(' + n + ')</span></button>';
+      FG.categoriasTopo().map(function (c) {
+        var ativa = c.id === catId || (cat && cat.pai === c.id);
+        var html = '<button class="cat-link' + (c.id === catId ? ' on' : '') + '" data-cat="' + c.id + '">' +
+          esc(c.nome) + ' <span>(' + contaCat(c.id) + ')</span></button>';
+        var subs = FG.subcategorias(c.id);
+        if (subs.length && ativa) {
+          html += subs.map(function (s) {
+            var ns = FG.all('products').filter(function (p) { return p.cat === s.id; }).length;
+            return '<button class="cat-link sub' + (s.id === catId ? ' on' : '') + '" data-cat="' + s.id + '">↳ ' +
+              esc(s.nome) + ' <span>(' + ns + ')</span></button>';
+          }).join('');
+        }
+        return html;
       }).join('') + '</aside>';
+
+    // Chips de subcategoria acima da lista (drill-in rápido).
+    var subChips = '';
+    if (termoBusca == null && cat && !cat.pai) {
+      var subsTopo = FG.subcategorias(catId);
+      if (subsTopo.length) {
+        subChips = '<div class="subcat-chips"><a class="chip on" href="#/categoria/' + catId + '">Todos</a>' +
+          subsTopo.map(function (s) { return '<a class="chip" href="#/categoria/' + s.id + '">' + esc(s.nome) + '</a>'; }).join('') +
+          '</div>';
+      }
+    } else if (termoBusca == null && cat && cat.pai) {
+      var paiChip = FG.category(cat.pai);
+      subChips = '<div class="subcat-chips"><a class="chip" href="#/categoria/' + cat.pai + '">↩ ' + esc(paiChip ? paiChip.nome : 'Todos') + '</a>' +
+        FG.subcategorias(cat.pai).map(function (s) {
+          return '<a class="chip' + (s.id === catId ? ' on' : '') + '" href="#/categoria/' + s.id + '">' + esc(s.nome) + '</a>';
+        }).join('') + '</div>';
+    }
 
     var tools =
       '<div class="shop-tools">' +
@@ -190,7 +247,7 @@
     }).join('');
     if (!lista.length) rows = '<div class="empty-box">Nenhum artigo encontrado com os filtros atuais.</div>';
 
-    view.innerHTML = '<div class="shop-layout">' + side + '<section>' + tools + rows + '</section></div>';
+    view.innerHTML = '<div class="shop-layout">' + side + '<section>' + subChips + tools + rows + '</section></div>';
 
     /* sidebar */
     Array.prototype.forEach.call(view.querySelectorAll('.cat-link'), function (b) {

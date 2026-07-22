@@ -68,7 +68,8 @@
       apiGet('/faturas'),
       apiGet('/prevenda'),
       apiGet('/reivindicacoes'),
-      apiGet('/usuarios') // só admin recebe; cliente resolve null (apiGet nunca rejeita)
+      apiGet('/usuarios'), // só admin recebe; cliente resolve null (apiGet nunca rejeita)
+      apiGet('/notificacoes')
     ]).then(function (r) {
       if (r[0]) CACHE.products = r[0];
       if (r[1]) CACHE.categories = r[1];
@@ -79,6 +80,7 @@
       if (r[6]) CACHE.prevenda = r[6];
       if (r[7]) CACHE.claims = r[7];
       if (r[8]) CACHE.users = r[8];
+      if (r[9]) CACHE.notifications = r[9];
       return CACHE;
       // (demais coleções entram nas próximas rotas: notificações, etc.)
     });
@@ -115,6 +117,50 @@
   }
   FG.recarregarUsuarios = recarregarUsuarios;
 
+  function recarregarNotifs() {
+    return apiGet('/notificacoes').then(function (l) { if (l) CACHE.notifications = l; return l; });
+  }
+  FG.recarregarNotifs = recarregarNotifs;
+
+  /* ---------- notificações (admin → concessionárias) ---------- */
+  // Marca lida/não lida (estado POR USUÁRIO na API). Atualiza o cache.
+  FG.markNotif = function (id, lida) {
+    var n = CACHE.notifications.find(function (x) { return String(x.id) === String(id); });
+    if (n) n.lida = lida; // otimista: a tela reflete na hora
+    return req('PATCH', '/notificacoes/' + encodeURIComponent(id) + '/lida', { lida: !!lida });
+  };
+
+  // Admin envia notificação. `dados` = { titulo, texto, tipo, empresaId?,
+  // anexo? (File) }. Multipart montado aqui (fetch próprio — o api() força
+  // Content-Type JSON). Devolve Promise<{ ok, msg? }>.
+  FG.notifEnviar = function (dados) {
+    var fd = new FormData();
+    fd.append('titulo', dados.titulo || '');
+    fd.append('texto', dados.texto || '');
+    fd.append('tipo', dados.tipo || 'info');
+    if (dados.empresaId) fd.append('empresaId', dados.empresaId);
+    if (dados.anexo) fd.append('anexo', dados.anexo);
+    return fetch(API_BASE + '/notificacoes', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token(), 'ngrok-skip-browser-warning': '1' },
+      body: fd
+    }).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (data) {
+        if (!r.ok) return { ok: false, msg: data.erro || ('HTTP ' + r.status) };
+        return recarregarNotifs().then(function () { return { ok: true }; });
+      });
+    }, function () { return { ok: false, msg: 'Sem conexão com a API.' }; });
+  };
+
+  // Admin apaga uma notificação (anexo sai do disco na API).
+  FG.notifApagar = function (id) {
+    return req('DELETE', '/notificacoes/' + encodeURIComponent(id)).then(function (r) {
+      if (!r.ok) return r;
+      CACHE.notifications = CACHE.notifications.filter(function (x) { return String(x.id) !== String(id); });
+      return r;
+    });
+  };
+
   /* ---------- Minha conta (concessionário) ---------- */
   // Visão da própria empresa: cadastro, endereço e contas internas.
   // Devolve Promise<{empresa, endereco, areas, usuarios} | null>.
@@ -129,6 +175,11 @@
   // Gestor edita conta interna: { permissoes?, status?, senha? }.
   FG.subdealerEditar = function (id, patch) {
     return req('PATCH', '/conta/subdealers/' + encodeURIComponent(id), patch);
+  };
+
+  // Gestor exclui uma conta interna da própria empresa.
+  FG.subdealerExcluir = function (id) {
+    return req('DELETE', '/conta/subdealers/' + encodeURIComponent(id));
   };
 
   // Sub-dealer tem acesso à área? (null/ausente = acesso total; admin e
@@ -208,9 +259,111 @@
             function (e) { return { ok: false, msg: (e && e.message) || 'Falha no cadastro.' }; });
   };
 
+  /* ---------- esqueci minha senha ----------
+     Nenhuma das três revela se o e-mail existe: a mensagem de sucesso é
+     sempre a mesma, venha o cadastro de onde vier. */
+
+  // Dispara o e-mail com o link de redefinição. Promise<{ ok, msg }>.
+  FG.esqueciSenha = function (email) {
+    return api('/auth/senha/esqueci', { method: 'POST', body: { email: email } })
+      .then(function (d) { return { ok: true, msg: d.msg }; },
+            function (e) { return { ok: false, msg: (e && e.message) || 'Não foi possível enviar agora.' }; });
+  };
+
+  // O link ainda vale? Promise<{ ok, nome?, email? (mascarado), msg? }>.
+  FG.verificarTokenSenha = function (token) {
+    return api('/auth/senha/verificar', { method: 'POST', body: { token: token } })
+      .then(function (d) { return { ok: true, nome: d.nome, email: d.email }; },
+            function (e) { return { ok: false, msg: (e && e.message) || 'Link inválido ou expirado.' }; });
+  };
+
+  // Grava a nova senha e queima o token. Promise<{ ok, msg }>.
+  FG.redefinirSenha = function (token, senha) {
+    return api('/auth/senha/redefinir', { method: 'POST', body: { token: token, senha: senha } })
+      .then(function (d) { return { ok: true, msg: d.msg }; },
+            function (e) { return { ok: false, msg: (e && e.message) || 'Não foi possível alterar a senha.' }; });
+  };
+
+  /* ---------- alteração de identidade (admin entra na conta do cliente) ----------
+     A sessão do admin é guardada à parte antes da troca, para ele voltar com um
+     clique. Enquanto durar, uma tarja fixa no topo avisa em qual conta ele está
+     — ninguém pode esquecer que está agindo pelo cliente. */
+  var ADMIN_TOKEN_KEY = 'fullgas_admin_token_v1';
+  var ADMIN_SESS_KEY = 'fullgas_admin_sessao_v1';
+
+  // Sessão do admin guardada, ou null quando não há identidade assumida.
+  FG.identidadeAssumida = function () {
+    try { return JSON.parse(localStorage.getItem(ADMIN_SESS_KEY) || 'null'); }
+    catch (e) { return null; }
+  };
+
+  // Admin assume a identidade de um usuário. Promise<{ ok, msg? }>.
+  FG.assumirIdentidade = function (id) {
+    return api('/usuarios/' + encodeURIComponent(id) + '/identidade', { method: 'POST' })
+      .then(function (d) {
+        // Guarda a sessão do admin ANTES de sobrescrever (só a primeira vez —
+        // assumir outra identidade em seguida não pode perder o original).
+        if (!localStorage.getItem(ADMIN_TOKEN_KEY)) {
+          localStorage.setItem(ADMIN_TOKEN_KEY, localStorage.getItem(TOKEN_KEY) || '');
+          localStorage.setItem(ADMIN_SESS_KEY, localStorage.getItem('fullgas_session_v1') || '');
+        }
+        localStorage.setItem(TOKEN_KEY, d.token);
+        localStorage.setItem('fullgas_session_v1', JSON.stringify({
+          id: d.usuario.id, nome: d.usuario.nome, email: d.usuario.email,
+          papel: d.usuario.papel, empresa: d.usuario.empresa, empresaId: d.usuario.empresaId,
+          gestor: !!d.usuario.gestor, permissoes: d.usuario.permissoes || null
+        }));
+        return { ok: true, usuario: d.usuario };
+      }, function (e) {
+        return { ok: false, msg: (e && e.message) || 'Não foi possível assumir a identidade.' };
+      });
+  };
+
+  // Devolve o admin à própria conta.
+  FG.voltarIdentidade = function (destino) {
+    var t = localStorage.getItem(ADMIN_TOKEN_KEY);
+    var s = localStorage.getItem(ADMIN_SESS_KEY);
+    localStorage.removeItem(ADMIN_TOKEN_KEY);
+    localStorage.removeItem(ADMIN_SESS_KEY);
+    if (t && s) {
+      localStorage.setItem(TOKEN_KEY, t);
+      localStorage.setItem('fullgas_session_v1', s);
+      location.href = destino || 'admin.html';
+      return;
+    }
+    FG.logout();   // sem backup não dá para voltar: cai no login
+  };
+
+  // Tarja fixa de aviso, injetada em qualquer página enquanto houver identidade
+  // assumida. Fica no adaptador (carregado em todas as telas) para não precisar
+  // repetir o mesmo bloco em portal/loja/finder.
+  function montarTarjaIdentidade() {
+    var adm = FG.identidadeAssumida();
+    if (!adm || document.getElementById('fg-imp-bar')) return;
+    var atual = FG.session() || {};
+    var bar = document.createElement('div');
+    bar.id = 'fg-imp-bar';
+    bar.className = 'imp-bar';
+    bar.innerHTML =
+      '<span class="imp-ico" aria-hidden="true">👁</span>' +
+      '<span class="imp-txt">Você está usando o portal como <b></b>' +
+      '<span class="imp-emp"></span> — tudo o que fizer aqui vale como se fosse o cliente.</span>' +
+      '<button type="button" class="imp-sair">Voltar para minha conta</button>';
+    bar.querySelector('b').textContent = atual.nome || '—';
+    bar.querySelector('.imp-emp').textContent = atual.empresa ? ' (' + atual.empresa + ')' : '';
+    bar.querySelector('.imp-sair').addEventListener('click', function () { FG.voltarIdentidade(); });
+    document.body.insertBefore(bar, document.body.firstChild);
+    document.body.classList.add('com-imp-bar');
+  }
+  if (document.readyState === 'loading')
+    document.addEventListener('DOMContentLoaded', montarTarjaIdentidade);
+  else montarTarjaIdentidade();
+
   FG.logout = function () {
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem('fullgas_session_v1');
+    localStorage.removeItem(ADMIN_TOKEN_KEY);
+    localStorage.removeItem(ADMIN_SESS_KEY);
     location.href = 'index.html';
   };
 
@@ -223,6 +376,33 @@
   FG.apiCriarProduto = function (p) { return api('/produtos', { method: 'POST', body: p }).then(recarregarProdutos).then(aposGravarProduto); };
   FG.apiEditarProduto = function (sku, p) { return api('/produtos/' + encodeURIComponent(sku), { method: 'PUT', body: p }).then(recarregarProdutos).then(aposGravarProduto); };
   FG.apiExcluirProduto = function (sku) { return api('/produtos/' + encodeURIComponent(sku), { method: 'DELETE' }).then(recarregarProdutos).then(aposGravarProduto); };
+
+  /* ---------- categorias (admin) ---------- */
+  function recarregarCategorias() {
+    return apiGet('/categorias').then(function (l) { if (l) CACHE.categories = l; return l; });
+  }
+  FG.recarregarCategorias = recarregarCategorias;
+
+  // Cria categoria de topo ou subcategoria. `dados` = { nome, icone?, pai? }.
+  FG.apiCriarCategoria = function (dados) {
+    return req('POST', '/categorias', dados).then(function (r) {
+      if (!r.ok) return r;
+      return recarregarCategorias().then(function () { return r; });
+    });
+  };
+  // Renomeia / troca o ícone. `dados` = { nome, icone? }.
+  FG.apiEditarCategoria = function (codigo, dados) {
+    return req('PUT', '/categorias/' + encodeURIComponent(codigo), dados).then(function (r) {
+      if (!r.ok) return r;
+      return recarregarCategorias().then(function () { return r; });
+    });
+  };
+  FG.apiExcluirCategoria = function (codigo) {
+    return req('DELETE', '/categorias/' + encodeURIComponent(codigo)).then(function (r) {
+      if (!r.ok) return r;
+      return recarregarCategorias().then(function () { return r; });
+    });
+  };
 
   /* ---------- pedidos ---------- */
   // Cria o pedido a partir da cesta atual. Devolve Promise<data|null>; em erro

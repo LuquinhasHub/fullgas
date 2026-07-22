@@ -4,14 +4,16 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Fullgas Dealer Shop</title>
-  <link rel="stylesheet" href="css/styles.css?v=20260716b">
+  <link rel="icon" type="image/png" href="img/favicon.png?v=20260722d">
+  <link rel="apple-touch-icon" href="img/favicon.png?v=20260722d">
+  <link rel="stylesheet" href="css/styles.css?v=20260722b">
 </head>
 <body>
 
   <!-- ====== cabeçalho vermelho ====== -->
   <header class="shop-head">
     <div>
-      <div class="sh-title">FULLGAS Dealer Shop</div>
+      <a href="portal.html" class="sh-title" title="Sair da loja e voltar ao portal" style="display:inline-block;text-decoration:none;color:var(--ink);">FULLGAS Dealer Shop</a>
       <div class="sh-user" id="sh-user"></div>
     </div>
 
@@ -31,7 +33,8 @@
       <a href="#/carrinho" title="Carrinho">🛒<span class="cart-n" id="cart-n">0</span></a>
       <a href="#/quick-order" title="Quick Order">⚡</a>
       <a href="#/pedidos" title="Histórico de pedidos">🧾</a>
-      <a href="portal.html" title="Voltar ao portal">↩</a>
+      <!-- Sem seta de voltar aqui: o VOLTAR padrão fica na faixa da página
+           (e o logo FULLGAS ao lado já leva ao portal). -->
       <a class="sh-brand" href="portal.html" title="Voltar ao portal" style="text-decoration:none;"><span class="brand white" style="font-size:15px;"><span class="g-badge" style="width:22px;height:22px;font-size:13px;border-width:2px;">F</span> FULLGAS</span></a>
     </div>
   </header>
@@ -44,9 +47,16 @@
 
   <main class="shop" id="view"></main>
 
-  <script src="js/config.js?v=20260716b"></script>
-  <script src="js/store.js?v=20260716b"></script>
-  <script src="js/api-adapter.js?v=20260716b"></script>
-  <script src="js/shop.js?v=20260716b"></script>
+  <!-- Carrinho flutuante (canto inferior direito) — atalho sempre visível
+       para a cesta, além do ícone no cabeçalho. -->
+  <a href="#/carrinho" class="cart-fab" id="cart-fab" title="Ver carrinho" aria-label="Ver carrinho">
+    <span class="cart-fab-ico">🛒</span>
+    <span class="cart-n" id="cart-fab-n">0</span>
+  </a>
+
+  <script src="js/config.js?v=20260722b"></script>
+  <script src="js/store.js?v=20260722b"></script>
+  <script src="js/api-adapter.js?v=20260722b"></script>
+  <script src="js/shop.js?v=20260722b"></script>
 </body>
 </html>

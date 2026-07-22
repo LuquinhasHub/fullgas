@@ -166,12 +166,20 @@
     var html = '<h2>Notificações</h2>';
     if (!list.length) html += '<p class="muted">Nenhuma notificação.</p>';
     list.forEach(function (n) {
+      // Anexo enviado pelo admin: imagem inline, vídeo com player ou link.
+      var anexo = '';
+      if (n.anexo) {
+        if (n.anexoTipo === 'imagem') anexo = '<img class="nt-img" src="' + esc(n.anexo) + '" alt="Anexo" loading="lazy">';
+        else if (n.anexoTipo === 'video') anexo = '<video class="nt-video" src="' + esc(n.anexo) + '" controls preload="metadata"></video>';
+        else anexo = '<a class="link-action" href="' + esc(n.anexo) + '" target="_blank" rel="noopener">📎 Abrir anexo</a>';
+      }
       html += '<div class="notif ' + n.tipo + (n.lida ? '' : ' unread') + '">' +
         '<div class="nt-body"><div class="nt-title">' + (n.tipo === 'critica' ? '⚠ ' : '') + esc(n.titulo) + '</div>' +
-        '<div>' + esc(n.texto) + '</div>' +
+        (n.texto ? '<div style="white-space:pre-line;">' + esc(n.texto) + '</div>' : '') +
+        anexo +
         '<div class="nt-date">' + FG.fmtDateTime(n.data) + '</div></div>' +
-        '<button class="link-action" data-id="' + n.id + '" data-lida="' + (!n.lida) + '">' +
-        (n.lida ? 'Marcar como não lida' : 'Marcar como lida') + '</button></div>';
+        (n.lida ? '' : '<button class="link-action" data-id="' + n.id + '" data-lida="true">Marcar como lida</button>') +
+        '</div>';
     });
     view.innerHTML = html;
     Array.prototype.forEach.call(view.querySelectorAll('[data-id]'), function (b) {
@@ -802,19 +810,31 @@
   /* =========================================================
      DETALHE DO PEDIDO (#pedido/:numero)
      ========================================================= */
-  // Indicador circular por item: verde=enviado, amarelo=parcial, cinza=pendente.
-  function dotItem(it) {
+  // Indicador circular por item: verde=enviado, amarelo=parcial, cinza=pendente,
+  // vermelho=cancelado (o pedido inteiro foi cancelado — nada será enviado).
+  function dotItem(it, cancelado) {
+    if (cancelado) return '<span class="item-dot dot-cancelado" title="Cancelado"></span>';
     var cls = it.qtdEnviada >= it.qtd ? 'dot-ok' : (it.qtdEnviada > 0 ? 'dot-parcial' : 'dot-pendente');
     var t = it.qtdEnviada >= it.qtd ? 'Enviado' : (it.qtdEnviada > 0 ? 'Parcial' : 'Não enviado');
     return '<span class="item-dot ' + cls + '" title="' + t + '"></span>';
   }
 
-  function tabelaItens(itens) {
-    return '<table class="table"><thead><tr><th></th><th>SKU</th><th>Produto</th>' +
+  // Legenda das bolinhas — vai uma única vez, logo abaixo das tabelas de itens.
+  var LEGENDA_DOTS =
+    '<div class="dot-legenda"><strong>Legenda do status:</strong>' +
+    '<span><span class="item-dot dot-ok"></span>Enviado — quantidade completa já despachada</span>' +
+    '<span><span class="item-dot dot-parcial"></span>Parcial — parte da quantidade já saiu</span>' +
+    '<span><span class="item-dot dot-pendente"></span>Não enviado — aguardando separação/estoque</span>' +
+    '<span><span class="item-dot dot-cancelado"></span>Cancelado — o pedido foi cancelado</span>' +
+    '</div>';
+
+  function tabelaItens(itens, cancelado) {
+    return '<table class="table"><thead><tr><th title="Status de envio do item">Status</th>' +
+      '<th>SKU</th><th>Produto</th>' +
       '<th class="right">Qtd. pedida</th><th class="right">Qtd. enviada</th>' +
       '<th class="right">Preço un.</th><th class="right">Subtotal</th></tr></thead><tbody>' +
       itens.map(function (it) {
-        return '<tr><td>' + dotItem(it) + '</td><td>' + esc(it.artigo) + '</td><td>' + esc(it.nome) + '</td>' +
+        return '<tr><td>' + dotItem(it, cancelado) + '</td><td>' + esc(it.artigo) + '</td><td>' + esc(it.nome) + '</td>' +
           '<td class="right">' + it.qtd + '</td><td class="right">' + it.qtdEnviada + '</td>' +
           '<td class="right">' + FG.fmtMoney(it.preco) + '</td>' +
           '<td class="right">' + FG.fmtMoney(it.preco * it.qtd) + '</td></tr>';
@@ -825,16 +845,16 @@
     setCrumb(['Pedidos', numero]); setTabOn('pedidos');
     FG.pedidoDetalhe(numero).then(function (d) {
     if (!d || !d.id) {
-      view.innerHTML = '<div class="empty-box">Pedido não encontrado.<br>' +
-        '<a class="btn red" href="#pedidos">Voltar para Pedidos</a></div>';
+      // Sem botão de voltar aqui: o VOLTAR padrão da trilha já cobre.
+      view.innerHTML = '<div class="empty-box">Pedido não encontrado.</div>';
       return;
     }
     var normais = d.itens.filter(function (i) { return !i.backorder; });
     var preVenda = d.itens.filter(function (i) { return i.backorder; });
     var pg = d.progresso;
 
+    // O VOLTAR fica só na trilha (botão padrão) — não se repete aqui dentro.
     var html =
-      '<div style="margin-bottom:12px;"><a class="btn" href="#pedidos">← Voltar para Pedidos</a></div>' +
       '<div class="ped-det-head"><h2 style="margin:0;">Pedido ' + esc(d.id) + '</h2>' +
       '<span class="pill-status ' + esc(d.status) + '">' + esc(d.status) + '</span>' +
       (d.garantia ? ' <span class="pill-status Garantia">Garantia — reposição sem cobrança</span>' : '') +
@@ -843,13 +863,18 @@
       '<div class="prog-wrap"><div class="prog-bar"><div class="prog-fill" style="width:' + pg.pct + '%;"></div></div>' +
       '<span class="prog-label">' + pg.pct + '% (' + pg.enviada + ' de ' + pg.qtd + ' enviadas)</span></div>';
 
+    var cancelado = String(d.status || '').toLowerCase() === 'cancelado';
+
     if (normais.length)
-      html += '<h3 class="sec-title">Itens em envio normal</h3>' + tabelaItens(normais);
+      html += '<h3 class="sec-title">Itens em envio normal</h3>' + tabelaItens(normais, cancelado);
 
     if (preVenda.length)
       html += '<h3 class="sec-title">Itens em pré-venda</h3>' +
         '<div class="backorder-aviso">Estes itens serão enviados quando o estoque for reposto.</div>' +
-        tabelaItens(preVenda);
+        tabelaItens(preVenda, cancelado);
+
+    // Legenda uma única vez, logo abaixo da(s) tabela(s) de itens.
+    if (normais.length || preVenda.length) html += LEGENDA_DOTS;
 
     if (d.faturas && d.faturas.length)
       html += '<h3 class="sec-title">Faturas</h3>' +
@@ -1060,18 +1085,30 @@
   function renderFinanceiro() {
     setCrumb(['Conta financeira', 'Faturas']); setTabOn('financeiro');
     var inv = FG.all('invoices'); // faturas reais (cobrança)
-    var faturado = 0, credito = 0;
-    inv.forEach(function (i) { if (i.valor >= 0) faturado += i.valor; else credito += i.valor; });
+    var faturado = 0;
+    inv.forEach(function (i) { faturado += i.valor; });
+
+    // Garantias aprovadas (substituem as antigas "notas de crédito"): as
+    // reivindicações do revendedor que o admin já aprovou.
+    var garantias = FG.all('claims').filter(function (c) { return c.status === 'Aprovada'; })
+      .slice().sort(function (a, b) {
+        return (b.dataAprovacao || b.data || '') < (a.dataAprovacao || a.data || '') ? -1 : 1;
+      });
+    var totalGarantias = garantias.reduce(function (s, c) { return s + (c.valorGarantia || 0); }, 0);
 
     // Pré-venda: peças já compradas (incluídas na fatura do pedido, sem cobrança
-    // à parte) que aguardam envio. Derivado dos pedidos; status pelo estoque atual.
+    // à parte) que AINDA aguardam envio. Derivado dos pedidos; status pelo
+    // estoque atual. Só entra o que tem saldo pendente (qtdEnviada < qtd) e de
+    // pedidos vivos — item já enviado por completo ou pedido cancelado não é
+    // "peça a enviar" e não deve poluir o rastreador.
     var preParts = [];
     FG.all('orders').forEach(function (o) {
+      if (o.status === 'Cancelado') return;
       (o.itens || []).forEach(function (it) {
         if (!it.backorder) return;
+        if (it.qtdEnviada >= it.qtd) return; // nada pendente — já enviado
         var p = FG.product(it.artigo);
-        var st = it.qtdEnviada >= it.qtd ? 'Enviado'
-          : ((p && p.estoque >= (it.qtd - it.qtdEnviada)) ? 'Disponivel' : 'Aguardando');
+        var st = (p && p.estoque >= (it.qtd - it.qtdEnviada)) ? 'Disponivel' : 'Aguardando';
         preParts.push({ it: it, o: o, st: st, prev: p && p.previsao });
       });
     });
@@ -1085,67 +1122,232 @@
         '<table class="table"><thead><tr><th>Artigo</th><th>Peça</th><th class="right">Qtd.</th>' +
         '<th>Data do pedido</th><th>Pedido</th><th>Status do envio</th></tr></thead><tbody>' +
         preParts.map(function (x) {
-          var pill = x.st === 'Enviado' ? '<span class="pill-status Enviado">Enviado</span>'
-            : x.st === 'Disponivel' ? '<span class="pill-status Disponivel">Disponível — envio em breve</span>'
+          var pendente = x.it.qtd - x.it.qtdEnviada;
+          var pill = x.st === 'Disponivel'
+            ? '<span class="pill-status Disponivel">Disponível — envio em breve</span>'
             : '<span class="pill-status Aguardando">Aguardando reposição' + (x.prev ? ' · ' + esc(x.prev) : '') + '</span>';
           return '<tr><td>' + esc(x.it.artigo) + '</td><td>' + esc(x.it.nome) + '</td>' +
-            '<td class="right">' + x.it.qtd + '</td>' +
+            '<td class="right">' + pendente + '</td>' +
             '<td>' + (x.o.data ? FG.fmtDate(x.o.data) : '—') + '</td>' +
             '<td><a href="#pedido/' + esc(x.o.id) + '">' + esc(x.o.id) + '</a></td>' +
             '<td>' + pill + '</td></tr>';
         }).join('') + '</tbody></table>';
     }
 
+    // Bloco "Garantias" — reivindicações aprovadas do revendedor.
+    var garantiasHTML =
+      '<h3 class="sec-title">Garantias aprovadas</h3>' +
+      (garantias.length
+        ? '<table class="table"><thead><tr><th>Reivindicação</th><th>Data da aprovação</th>' +
+          '<th>Chassi (NIV)</th><th>Peças</th><th class="right">Valor da garantia</th></tr></thead><tbody>' +
+          garantias.map(function (c) {
+            var pecas = (c.pecas || []).map(function (p) {
+              return esc((p.nome || p.sku) + (p.quantidade > 1 ? ' ×' + p.quantidade : ''));
+            }).join(', ');
+            return '<tr><td><b>' + esc(c.id) + '</b></td>' +
+              '<td>' + (c.dataAprovacao ? FG.fmtDate(c.dataAprovacao) : '—') + '</td>' +
+              '<td>' + esc(c.niv || '—') + '</td>' +
+              '<td style="font-size:12px;max-width:320px;">' + (pecas || '<span class="muted">—</span>') + '</td>' +
+              '<td class="right">' + (c.valorGarantia != null ? FG.fmtMoney(c.valorGarantia) : '—') + '</td></tr>';
+          }).join('') + '</tbody></table>'
+        : '<p class="muted">Nenhuma garantia aprovada.</p>');
+
     view.innerHTML =
       '<h2>Conta financeira</h2>' +
       '<div class="fin-cards">' +
       '<div class="fin-card"><div class="muted">Total faturado</div><div class="v">' + FG.fmtMoney(faturado) + '</div></div>' +
-      '<div class="fin-card"><div class="muted">Notas de crédito</div><div class="v">' + FG.fmtMoney(credito) + '</div></div>' +
+      '<div class="fin-card"><div class="muted">Garantias aprovadas</div><div class="v">' + FG.fmtMoney(totalGarantias) + '</div></div>' +
       '<div class="fin-card"><div class="muted">Documentos</div><div class="v">' + inv.length + '</div></div>' +
       '</div>' +
       '<div class="toolbar"><button class="tool" id="fi-csv">📄 Export. p/ Excel</button></div>' +
       '<table class="table"><thead><tr><th class="filt">Tipo</th><th class="filt">N° da fatura</th>' +
-      '<th class="filt">Data da fatura ↓</th><th class="right filt">Quantia cobrada</th><th>Moeda</th><th></th></tr></thead><tbody>' +
-      inv.map(function (i, idx) {
+      '<th class="filt">Data da fatura ↓</th><th class="right filt">Quantia cobrada</th><th></th></tr></thead><tbody>' +
+      (inv.length ? inv.map(function (i, idx) {
         return '<tr><td>' + esc(i.tipo) +
           (i.status && i.status !== 'Emitida' ? ' <span class="pill-status ' + esc(i.status) + '">' + esc(i.status) + '</span>' : '') +
-          (i.referencia ? '<br><span class="muted" style="font-size:11px;">ref. reivindicação ' + esc(i.referencia) + '</span>' : '') +
           '</td><td>' + i.numero + '</td><td>' + FG.fmtDate(i.data) + '</td>' +
           '<td class="right">' + i.valor.toLocaleString('pt-BR', { minimumFractionDigits: 2 }) + '</td>' +
-          '<td>' + esc(i.moeda) + '</td><td><button class="pdf-ico" data-i="' + idx + '">PDF</button></td></tr>';
-      }).join('') +
-      '</tbody></table>' + preVendaHTML;
+          '<td class="nowrap"><button class="pdf-ico pdf-baixar" data-i="' + idx + '">⬇ Baixar PDF</button> ' +
+          '<button class="pdf-ico pdf-imprimir" data-i="' + idx + '">🖨 Imprimir</button></td></tr>';
+      }).join('') : '<tr><td colspan="5" class="muted">Nenhuma fatura.</td></tr>') +
+      '</tbody></table>' + garantiasHTML + preVendaHTML;
 
     document.getElementById('fi-csv').addEventListener('click', function () {
-      var linhas = [['Tipo', 'N°', 'Data', 'Valor', 'Moeda']];
-      inv.forEach(function (i) { linhas.push([i.tipo, i.numero, FG.fmtDate(i.data), i.valor.toFixed(2), i.moeda]); });
+      var linhas = [['Tipo', 'N°', 'Data', 'Valor']];
+      inv.forEach(function (i) { linhas.push([i.tipo, i.numero, FG.fmtDate(i.data), i.valor.toFixed(2)]); });
       FG.exportCSV('faturas', linhas);
     });
-    Array.prototype.forEach.call(view.querySelectorAll('.pdf-ico'), function (b) {
+    Array.prototype.forEach.call(view.querySelectorAll('.pdf-baixar'), function (b) {
+      b.addEventListener('click', function () { baixarFaturaPDF(inv[Number(b.getAttribute('data-i'))], b); });
+    });
+    Array.prototype.forEach.call(view.querySelectorAll('.pdf-imprimir'), function (b) {
       b.addEventListener('click', function () { imprimirFatura(inv[Number(b.getAttribute('data-i'))]); });
     });
   }
 
+  // Monta o endereço do destinatário em linhas (uma por <br>), no estilo da
+  // fatura de referência (logradouro/nº, complemento, bairro, cidade-UF/CEP, país).
+  function linhasEndereco(end) {
+    if (!end) return [];
+    var linhas = [];
+    var l1 = [end.logradouro, end.numero].filter(Boolean).join(', ');
+    if (l1) linhas.push(l1);
+    if (end.complemento) linhas.push(end.complemento);
+    if (end.bairro) linhas.push(end.bairro);
+    var cidadeUf = [end.cidade, end.uf].filter(Boolean).join(' - ');
+    var l4 = [end.cep, cidadeUf].filter(Boolean).join('  ');
+    if (l4) linhas.push(l4);
+    if (end.pais) linhas.push(end.pais);
+    return linhas;
+  }
+
+  // Fatura detalhada — replica o layout da fatura de referência (docs/
+  // referencias/fatura_referencia.png): cabeçalho com o logo FULLGAS + dados
+  // do documento, bloco do destinatário (empresa + endereço + país + CNPJ) e a
+  // tabela de itens com os produtos vendidos, quantidades e valores.
+  // Devolve só o HTML (usado tanto para imprimir quanto para baixar em PDF).
+  function faturaHTML(i) {
+    var itens = i.itens || [];
+    var somaItens = itens.reduce(function (s, it) { return s + (it.subtotal || 0); }, 0);
+    var total = itens.length ? somaItens : i.valor;
+    var endLinhas = linhasEndereco(i.endereco).map(esc).join('<br>');
+    var nomeEmpresa = esc(i.empresa || sess.empresa || '');
+    var pais = esc(i.pais || (i.endereco && i.endereco.pais) || '');
+    var pedidos = (i.pedidos || []).length ? (i.pedidos || []).map(esc).join(', ') : '—';
+
+    // Estilos inline (o print-area é isolado; nada de classes externas).
+    var thBase = 'text-align:left;padding:7px 6px;border-bottom:2px solid #e5b100;font-size:12px;';
+    var tdBase = 'padding:7px 6px;border-bottom:1px solid #e5e5e5;font-size:12px;vertical-align:top;';
+    var lbl = 'font-size:10px;color:#888;text-transform:uppercase;letter-spacing:.4px;';
+    var val = 'font-size:13px;font-weight:700;color:#222;';
+
+    function campo(rotulo, valor) {
+      return '<div style="margin-bottom:10px;"><div style="' + lbl + '">' + rotulo + '</div>' +
+        '<div style="' + val + '">' + (valor || '—') + '</div></div>';
+    }
+
+    // Logo da marca (data URI carregado por js/logo-data.js). Se por algum
+    // motivo não estiver disponível, cai no nome em texto.
+    // Largura e altura explícitas (110x70 = proporção original 600x382): evita
+    // o reflow do `width:auto` durante a captura do PDF.
+    var logo = window.FG_LOGO
+      ? '<img src="' + window.FG_LOGO + '" alt="FULLGAS" width="110" height="70" ' +
+        'style="width:110px;height:70px;display:block;flex:0 0 110px;">'
+      : '<div style="font-size:26px;font-weight:800;font-style:italic;color:#e5b100;">FULLGAS</div>';
+
+    // O PADDING LATERAL PRECISA ESTAR AQUI, na raiz do documento.
+    // O html2pdf recebe ESTE elemento e o clona para dentro de um container
+    // próprio, do tamanho da página — a margem do container que o segura na
+    // tela é jogada fora. Sem este padding o conteúdo encostava na borda da
+    // folha e o "S" de FULLGAS saía cortado (a logo fica colada à direita por
+    // causa do space-between). Medido: 34 linhas de pixel pintadas na última
+    // coluna do canvas antes da correção, zero depois.
+    return '<div style="font-family:Arial,Helvetica,sans-serif;color:#222;' +
+      'max-width:760px;box-sizing:border-box;padding:0 18px;">' +
+
+      /* ---- cabeçalho: título + logo ---- */
+      '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;">' +
+      '<h1 style="margin:0;font-size:30px;letter-spacing:.5px;">Fatura</h1>' +
+      logo +
+      '</div>' +
+
+      /* ---- grade de dados do documento ---- */
+      '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0 24px;margin-top:22px;">' +
+      campo('Fatura n°', esc(i.numero)) +
+      campo('Data da fatura', FG.fmtDate(i.data)) +
+      campo('Pedido(s)', pedidos) +
+      campo('CNPJ', esc(i.cnpj) || '—') +
+      campo('País', pais || '—') +
+      campo('Documento', esc(i.tipo)) +
+      '</div>' +
+
+      /* ---- destinatário ---- */
+      '<div style="margin-top:8px;border-top:1px solid #e5e5e5;padding-top:14px;">' +
+      '<div style="' + lbl + '">Destinatário da fatura</div>' +
+      '<div style="font-size:14px;font-weight:700;margin-top:3px;">' + nomeEmpresa + '</div>' +
+      (endLinhas ? '<div style="font-size:12px;line-height:1.5;margin-top:2px;">' + endLinhas + '</div>' : '') +
+      (i.cnpj ? '<div style="font-size:12px;margin-top:4px;">CNPJ: ' + esc(i.cnpj) + '</div>' : '') +
+      '</div>' +
+
+      /* ---- itens ---- */
+      '<table style="width:100%;border-collapse:collapse;margin-top:22px;">' +
+      '<thead><tr>' +
+      '<th style="' + thBase + 'width:36px;">Item</th>' +
+      '<th style="' + thBase + '">Código</th>' +
+      '<th style="' + thBase + '">Descrição</th>' +
+      '<th style="' + thBase + 'text-align:center;">Qtd.</th>' +
+      '<th style="' + thBase + 'text-align:right;">Preço unit.</th>' +
+      '<th style="' + thBase + 'text-align:right;">Total</th>' +
+      '</tr></thead><tbody>' +
+      (itens.length
+        ? itens.map(function (it, ix) {
+          return '<tr>' +
+            '<td style="' + tdBase + '">' + ((ix + 1) * 10) + '</td>' +
+            '<td style="' + tdBase + '">' + esc(it.sku || '') + '</td>' +
+            '<td style="' + tdBase + '">' + esc(it.nome || '') + '</td>' +
+            '<td style="' + tdBase + 'text-align:center;">' + it.qtd + '</td>' +
+            '<td style="' + tdBase + 'text-align:right;">' + FG.fmtMoney(it.preco) + '</td>' +
+            '<td style="' + tdBase + 'text-align:right;">' + FG.fmtMoney(it.subtotal) + '</td>' +
+            '</tr>';
+        }).join('')
+        : '<tr><td style="' + tdBase + '" colspan="6">Movimentação de peças e acessórios</td></tr>') +
+      '</tbody></table>' +
+
+      /* ---- total ---- */
+      '<div style="display:flex;justify-content:flex-end;margin-top:16px;">' +
+      '<table style="border-collapse:collapse;min-width:280px;">' +
+      '<tr><td style="padding:6px 10px;font-size:13px;">Total de itens</td>' +
+      '<td style="padding:6px 10px;text-align:right;font-size:13px;">' + itens.length + '</td></tr>' +
+      '<tr><td style="padding:10px;font-size:15px;font-weight:800;border-top:2px solid #e5b100;">Total</td>' +
+      '<td style="padding:10px;text-align:right;font-size:15px;font-weight:800;border-top:2px solid #e5b100;">' + FG.fmtMoney(total) + '</td></tr>' +
+      '</table></div>' +
+
+      // Sem rodapé: a nota de "documento demonstrativo gerado em <data>" saiu a
+      // pedido do dono — não acrescenta nada ao documento que o cliente recebe.
+      '</div>';
+  }
+
+  // Imprimir: joga o HTML no #print-area (isolado por @media print) e chama a
+  // impressão do navegador (o usuário pode escolher "Salvar como PDF").
   function imprimirFatura(i) {
     var area = document.getElementById('print-area');
+    area.innerHTML = faturaHTML(i);
     area.classList.remove('hidden');
-    area.innerHTML =
-      '<div style="font-family:Arial,sans-serif;max-width:680px;">' +
-      '<h1 style="color:#e5b100;font-style:italic;">FULLGAS</h1>' +
-      '<h2>' + esc(i.tipo) + ' n° ' + i.numero + '</h2>' +
-      '<p><b>Data:</b> ' + FG.fmtDate(i.data) + '<br><b>Cliente:</b> ' + esc(sess.empresa) + '<br>' +
-      (i.referencia ? '<b>Ref. reivindicação:</b> ' + esc(i.referencia) + '<br>' : '') +
-      '<b>Moeda:</b> ' + esc(i.moeda) + '</p>' +
-      '<table style="width:100%;border-collapse:collapse;margin-top:14px;">' +
-      '<tr><th style="text-align:left;border-bottom:2px solid #e5b100;padding:8px 4px;">Descrição</th>' +
-      '<th style="text-align:right;border-bottom:2px solid #e5b100;padding:8px 4px;">Valor</th></tr>' +
-      '<tr><td style="padding:8px 4px;">Movimentação de peças e acessórios</td>' +
-      '<td style="text-align:right;padding:8px 4px;">' + FG.fmtMoney(i.valor) + '</td></tr>' +
-      '<tr><td style="padding:14px 4px;font-weight:700;">Total</td>' +
-      '<td style="text-align:right;padding:14px 4px;font-weight:700;">' + FG.fmtMoney(i.valor) + '</td></tr>' +
-      '</table><p style="font-size:11px;color:#777;margin-top:30px;">Documento demonstrativo gerado pelo portal Fullgas B2B.</p></div>';
     window.print();
     setTimeout(function () { area.classList.add('hidden'); }, 300);
+  }
+
+  // Baixar: gera um arquivo PDF de verdade (html2pdf) e dispara o download,
+  // sem passar pela caixa de impressão. Nome: fatura-<numero>.pdf.
+  function baixarFaturaPDF(i, btn) {
+    if (typeof html2pdf === 'undefined') { // biblioteca não carregou → imprime
+      FG.toast('Gerador de PDF indisponível — abrindo a impressão.', 'erro');
+      return imprimirFatura(i);
+    }
+    var rotulo = btn ? btn.textContent : '';
+    if (btn) { btn.disabled = true; btn.textContent = 'Gerando…'; }
+
+    // Container temporário fora da tela (o html2pdf renderiza o elemento real).
+    // Fica preso ao <html> (não ao <body>) para escapar do `zoom` global da
+    // interface — assim o PDF sai sempre no tamanho projetado.
+    var holder = document.createElement('div');
+    holder.style.cssText = 'position:fixed;left:-9999px;top:0;width:760px;background:#fff;padding:24px;zoom:1;';
+    holder.innerHTML = faturaHTML(i);
+    document.documentElement.appendChild(holder);
+
+    html2pdf().set({
+      margin: [10, 10, 10, 10],
+      filename: 'fatura-' + i.numero + '.pdf',
+      image: { type: 'jpeg', quality: 0.98 },
+      html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
+      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+    }).from(holder.firstChild).save()
+      .then(function () { FG.toast('PDF da fatura ' + i.numero + ' baixado.'); })
+      .catch(function () { FG.toast('Não foi possível gerar o PDF.', 'erro'); })
+      .then(function () {
+        holder.remove();
+        if (btn) { btn.disabled = false; btn.textContent = rotulo; }
+      });
   }
 
   /* =========================================================
@@ -1190,7 +1392,8 @@
         '<div class="field"><label for="ct-cnpj">CNPJ</label><input id="ct-cnpj" type="text" maxlength="18" value="' + esc(c.empresa.cnpj) + '"' + ro + '></div>' +
         '<div class="field"><label for="ct-ie">Inscrição estadual (opcional)</label><input id="ct-ie" type="text" maxlength="20" value="' + esc(c.empresa.inscricaoEstadual || '') + '"' + ro + '></div>' +
         '<div class="field"><label for="ct-tel">Telefone</label><input id="ct-tel" type="text" maxlength="15" value="' + esc(c.empresa.telefone) + '"' + ro + '></div>' +
-        '<div class="field"><label for="ct-email">E-mail da empresa</label><input id="ct-email" type="email" value="' + esc(c.empresa.email) + '"' + ro + '></div>' +
+        '<div class="field"><label for="ct-email">E-mail (empresa e acesso)</label><input id="ct-email" type="email" value="' + esc(c.empresa.email) + '"' + ro + '>' +
+        (gestor ? '<span class="muted" style="font-size:11px;">É também o seu e-mail de login. Ao alterar, entre com o novo.</span>' : '') + '</div>' +
         '</div>' +
 
         '<h3 class="sec-title">Endereço</h3>' +
@@ -1221,7 +1424,8 @@
               ? '<td class="nowrap">' +
                 '<button class="tool" data-ed="' + u.id + '">Permissões</button> ' +
                 '<button class="tool" data-bl="' + u.id + '" data-st="' + u.status + '">' + (u.status === 'bloqueado' ? 'Desbloquear' : 'Bloquear') + '</button> ' +
-                '<button class="tool" data-sn="' + u.id + '">Redefinir senha</button></td>'
+                '<button class="tool" data-sn="' + u.id + '">Redefinir senha</button> ' +
+                '<button class="tool danger" data-del="' + u.id + '" data-nome="' + esc(u.nome) + '">Excluir</button></td>'
               : '') + '</tr>';
         }).join('') : '<tr><td colspan="' + (gestor ? 5 : 4) + '" class="muted">Nenhuma conta interna ainda.</td></tr>') +
         '</tbody></table>';
@@ -1288,7 +1492,23 @@
         if (/[^A-Za-zÀ-ÖØ-öø-ÿ'. -]/.test(dados.endereco.cidade)) { FG.toast('Cidade não pode conter números ou caracteres especiais.', 'erro'); return; }
         FG.contaSalvarEmpresa(dados).then(function (r) {
           if (!r.ok) { FG.toast(r.msg || 'Não foi possível salvar.', 'erro'); return; }
-          FG.toast('Dados da empresa salvos.');
+          // E-mail é também o login: se mudou, atualiza a sessão em memória e no
+          // localStorage e o cabeçalho, para o portal refletir na hora (o próximo
+          // login usa o novo e-mail).
+          if (r.email && r.email !== sess.email) {
+            sess.email = r.email;
+            try {
+              var s = JSON.parse(localStorage.getItem('fullgas_session_v1') || '{}');
+              s.email = r.email;
+              localStorage.setItem('fullgas_session_v1', JSON.stringify(s));
+            } catch (e) { /* sessão intacta se falhar */ }
+            var who = document.getElementById('user-who');
+            if (who) who.textContent = sess.nome + ' (' + sess.email + ') - ' + sess.empresa +
+              ', ' + (sess.papel === 'admin' ? 'Administrador' : 'Concessionário');
+            FG.toast('Dados salvos. Seu e-mail de acesso agora é ' + r.email + '.');
+          } else {
+            FG.toast('Dados da empresa salvos.');
+          }
         });
       });
 
@@ -1339,6 +1559,17 @@
           var u = internas.find(function (x) { return x.id === id; });
           if (!u) return;
           abrirPermissoes(u, c.areas);
+        });
+      });
+      Array.prototype.forEach.call(view.querySelectorAll('[data-del]'), function (b) {
+        b.addEventListener('click', function () {
+          var nome = b.getAttribute('data-nome') || 'esta conta';
+          if (!confirm('Excluir a conta interna de ' + nome + '? Esta ação não pode ser desfeita.')) return;
+          FG.subdealerExcluir(b.getAttribute('data-del')).then(function (r) {
+            if (!r.ok) { FG.toast(r.msg || 'Não foi possível excluir.', 'erro'); return; }
+            FG.toast('Conta interna excluída.');
+            renderConta();
+          });
         });
       });
 

@@ -24,7 +24,11 @@
 
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; }
-body { font-family: var(--font); font-size: 14px; color: var(--ink); background: var(--bg); }
+/* Escala geral da interface — deixa fontes, espaçamentos e ícones ~15% maiores
+   de forma proporcional (o layout é quase todo em px, então `zoom` é o jeito
+   confiável de ampliar tudo de uma vez no Chrome/Edge). A impressão e a geração
+   de PDF resetam para 1 (ver @media print e baixarFaturaPDF). */
+body { font-family: var(--font); font-size: 14px; color: var(--ink); background: var(--bg); zoom: 1.15; }
 a { color: var(--red); text-decoration: none; }
 a:hover { text-decoration: underline; }
 img, svg { vertical-align: middle; }
@@ -170,6 +174,10 @@ h1, h2, h3 { margin: 0 0 .5em; }
 .pill-status { display: inline-block; font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 2px; background: #eee; color: #555; text-transform: uppercase; }
 .pill-status.Pendente { background: #fff3cd; color: #8a6d00; }
 .pill-status.Processando { background: #dbeafe; color: #1d4ed8; }
+/* "Em separação": o status tem espaço/acento, então o nome vira classes soltas.
+   O seletor por atributo pega tanto o slug do admin (ps-Em-separacao) quanto o
+   texto cru "Em separação" usado na loja/portal. */
+.pill-status[class*="separa"] { background: #dbeafe; color: #1d4ed8; }
 .pill-status.Enviado { background: #ede9fe; color: #6d28d9; }
 .pill-status.Entregue { background: #dcfce7; color: #15803d; }
 .pill-status.Cancelado, .pill-status.Recusada, .pill-status.bloqueado { background: #fee2e2; color: #b91c1c; }
@@ -185,6 +193,11 @@ h1, h2, h3 { margin: 0 0 .5em; }
 .pill-status.Aguardando { background: #e2e8f0; color: #475569; }
 .pill-status.Disponivel { background: #ccfbf1; color: #0f766e; }
 .pill-status.Tiny { background: #cffafe; color: #0e7490; }
+/* Chassis — esquema de cores pedido: Disponível = amarelo da marca, Vendido =
+   verde. Miram a classe slug (ps-<slug>), que é só do status do veículo: a
+   .Disponivel sem prefixo é a peça de pré-venda "disponível p/ envio". */
+.pill-status.ps-Disponivel { background: var(--red); color: var(--ink); }
+.pill-status.ps-Vendido { background: #15803d; color: #fff; }
 
 /* ---------- pré-venda (admin e cliente) ---------- */
 .fin-prevenda { border: 1px solid #e6e6e6; border-radius: 6px; margin: 10px 0; overflow: hidden; }
@@ -206,7 +219,15 @@ h1, h2, h3 { margin: 0 0 .5em; }
 .item-dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; vertical-align: middle; }
 .item-dot.dot-ok { background: #15803d; }
 .item-dot.dot-parcial { background: #d99a00; }
-.item-dot.dot-pendente { background: #cbd5e1; }
+.item-dot.dot-pendente { background: #cbd5e1; border: 1px solid #94a3b8; }
+.item-dot.dot-cancelado { background: #b91c1c; }
+/* Legenda das bolinhas, abaixo da tabela de itens do pedido. */
+.dot-legenda {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 18px;
+  margin: 8px 0 4px; font-size: 12px; color: var(--gray);
+}
+.dot-legenda strong { color: var(--ink); font-size: 12px; }
+.dot-legenda > span { display: inline-flex; align-items: center; gap: 6px; }
 
 /* ---------- modal ---------- */
 .modal-back {
@@ -249,6 +270,34 @@ h1, h2, h3 { margin: 0 0 .5em; }
 .auth-msg { font-size: 13px; margin: 0 0 12px; padding: 9px 12px; display: none; }
 .auth-msg.err { display: block; background: #fbe3dc; color: #a50d14; } /* erro: vermelho semântico */
 .auth-msg.ok { display: block; background: #e6f5ea; color: #1d6b32; }
+/* =========================================================
+   Tarja de identidade assumida (admin usando a conta do cliente).
+   Injetada pelo api-adapter.js em qualquer página. Fica grudada no topo
+   justamente para ser impossível esquecer que se está agindo pelo cliente.
+   ========================================================= */
+.imp-bar {
+  position: sticky; top: 0; z-index: 200;
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  background: #1c1c1c; color: #fff; padding: 9px 16px; font-size: 13px;
+  border-bottom: 3px solid var(--red);
+}
+.imp-bar .imp-ico { font-size: 15px; }
+.imp-bar .imp-txt { flex: 1; min-width: 200px; }
+.imp-bar b { color: var(--red); }
+.imp-bar .imp-emp { color: #ddd; }
+.imp-bar .imp-sair {
+  background: var(--red); color: var(--ink); border: none; border-radius: 3px;
+  padding: 6px 14px; font-size: 12px; font-weight: 700; cursor: pointer; white-space: nowrap;
+}
+.imp-bar .imp-sair:hover { background: var(--red-dark); }
+@media print { .imp-bar { display: none; } }
+
+/* Link-botão discreto do card de acesso ("Esqueci minha senha", "Voltar"). */
+.link-btn {
+  background: none; border: none; padding: 0; cursor: pointer;
+  font: inherit; font-size: 13px; color: var(--gray); text-decoration: underline;
+}
+.link-btn:hover { color: var(--ink); }
 .auth-hint { margin-top: 18px; width: 420px; max-width: 100%; font-size: 12px; color: var(--gray); background: #fff; border: 1px dashed var(--line); padding: 12px 14px; }
 .auth-hint code { background: #f2f2f2; padding: 1px 5px; }
 
@@ -261,10 +310,18 @@ h1, h2, h3 { margin: 0 0 .5em; }
 .searchbox { display: flex; }
 .searchbox input { width: 340px; max-width: 56vw; padding: 8px 10px; border: 1px solid var(--line); border-right: none; color: #555; }
 .searchbox button { border: 1px solid var(--line); background: #fff; padding: 0 13px; cursor: pointer; }
-.icon-btn { position: relative; background: none; border: none; cursor: pointer; padding: 4px 6px; }
+.icon-btn {
+  position: relative; background: none; border: none; cursor: pointer;
+  width: 42px; height: 42px;
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: transform .1s;
+}
+.icon-btn:hover { transform: scale(1.08); }
+/* Badge de quantidade idêntico ao do carrinho da loja (.shop-head .cart-n). */
 .icon-btn .pill {
-  position: absolute; top: -7px; left: 50%; transform: translateX(-50%);
-  border: 1px solid var(--ink); border-radius: 10px; font-size: 10px; padding: 0 6px; background: #fff;
+  position: absolute; top: -4px; right: -4px; left: auto; transform: none;
+  background: var(--red); color: var(--ink); border: 1px solid var(--ink);
+  border-radius: 9px; font-size: 10px; font-weight: 800; padding: 0 5px;
 }
 .pf-link { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 700; color: var(--ink); }
 .pf-link:hover { text-decoration: none; color: var(--red); }
@@ -345,6 +402,12 @@ main.portal { padding: 0 22px 60px; }
 .toolbar .tool { background: none; border: none; cursor: pointer; font-size: 13px; color: var(--ink); padding: 0; }
 .toolbar .tool.red { color: var(--red-dark); }
 .toolbar .tool:hover { text-decoration: underline; }
+
+/* Ações em linha dentro de tabelas (ex.: contas internas em "Minha conta"):
+   botões-link discretos; .danger em vermelho semântico (excluir). */
+.table .tool { background: none; border: none; cursor: pointer; font-size: 12px; color: var(--ink); padding: 2px 4px; }
+.table .tool:hover { text-decoration: underline; }
+.table .tool.danger { color: #b91c1c; }
 .toolbar .grow { flex: 1; }
 .toolbar .mini-search input { padding: 6px 9px; border: 1px solid var(--line); }
 
@@ -405,6 +468,25 @@ main.portal { padding: 0 22px 60px; }
 .shop-head .sh-icons a.sh-brand { width: auto; background: none; border-radius: 0; }
 .shop-head .sh-icons a.sh-brand:hover { transform: none; }
 .shop-head .cart-n { position: absolute; top: -4px; right: -4px; background: var(--red); color: var(--ink); border: 1px solid var(--ink); border-radius: 9px; font-size: 10px; font-weight: 800; padding: 0 5px; }
+
+/* Carrinho flutuante — canto inferior direito, sempre à vista na loja. */
+.cart-fab {
+  position: fixed; right: 22px; bottom: 22px; z-index: 200;
+  width: 60px; height: 60px; border-radius: 50%;
+  background: var(--red); color: var(--ink);
+  display: inline-flex; align-items: center; justify-content: center;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, .28); border: 2px solid var(--ink);
+  text-decoration: none; transition: transform .12s, box-shadow .12s;
+}
+.cart-fab:hover { transform: scale(1.08); box-shadow: 0 6px 20px rgba(0, 0, 0, .34); text-decoration: none; }
+.cart-fab .cart-fab-ico { font-size: 27px; line-height: 1; }
+.cart-fab .cart-n {
+  position: absolute; top: -3px; right: -3px;
+  background: var(--ink); color: #fff; border: 2px solid var(--red);
+  border-radius: 11px; min-width: 20px; height: 20px; padding: 0 5px;
+  font-size: 11px; font-weight: 800; line-height: 18px; text-align: center;
+}
+.cart-fab.empty .cart-n { display: none; }
 .shop-mega { position: absolute; top: 100%; left: 0; background: #fff; color: var(--ink); width: 330px; box-shadow: var(--shadow); z-index: 60; display: none; }
 .shop-mega.open { display: block; }
 .shop-mega a { display: flex; justify-content: space-between; padding: 13px 16px; color: var(--ink); border-bottom: 1px solid #eee; font-size: 12px; font-weight: 700; text-transform: uppercase; }
@@ -442,6 +524,17 @@ main.shop { padding: 0 18px 70px; }
 .shop-side .cat-link.on { color: var(--red); }
 .shop-side .cat-link.on::before { content: "● "; font-size: 9px; vertical-align: 2px; }
 .shop-side .cat-link span { color: #999; font-weight: 400; }
+.shop-side .cat-link.sub { padding-left: 18px; font-size: 11px; text-transform: none; font-weight: 500; color: #555; }
+.shop-side .cat-link.sub.on { color: var(--red); font-weight: 700; }
+
+/* chips de subcategoria acima da lista de produtos (drill-in rápido) */
+.subcat-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
+.subcat-chips .chip { display: inline-block; padding: 5px 12px; font-size: 12px; font-weight: 600; border: 1px solid #ccc; border-radius: 999px; color: var(--ink); text-decoration: none; background: #fff; }
+.subcat-chips .chip:hover { border-color: var(--ink); }
+.subcat-chips .chip.on { background: var(--ink); color: #fff; border-color: var(--ink); }
+
+/* rótulo "N subcategorias" no card da grade de categorias */
+.cat-tile .cat-sub { margin-top: 6px; font-size: 11px; }
 
 .shop-tools { display: flex; align-items: center; gap: 22px; flex-wrap: wrap; margin-bottom: 20px; font-size: 12px; }
 .shop-tools .avail { display: inline-flex; align-items: center; gap: 8px; font-weight: 700; text-transform: uppercase; cursor: pointer; }
@@ -508,6 +601,7 @@ main.shop { padding: 0 18px 70px; }
    ========================================================= */
 main.finder { padding: 8px 28px 70px; }
 .finder-top { display: flex; align-items: flex-start; justify-content: space-between; padding: 20px 28px 0; }
+.finder-top .btn-voltar { margin-bottom: 12px; }
 .finder-top h1 { font-size: 25px; margin: 0; }
 .finder-top .who { font-size: 13px; font-weight: 700; margin-top: 6px; }
 /* carrinho da loja no topo do finder (mesma cesta da loja) */
@@ -625,9 +719,11 @@ main.finder { padding: 8px 28px 70px; }
 
 /* impressão de fatura */
 @media print {
+  body { zoom: 1; }               /* fatura sai no tamanho projetado, sem a escala da tela */
   body * { visibility: hidden; }
   #print-area, #print-area * { visibility: visible; }
   #print-area { position: absolute; inset: 0; padding: 30px; }
+  .cart-fab { display: none !important; }
   /* finder: imprime a tela da seção (lista de peças + diagrama) */
   main.finder, main.finder * { visibility: visible; }
   main.finder .search-panel, main.finder .fnd-actions, main.finder .diag-tools { display: none; }
@@ -772,8 +868,8 @@ main.finder { padding: 8px 28px 70px; }
 .cl-check { cursor: pointer; }
 
 /* =========================================================
-   TEXTOS AMARELOS: sempre em NEGRITO com CONTORNO PRETO
-   (pedido do dono — o amarelo da marca some em fundo claro).
+   TEXTOS AMARELOS: sempre em NEGRITO (sem contorno — o dono
+   pediu a remoção das bordas pretas em 2026-07-16).
    Agrupa os seletores que usam o amarelo como cor de TEXTO;
    toda UI nova com texto amarelo deve entrar nesta lista.
    ========================================================= */
@@ -786,7 +882,11 @@ main.finder { padding: 8px 28px 70px; }
 .thumb .tn, .part-row b a:hover, .finder-crumb, .finder-crumb a,
 .finder-crumb .crumb-print, .btn.ghost, .link-action, .veh-card h3 {
   font-weight: 700;
-  text-shadow:
-    -1px 0 #000, 1px 0 #000, 0 -1px #000, 0 1px #000,
-    -1px -1px #000, 1px -1px #000, -1px 1px #000, 1px 1px #000;
 }
+/* No cabeçalho AMARELO da loja o hover amarelo sumiria — lá o hover do
+   link do finder fica preto sublinhado (sem contorno). */
+.shop-head .pf-link:hover { color: var(--ink); text-decoration: underline; }
+
+/* Anexos nas notificações do portal (enviados pelo admin). */
+.notif .nt-img { max-width: 340px; max-height: 240px; display: block; margin: 8px 0 2px; border: 1px solid var(--line); border-radius: 4px; }
+.notif .nt-video { max-width: 420px; width: 100%; display: block; margin: 8px 0 2px; border-radius: 4px; background: #000; }

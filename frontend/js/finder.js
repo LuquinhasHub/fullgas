@@ -186,7 +186,6 @@
       fdView.innerHTML =
         '<div class="finder-model-name">' + esc(m.label) + '</div>' +
         '<div class="finder-links">' +
-        '<button class="btn-voltar" id="fl-back">Voltar</button>' +
         '<button id="fl-img">🖼 Show Image</button>' +
         '<a href="#/modelo/' + esc(m.id) + '/' + outro + '">Switch To ' + (outro === 'engine' ? 'Engine' : 'Frame') + '</a>' +
         '<button id="fl-doc">📘 Technical documentation</button>' +
@@ -225,12 +224,6 @@
       document.getElementById('fl-doc').addEventListener('click', function () {
         if (m.docTecnica) window.open(m.docTecnica, '_blank', 'noopener');
         else FG.toast('Nenhuma documentação técnica cadastrada para este modelo.');
-      });
-      // Voltar à tela inicial de busca (reabre o painel recolhido).
-      document.getElementById('fl-back').addEventListener('click', function () {
-        location.hash = '';
-        spBody.classList.remove('hidden');
-        spToggle.textContent = '▾ Search';
       });
     }, function () {
       fdView.innerHTML = '<p class="muted">Modelo não encontrado.</p>';
@@ -290,7 +283,6 @@
         ' <span class="chev">›</span> ' + esc(s.nome) +
         '<button class="link-action crumb-print" id="fa-print">🖨 Print</button></div>' +
         '<div class="fnd-actions">' +
-        '<a class="btn-voltar" href="#/modelo/' + esc(s.modelo.id) + '/' + s.lado + '">Voltar</a>' +
         '<button class="btn" id="fa-next"' + (s.vizinhos.proxima ? '' : ' disabled') + '>NEXT CATEGORY</button>' +
         '<a class="btn" href="#/modelo/' + esc(s.modelo.id) + '/' + outro + '">SWITCH TO ' + (outro === 'engine' ? 'ENGINE' : 'FRAME') + '</a>' +
         '</div>' +
@@ -490,9 +482,22 @@
     var p = h.split('/');
     if (p[0] === 'modelo' && p[1]) renderModelo(decodeURIComponent(p[1]), p[2] === 'engine' ? 'engine' : 'chassi');
     else if (p[0] === 'secao' && p[1]) renderSecao(Number(p[1]));
-    else fdView.innerHTML = '';
+    else {
+      // Tela inicial: limpa o resultado e reabre o painel de busca — é o que
+      // o VOLTAR encontra ao sair de um modelo/seção.
+      fdView.innerHTML = '';
+      spBody.classList.remove('hidden');
+      spToggle.textContent = '▾ Search';
+    }
     window.scrollTo(0, 0);
   }
+
+  // Botão VOLTAR único do finder: dentro de um modelo/seção volta um passo na
+  // navegação; já na tela de busca, sai para o portal.
+  document.getElementById('fd-voltar').addEventListener('click', function () {
+    if ((location.hash || '').replace('#', '') && history.length > 1) history.back();
+    else location.href = 'portal.html';
+  });
 
   /* carrega os modelos (árvore) e só então liga o router */
   FG.finderModelos().then(function (lista) {
