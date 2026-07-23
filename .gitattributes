@@ -1,0 +1,7 @@
+# Scripts executados em Linux PRECISAM de quebra de linha LF. Sem isto, o
+# checkout no Windows converteria para CRLF, o commit levaria o \r junto e o
+# bash no servidor falharia com "bad interpreter: /usr/bin/env bash^M".
+*.sh text eol=lf
+
+# Scripts SQL: LF por consistência (o sqlcmd tolera CRLF, mas evita ruído no diff).
+*.sql text eol=lf
