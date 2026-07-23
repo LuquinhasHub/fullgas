@@ -1,3 +1,6 @@
+USE FullgasB2B;
+GO
+
 -- ============================================================
 -- 028 — Renomeia o status de pedido "Processando" para "Em separação".
 -- Troca o valor no CHECK constraint e migra as linhas existentes.

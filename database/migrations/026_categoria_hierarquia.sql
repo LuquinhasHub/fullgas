@@ -1,3 +1,6 @@
+USE FullgasB2B;
+GO
+
 -- ============================================================
 -- 026 — Hierarquia de categorias (subcategorias).
 -- Adiciona ParentId à Categoria: NULL = categoria de topo; preenchido = é

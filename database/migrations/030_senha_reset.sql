@@ -1,3 +1,6 @@
+USE FullgasB2B;
+GO
+
 -- ============================================================
 -- 030 - Recuperacao de senha ("esqueci minha senha").
 -- Guarda apenas o HASH SHA-256 do token enviado por e-mail: quem tiver acesso

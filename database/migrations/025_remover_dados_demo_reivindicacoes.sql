@@ -1,3 +1,6 @@
+USE FullgasB2B;
+GO
+
 -- ============================================================
 -- 025 — Remove os dados de DEMONSTRAÇÃO de reivindicações.
 -- O "quadro de reivindicações" do admin já é dinâmico (vem da API), mas o

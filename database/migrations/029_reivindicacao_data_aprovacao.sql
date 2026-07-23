@@ -1,3 +1,6 @@
+USE FullgasB2B;
+GO
+
 -- ============================================================
 -- 029 — Data de aprovação da reivindicação.
 -- Grava quando a reivindicação foi aprovada (controle no painel admin).

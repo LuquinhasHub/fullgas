@@ -1,3 +1,6 @@
+USE FullgasB2B;
+GO
+
 -- ============================================================
 -- 027 — Cria subcategorias e classifica os produtos importados.
 -- Os produtos vindos do Tiny caíram quase todos em "Acessórios Técnicos".
