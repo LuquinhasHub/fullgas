@@ -1,36 +1,110 @@
 # Fullgas B2B
 
-Portal B2B para concessionárias: catálogo de peças, Parts Finder, pedidos,
-reivindicações de garantia e painel administrativo.
+Portal B2B para a rede de concessionárias Fullgas: catálogo de peças integrado ao
+ERP, localizador visual de peças (Parts Finder), pedidos com controle de envio por
+item, reivindicações de garantia com fotos, e um painel administrativo completo.
 
-## Estrutura
+**Em produção:** https://fullgas.app.br
+
+---
+
+## O que o portal faz
+
+**Para a concessionária**
+- **Catálogo** sincronizado automaticamente com o **Tiny ERP** (produtos, preços e
+  estoque real).
+- **Parts Finder** — localiza a peça pelo diagrama do modelo: navega por seções,
+  clica na área do desenho e chega ao produto.
+- **Pedidos** com baixa de estoque, envio parcial e **pré-venda/backorder** (itens
+  sem estoque entram numa fila e são liberados quando repostos).
+- **Reivindicações de garantia** com anexos (fotos/vídeos), fluxo de aprovação e
+  geração de pedido de reposição.
+- **Conta financeira** com faturas e **PDF** da fatura.
+- **Contas internas (sub-dealers)** com permissões por área, criadas pelo gestor
+  da concessionária.
+- **Recuperação de senha** por e-mail.
+
+**Para o administrador**
+- Gestão de catálogo, categorias e subcategorias, pedidos (com **controle de envio
+  peça a peça**), chassis, clientes e reivindicações.
+- **Notificações** para as concessionárias.
+- **Alteração de identidade**: entra na conta de um cliente para dar suporte,
+  com tarja de aviso e registro em log.
+- Filtros e busca em todas as abas; integração Tiny (importação e exportação de
+  pedidos).
+
+---
+
+## Arquitetura
+
+```
+Internet ──HTTPS──> Cloudflare ──HTTPS──> Nginx (VPS)
+                                            ├─ /         → front estático
+                                            ├─ /api      → API Node (localhost:3000)
+                                            └─ /uploads  → API Node
+                                                              │
+                                                              └─ SQL Server (Docker)
+                                                                     ↕
+                                                                  Tiny ERP
+```
+
+| Camada | Tecnologia |
+|---|---|
+| Frontend | HTML/CSS/JavaScript puro (sem build), servido estático |
+| API | Node.js + Express (ESM) |
+| Banco | Microsoft SQL Server (Express, em Docker) |
+| Auth | JWT + bcrypt |
+| Integração | Tiny ERP (API v2) — catálogo e pedidos |
+| E-mail | SMTP (recuperação de senha) |
+| Infra | VPS Ubuntu · Nginx · Cloudflare (HTTPS Full strict) |
+
+---
+
+## Estrutura do repositório
 
 | Pasta | O que é |
 |---|---|
-| `frontend/` | O site (HTML/CSS/JS). Abra `index.html` ou sirva por HTTP. |
-| `api/` | API Node.js + Express que conecta o front ao banco. |
-| `database/` | Scripts SQL: schema, dados de teste e migrações. |
-| `docs/` | Guias de Git, deploy e arquitetura. |
+| `frontend/` | O site (HTML/CSS/JS). `index.html` é a tela de acesso. |
+| `api/` | API Node.js + Express. Ponto de entrada `src/server.js`. |
+| `api/scripts/` | Utilitários operacionais (ex.: `criar-admin.mjs`). |
+| `database/` | Schema, migrações numeradas (`migrations/`), seeds e o backup. |
+| `docs/` | Especificações, roadmap e o **guia de deploy** (`09-deploy-vps-linux.md`). |
 
-## Começar (desenvolvimento local)
+---
 
-1. **Banco**: no SQL Server, rode os scripts de `database/` na ordem:
-   `fullgas_schema_sqlserver.sql` → `migrations/001_anexos_reivindicacao.sql`
-   → `fullgas_seeds.sql` → `criar_usuario_app.sql`.
-2. **API**: `cd api`, copie `.env.example` para `.env` e preencha, depois
-   `npm install` e `npm start`.
-3. **Front**: sirva a pasta `frontend/` por HTTP (ex.: Live Server do VS Code).
+## Rodar em desenvolvimento
 
-Login de teste: `admin@fullgas.com.br` / `admin123`.
+1. **Banco** (SQL Server): rode, nesta ordem —
+   `database/fullgas_schema_sqlserver.sql`, depois todas as
+   `database/migrations/*.sql` em ordem numérica, depois
+   `database/criar_usuario_app.sql`.
+   > Se usar o `sqlcmd`, passe `-f 65001` (senão os acentos das constraints
+   > corrompem). Os seeds (`fullgas_seeds.sql`) são opcionais e trazem dados de
+   > demonstração.
+2. **API**: `cd api`, copie `.env.example` para `.env` e preencha, então
+   `npm install` e `npm start` (ou `npm run dev` para recarregar ao salvar).
+3. **Frontend**: sirva a pasta `frontend/` por HTTP (ex.: Live Server do VS Code).
+4. **Primeiro admin** (banco sem seeds):
+   `node scripts/criar-admin.mjs "Nome" email@dominio "SenhaForte"`.
 
-## Documentação
+---
 
-- `docs/01-guia-git.md` — versionamento do zero (comece por aqui se nunca usou Git)
-- `docs/02-guia-deploy.md` — colocar no ar (banco no Azure, API e front no Render)
-- `docs/03-arquitetura-e-expansao.md` — como o projeto é montado e como crescê-lo
+## Deploy em produção
 
-## Status
+Guia completo, testado no servidor real, em
+[`docs/09-deploy-vps-linux.md`](docs/09-deploy-vps-linux.md): VPS Ubuntu, SQL
+Server Express em Docker, API como serviço systemd, Nginx + certificado de origem
+da Cloudflare.
 
-Fundação pronta: autenticação e catálogo já passam pela API/banco. As demais
-áreas (pedidos, veículos, reivindicações com fotos, finder, dashboard) estão
-mapeadas no roadmap em `docs/03-arquitetura-e-expansao.md`.
+**Backup:** `database/backup-fullgas.sh` roda por cron no servidor (backup diário +
+`RESTORE VERIFYONLY` + retenção), com cópia externa para a nuvem. Inclui a receita
+de restauração no próprio arquivo.
+
+---
+
+## Documentação complementar
+
+- `docs/04-roadmap.md` — evolução do produto
+- `docs/07-partsfinder.md` — o localizador de peças
+- `docs/08-integracao-tiny.md` — a integração com o ERP
+- `docs/09-deploy-vps-linux.md` — colocar (e manter) no ar
