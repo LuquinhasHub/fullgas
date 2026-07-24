@@ -169,6 +169,10 @@ body.admin { background: var(--adm-bg); color: var(--adm-ink); display: flex; mi
 select.inline-status { border: 1px solid #ccc; padding: 5px 8px; font-size: 12px; background: #fff; }
 
 /* modal reaproveita styles.css (.modal-back/.modal) — versão laranja */
+/* Centraliza o modal na vertical (o padrão do styles.css cola no topo com
+   `align-items: flex-start`, o que deixava o pop-up abaixo do centro da tela).
+   Como o .modal tem max-height: 85vh, centralizado ainda cabe na viewport. */
+body.admin .modal-back { align-items: center; }
 body.admin .modal { border-top-color: var(--adm-orange); }
 body.admin .field input:focus, body.admin .field select:focus, body.admin .field textarea:focus { outline-color: var(--adm-orange); }
 
@@ -188,6 +192,9 @@ body.admin .field input:focus, body.admin .field select:focus, body.admin .field
 .fnd-arvore { font-size: 11px; color: #666; max-width: 260px; }
 
 .fnd-thumb { width: 48px; height: 48px; object-fit: contain; border: 1px solid #e0e0e0; background: #fff; display: inline-block; }
+/* Miniatura com foto: clicável para ampliar em lightbox (ver admin.js). */
+img.fnd-thumb { cursor: zoom-in; }
+img.fnd-thumb:hover { border-color: var(--adm-orange); }
 span.fnd-thumb.vazio { display: inline-flex; align-items: center; justify-content: center; font-size: 9px; color: #999; text-align: center; }
 .fnd-foto-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 

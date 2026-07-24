@@ -17,6 +17,22 @@
 
   document.getElementById('adm-user').textContent = sess.nome;
   document.getElementById('adm-sair').addEventListener('click', function () { FG.logout(); });
+
+  // Ampliar qualquer miniatura (.fnd-thumb) em lightbox — vale para as fotos
+  // nos pop-ups (editar produto/peça) e na tabela do catálogo. Listener único e
+  // delegado no body: cobre telas re-renderizadas e modais criados na hora.
+  document.body.addEventListener('click', function (e) {
+    var img = e.target.closest('img.fnd-thumb');
+    if (!img || !img.getAttribute('src')) return;
+    var back = document.createElement('div');
+    back.className = 'modal-back';
+    back.innerHTML = '<div class="modal modal-img"><header><h3>' + esc(img.alt || 'Foto da peça') + '</h3>' +
+      '<button class="x">×</button></header><div class="modal-body">' +
+      '<img src="' + esc(img.src) + '" alt="' + esc(img.alt || '') + '"></div></div>';
+    document.body.appendChild(back);
+    back.querySelector('.x').addEventListener('click', function () { back.remove(); });
+    // Clicar fora NÃO fecha — pop-ups só fecham no X (padrão do painel).
+  });
   document.getElementById('adm-bell').addEventListener('click', function () { location.hash = '#usuarios'; });
 
   function refreshBell() {
@@ -165,8 +181,7 @@
 
     view.innerHTML =
       '<div class="adm-banner">ℹ️ É hora de <b>mudar sua senha</b>.</div>' +
-      '<div class="adm-bar"><span class="scope">Escopo: <b>Todas as Visões de Loja</b> ▾ ❓</span>' +
-      '<span class="grow"></span><button class="btn-orange" id="dz-reload">Recarregar</button></div>' +
+      '<div class="adm-bar"><span class="grow"></span><button class="btn-orange" id="dz-reload">Recarregar</button></div>' +
 
       '<div class="dash-grid">' +
 
