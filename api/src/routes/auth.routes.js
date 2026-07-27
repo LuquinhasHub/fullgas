@@ -256,7 +256,7 @@ router.post('/senha/esqueci', async (req, res, next) => {
 
     // appUrl(req): sem APP_URL no .env, o link nasce com a MESMA origem de onde
     // o portal foi aberto — assim funciona no celular/rede local sem configurar.
-    const link = `${appUrl(req)}/redefinir.html?token=${tokenCru}`;
+    const link = `${appUrl(req)}/redefinir?token=${tokenCru}`;
     const corpo = emailRecuperacaoSenha(u.Nome, link, RESET_MINUTOS);
     try {
       await enviarEmail({

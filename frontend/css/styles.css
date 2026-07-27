@@ -516,6 +516,13 @@ main.shop { padding: 0 18px 70px; }
   width: 120px; height: 120px; box-sizing: border-box;
   transition: transform .12s;
 }
+/* foto real da categoria (quando o admin envia uma) — mesmo enquadramento
+   circular do ícone padrão. */
+.cat-tile .cat-photo {
+  width: 120px; height: 120px; border-radius: 50%; object-fit: cover;
+  box-sizing: border-box; background: #eee; transition: transform .12s;
+}
+.cat-tile:hover .cat-photo { transform: scale(1.05); }
 
 .shop-layout { display: grid; grid-template-columns: 280px 1fr; gap: 34px; align-items: start; }
 @media (max-width: 940px) { .shop-layout { grid-template-columns: 1fr; } }

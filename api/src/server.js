@@ -71,11 +71,28 @@ app.use('/api', notificacoesRoutes);
 app.use('/api', finderRoutes);
 app.use('/api', tinyRoutes);
 
-// 404
-app.use((req, res) => res.status(404).json({ erro: 'Rota não encontrada.' }));
+// Frontend estático com URLs LIMPAS (esconder o .html).
+// `extensions: ['html']` faz /portal servir portal.html, /loja → loja.html,
+// etc.; a raiz "/" serve index.html. Em produção quem serve o front é o Nginx
+// (mesmo comportamento via try_files) — aqui é para o dev abrir tudo na mesma
+// origem da API (http://localhost:3000) sem depender de outro servidor.
+const FRONT_DIR = path.join(__dirname, '..', '..', 'frontend');
+app.use(express.static(FRONT_DIR, { extensions: ['html'] }));
+
+// 404 — só cai aqui o que não é arquivo do front nem rota conhecida. Rotas de
+// API (JSON) e navegação de página (HTML) recebem o formato adequado.
+app.use((req, res) => {
+  if (req.path.startsWith('/api/')) return res.status(404).json({ erro: 'Rota não encontrada.' });
+  res.status(404).sendFile(path.join(FRONT_DIR, 'index.html'));
+});
 
 // Tratador central de erros
 app.use((err, _req, res, _next) => {
+  // Erro de aplicação (AppError, marca `publica`): status e mensagem podem ir
+  // ao cliente. Qualquer outro erro vira 500 genérico — nada de vazar detalhe.
+  if (err && err.publica) {
+    return res.status(err.status || 400).json({ erro: err.message });
+  }
   console.error('ERRO:', err.message);
   res.status(500).json({ erro: 'Erro interno do servidor.' });
 });

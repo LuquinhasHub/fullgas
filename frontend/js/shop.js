@@ -10,7 +10,7 @@
   // Conta interna (sub-dealer) sem a área "loja" volta ao portal.
   if (!FG.temArea(sess, 'loja')) {
     alert('Sua conta não tem acesso à Loja. Fale com o gestor da concessionária.');
-    location.href = 'portal.html'; return;
+    location.href = '/portal'; return;
   }
 
   // Espera o cache (carregado de forma assíncrona via fetch) antes de montar a
@@ -83,7 +83,7 @@
     // portal; nas demais telas volta um passo na navegação.
     var home = !(trilha || []).length;
     var bc = home
-      ? '<a class="btn-voltar" href="portal.html">Portal</a>'
+      ? '<a class="btn-voltar" href="/portal">Portal</a>'
       : '<button class="btn-voltar" id="bt-voltar" type="button">Voltar</button>';
     bc += '<a href="#/">LOJA</a>';
     (trilha || []).forEach(function (t) {
@@ -133,7 +133,10 @@
     setBand('Categorias', []);
     view.innerHTML = '<div class="cat-grid">' + FG.categoriasTopo().map(function (c) {
       var subs = FG.subcategorias(c.id);
-      return '<button class="cat-tile" data-cat="' + c.id + '">' + catIcon(c.icone) +
+      var midia = c.imagem
+        ? '<img class="cat-photo" src="' + esc(c.imagem) + '" alt="' + esc(c.nome) + '">'
+        : catIcon(c.icone);
+      return '<button class="cat-tile" data-cat="' + c.id + '">' + midia +
         '<div class="cat-name">' + esc(c.nome) + '</div>' +
         (subs.length ? '<div class="cat-sub muted">' + subs.length + ' subcategoria' + (subs.length > 1 ? 's' : '') + '</div>' : '') +
         '</button>';
@@ -330,7 +333,7 @@
           '<button class="btn dark" disabled style="opacity:.55;cursor:not-allowed;">Indisponível</button>' +
           '<span class="muted" style="font-size:12px;">Produto sem estoque e sem previsão de chegada.</span></div>') +
       (usados.length ? '<p class="muted" style="font-size:12px;">Aplicação (Parts Finder): ' +
-        usados.map(function (m) { return '<a href="finder.html#/modelo/' + m.id + '/chassi">' + esc(m.nome + ' ' + m.ano) + '</a>'; }).join(' · ') + '</p>' : '') +
+        usados.map(function (m) { return '<a href="/finder#/modelo/' + m.id + '/chassi">' + esc(m.nome + ' ' + m.ano) + '</a>'; }).join(' · ') + '</p>' : '') +
       '</div></div>';
     bindAddCart();
   }
@@ -513,7 +516,7 @@
       orders.map(function (o) {
         // O número linka direto para o detalhe do pedido na aba Pedidos do portal.
         return '<div class="order-card"><div class="oc-head">' +
-          '<span><b><a href="portal.html#pedido/' + esc(o.id) + '" title="Ver detalhes do pedido">' + esc(o.id) + '</a></b>' +
+          '<span><b><a href="/portal#pedido/' + esc(o.id) + '" title="Ver detalhes do pedido">' + esc(o.id) + '</a></b>' +
           (o.garantia ? ' <span class="pill-status Garantia">Garantia</span>' : '') + '</span>' +
           '<span>' + FG.fmtDateTime(o.data) + '</span>' +
           '<span><span class="pill-status ' + esc(o.status) + '">' + esc(o.status) + '</span></span>' +

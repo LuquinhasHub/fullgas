@@ -388,7 +388,7 @@
           b.disabled = true; b.textContent = 'Entrando…';
           var r = await FG.assumirIdentidade(u.id);
           if (!r.ok) { FG.toast(r.msg, 'erro'); b.disabled = false; b.textContent = 'Entrar na conta'; return; }
-          location.href = 'portal.html';   // recarrega o app já com a nova sessão
+          location.href = '/portal';   // recarrega o app já com a nova sessão
           return;
         }
 
@@ -679,12 +679,15 @@
     function catRow(c, sub) {
       var n = prods.filter(function (p) { return p.cat === c.id; }).length;
       return '<tr>' +
+        '<td>' + (c.imagem
+            ? '<img class="fnd-thumb" src="' + esc(c.imagem) + '" alt="">'
+            : '<span class="fnd-thumb vazio">sem foto</span>') + '</td>' +
         '<td>' + (sub ? '<span class="muted">↳&nbsp;</span>' : '') + esc(c.nome) +
           ' <span class="muted" style="font-size:11px;">(' + esc(c.id) + ')</span></td>' +
         '<td class="r">' + n + '</td>' +
         '<td class="nowrap">' +
           (sub ? '' : '<button class="btn-line btn-mini" data-cat-sub="' + esc(c.id) + '">＋ Sub</button> ') +
-          '<button class="btn-line btn-mini" data-cat-edit="' + esc(c.id) + '">Editar</button> ' +
+          '<button class="btn-line btn-mini" data-cat-edit="' + esc(c.id) + '">' + (c.imagem ? 'Editar / foto' : 'Editar / +foto') + '</button> ' +
           '<button class="btn-line btn-mini" data-cat-del="' + esc(c.id) + '">Excluir</button>' +
         '</td></tr>';
     }
@@ -697,8 +700,8 @@
       '<div class="adm-card"><div class="c-head">Categorias e subcategorias</div><div class="c-body">' +
       '<div class="adm-bar"><span class="grow"></span>' +
       '<button class="btn-orange" id="ct-novo">Adicionar categoria</button></div>' +
-      '<table class="tbl"><thead><tr><th>Categoria</th><th class="r">Produtos</th><th>Ações</th></tr></thead><tbody>' +
-      (catRows || '<tr><td colspan="3" class="muted">Nenhuma categoria cadastrada.</td></tr>') +
+      '<table class="tbl"><thead><tr><th>Foto</th><th>Categoria</th><th class="r">Produtos</th><th>Ações</th></tr></thead><tbody>' +
+      (catRows || '<tr><td colspan="4" class="muted">Nenhuma categoria cadastrada.</td></tr>') +
       '</tbody></table>' +
       '<p class="muted" style="font-size:12px;margin:8px 0 0;">As subcategorias (↳) aparecem dentro da categoria pai na loja. ' +
       'Só é possível excluir categorias vazias (sem produtos e sem subcategorias).</p>' +
@@ -788,6 +791,13 @@
           }).join('') + '</select>' +
           '<p class="muted" style="font-size:12px;margin:4px 0 0;">Escolha uma categoria pai para criar uma <b>subcategoria</b> dentro dela.</p></div>'
         : '<p class="muted" style="font-size:12px;">Para mover a categoria de lugar, exclua e recrie.</p>') +
+      '<div class="field"><label>Foto da categoria (miniatura na grade da loja)</label>' +
+      '<div class="fnd-foto-row">' +
+      (cat && cat.imagem ? '<img class="fnd-thumb" src="' + esc(cat.imagem) + '" alt="">' : '<span class="fnd-thumb vazio">sem foto</span>') +
+      '<input id="ct-foto" type="file" accept="image/*">' +
+      (cat && cat.imagem ? '<button class="btn-line btn-mini" id="ct-foto-del" type="button">Remover foto</button>' : '') +
+      '</div>' +
+      '<p class="muted" style="font-size:12px;margin:4px 0 0;">Opcional. Sem foto, a loja usa o ícone padrão.</p></div>' +
       '</div>' +
       '<div class="modal-foot"><button class="btn-line" id="ct-canc">Cancelar</button>' +
       '<button class="btn-orange" id="ct-ok">' + (novo ? 'Criar' : 'Salvar') + '</button></div></div>';
@@ -796,6 +806,14 @@
     function fechar() { back.remove(); }
     back.querySelector('.x').addEventListener('click', fechar);
     back.querySelector('#ct-canc').addEventListener('click', fechar);
+    var ctFotoDel = document.getElementById('ct-foto-del');
+    if (ctFotoDel) ctFotoDel.addEventListener('click', function () {
+      ctFotoDel.disabled = true;
+      FG.removerImagemCategoria(cat.id).then(function (r) {
+        if (r && r.ok === false) { FG.toast(r.msg || 'Falha ao remover a foto.', 'erro'); ctFotoDel.disabled = false; return; }
+        FG.toast('Foto removida.'); fechar(); renderProdutos();
+      });
+    });
     back.querySelector('#ct-ok').addEventListener('click', function () {
       var nome = document.getElementById('ct-nome').value.trim();
       if (!nome) { FG.toast('Informe o nome da categoria.', 'erro'); return; }
@@ -804,10 +822,18 @@
         ? FG.apiCriarCategoria({ nome: nome, pai: document.getElementById('ct-pai').value })
         : FG.apiEditarCategoria(cat.id, { nome: nome });
       prom.then(function (r) {
-        btn.disabled = false;
-        if (r && r.ok === false) { FG.toast(r.msg || 'Não foi possível salvar.', 'erro'); return; }
-        FG.toast(novo ? 'Categoria criada.' : 'Categoria atualizada.');
-        fechar(); renderProdutos();
+        if (r && r.ok === false) { btn.disabled = false; FG.toast(r.msg || 'Não foi possível salvar.', 'erro'); return; }
+        // Foto: em categoria nova o código só existe após criar (r.id); na
+        // edição usa o código atual. Sem arquivo escolhido, não faz upload.
+        var arquivo = document.getElementById('ct-foto').files[0];
+        var codigo = novo ? r.id : cat.id;
+        var fotoOk = (arquivo && codigo) ? FG.uploadImagemCategoria(codigo, arquivo) : Promise.resolve({ ok: true });
+        return fotoOk.then(function (rf) {
+          btn.disabled = false;
+          if (rf && rf.ok === false) FG.toast((novo ? 'Categoria criada' : 'Categoria salva') + ', mas a foto falhou: ' + (rf.msg || ''), 'erro');
+          else FG.toast(novo ? 'Categoria criada.' : 'Categoria atualizada.');
+          fechar(); renderProdutos();
+        });
       });
     });
   }
@@ -1626,7 +1652,7 @@
             ' (' + ((m[l[0]] || []).length) + ')</button>';
         }).join('') + '</div>' +
         '<span class="grow"></span>' +
-        '<a class="btn-line" href="finder.html#/modelo/' + encodeURIComponent(m.id) + '/' + lado + '" target="_blank" rel="noopener">Ver no finder ↗</a> ' +
+        '<a class="btn-line" href="/finder#/modelo/' + encodeURIComponent(m.id) + '/' + lado + '" target="_blank" rel="noopener">Ver no finder ↗</a> ' +
         '<button class="btn-orange" id="fs-nova">Nova seção</button></div>' +
         '<div class="adm-card"><div class="c-head">Seções — ' + (lado === 'engine' ? 'Engine (motor)' : 'Frame (chassi)') + '</div><div class="c-body">' +
         '<table class="tbl"><thead><tr><th>Diagrama</th><th>Nº</th><th>Nome</th><th class="r">Peças</th>' +
@@ -1739,7 +1765,7 @@
           [sec.numero + ' ' + sec.nome]]) +
         '<div class="adm-bar"><span class="muted" style="font-size:13px;">Lado: <b>' +
         (sec.lado === 'engine' ? 'Engine (motor)' : 'Frame (chassi)') + '</b></span><span class="grow"></span>' +
-        '<a class="btn-line" href="finder.html#/secao/' + sec.id + '" target="_blank" rel="noopener">Ver no finder ↗</a></div>' +
+        '<a class="btn-line" href="/finder#/secao/' + sec.id + '" target="_blank" rel="noopener">Ver no finder ↗</a></div>' +
 
         /* ---- peças da seção: tabela no topo, largura cheia ---- */
         '<div class="adm-card"><div class="c-head">Peças desta seção (' + sec.pecas.length + ')</div><div class="c-body">' +

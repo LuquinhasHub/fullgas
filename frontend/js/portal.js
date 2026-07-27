@@ -24,13 +24,19 @@
 
   if (sess.papel === 'admin') document.getElementById('tab-admin').classList.remove('hidden');
 
+  // Aba "Subdealers": só a conta GESTORA (ou admin) gerencia as contas
+  // internas. Uma conta interna (sub-dealer) não vê a aba nem cria outras
+  // contas — o roteador (abaixo) também barra o acesso direto por hash.
+  var ehGestor = !!(sess.gestor || sess.papel === 'admin');
+  if (ehGestor) document.getElementById('tab-subdealers').classList.remove('hidden');
+
   /* ---------- permissões por área (contas internas / sub-dealers) ----------
      O gestor restringe as áreas de cada conta interna no painel "Minha
      conta". Aqui as abas bloqueadas somem; o roteador (abaixo) também barra
      acesso direto pelo hash. Admin/gestor têm sempre acesso total. */
   var GATE_TABS = [
-    ['loja', '.tabs a[href="loja.html"]'],
-    ['finder', '.tabs a[href="finder.html"]'],
+    ['loja', '.tabs a[href="/loja"]'],
+    ['finder', '.tabs a[href="/finder"]'],
     ['finder', '.topbar .pf-link'],
     ['pedidos', '.tabs a[data-rota="pedidos"]'],
     ['financeiro', '#tab-fin'],
@@ -758,7 +764,7 @@
       var n = FG.cartCount();
       body.innerHTML = '<div class="empty-box">' +
         (n ? 'Sua cesta atual tem <b>' + n + '</b> item(ns) aguardando envio.' : 'Sua cesta está vazia.') +
-        '<br><a class="btn red" href="loja.html#/carrinho">Abrir cesta na loja</a></div>';
+        '<br><a class="btn red" href="/loja#/carrinho">Abrir cesta na loja</a></div>';
       return;
     }
 
@@ -1033,7 +1039,7 @@
         (!v.garantia ? '<button class="btn" id="av-gar">Ativar garantia</button>' : '') +
         (sess.papel === 'admin' ? '<button class="btn" id="av-transf">Transferir revendedor</button>' : '') +
         '<a class="btn" href="#reivindicacoes">Criar reivindicação</a>' +
-        '<a class="btn" href="finder.html">Abrir no Parts Finder</a>' +
+        '<a class="btn" href="/finder">Abrir no Parts Finder</a>' +
         '</div></div>';
 
       var bv = document.getElementById('av-venda');
@@ -1406,47 +1412,9 @@
         '<div class="field"><label for="ct-cidade">Cidade</label><input id="ct-cidade" type="text" value="' + esc(e.cidade || '') + '"' + ro + '></div>' +
         '<div class="field"><label for="ct-uf">UF</label><input id="ct-uf" type="text" maxlength="2" value="' + esc(e.uf || '') + '"' + ro + ' style="text-transform:uppercase;"></div>' +
         '</div>' +
-        (gestor ? '<button class="btn red" id="ct-salvar" type="button">Salvar dados da empresa</button>' : '');
-
-      /* ---- contas internas ---- */
-      html += '<h3 class="sec-title">Contas internas (sub-dealers)</h3>' +
-        '<p class="muted" style="font-size:12px;">Contas para os usuários internos da concessionária. ' +
-        'O gestor escolhe as áreas do site que cada conta pode acessar.</p>';
-
-      var internas = (c.usuarios || []).filter(function (u) { return !u.gestor; });
-      html += '<table class="table"><thead><tr><th>Nome</th><th>E-mail</th><th>Acesso</th><th>Status</th>' +
-        (gestor ? '<th>Ações</th>' : '') + '</tr></thead><tbody>' +
-        (internas.length ? internas.map(function (u) {
-          return '<tr><td>' + esc(u.nome) + '</td><td>' + esc(u.email) + '</td>' +
-            '<td style="font-size:12px;">' + permTexto(u.permissoes) + '</td>' +
-            '<td><span class="pill-status ' + esc(u.status) + '">' + esc(u.status) + '</span></td>' +
-            (gestor
-              ? '<td class="nowrap">' +
-                '<button class="tool" data-ed="' + u.id + '">Permissões</button> ' +
-                '<button class="tool" data-bl="' + u.id + '" data-st="' + u.status + '">' + (u.status === 'bloqueado' ? 'Desbloquear' : 'Bloquear') + '</button> ' +
-                '<button class="tool" data-sn="' + u.id + '">Redefinir senha</button> ' +
-                '<button class="tool danger" data-del="' + u.id + '" data-nome="' + esc(u.nome) + '">Excluir</button></td>'
-              : '') + '</tr>';
-        }).join('') : '<tr><td colspan="' + (gestor ? 5 : 4) + '" class="muted">Nenhuma conta interna ainda.</td></tr>') +
-        '</tbody></table>';
-
-      /* form de nova conta interna (só gestor) */
-      if (gestor) {
-        html += '<div class="conta-nova" id="ct-nova">' +
-          '<h3 class="sec-title">Nova conta interna</h3>' +
-          '<div class="conta-grid">' +
-          '<div class="field"><label for="sd-nome">Nome</label><input id="sd-nome" type="text" placeholder="Nome do funcionário"></div>' +
-          '<div class="field"><label for="sd-email">E-mail</label><input id="sd-email" type="email" placeholder="email@suaempresa.com.br"></div>' +
-          '<div class="field"><label for="sd-senha">Senha</label><input id="sd-senha" type="password" placeholder="Mínimo 6 caracteres"></div>' +
-          '</div>' +
-          '<div class="field"><label>Áreas permitidas</label><div class="perm-list" id="sd-perms">' +
-          c.areas.map(function (a) {
-            return '<label class="perm-chk"><input type="checkbox" value="' + a + '" checked> ' + (AREA_LABELS[a] || a) + '</label>';
-          }).join('') +
-          '</div></div>' +
-          '<button class="btn red" id="sd-criar" type="button">Criar conta interna</button>' +
-          '</div>';
-      }
+        (gestor ? '<button class="btn red" id="ct-salvar" type="button">Salvar dados da empresa</button>' : '') +
+        // A gestão de sub-dealers vive na aba "Subdealers" (só o gestor a vê).
+        (gestor ? '<p class="muted" style="font-size:12px;margin-top:18px;">As contas internas (sub-dealers) são gerenciadas na aba <a href="#subdealers">Subdealers</a>.</p>' : '');
 
       view.innerHTML = html;
       if (!gestor) return;
@@ -1511,6 +1479,67 @@
           }
         });
       });
+    });
+  }
+
+  /* =========================================================
+     SUBDEALERS — gestão das contas internas (só o gestor)
+     ---------------------------------------------------------
+     Aba exclusiva da conta gestora: cria contas para os usuários
+     internos da concessionária, restringe as áreas que cada uma
+     acessa, bloqueia/desbloqueia, redefine senha e exclui. As
+     contas nascem PENDENTES — só entram depois que o administrador
+     Fullgas aprova (mesma fila de qualquer concessionário). Um
+     sub-dealer não vê esta aba nem cria outras contas.
+     ========================================================= */
+  function renderSubdealers() {
+    setCrumb(['Subdealers']); setTabOn('subdealers');
+    view.innerHTML = '<h2>Subdealers</h2><p class="muted">Carregando…</p>';
+
+    FG.conta().then(function (c) {
+      if (!c) { view.innerHTML = '<h2>Subdealers</h2><p class="muted">Não foi possível carregar os dados. Tente de novo.</p>'; return; }
+
+      var internas = (c.usuarios || []).filter(function (u) { return !u.gestor; });
+      var html =
+        '<h2>Subdealers</h2>' +
+        '<p class="muted" style="font-size:13px;">Contas para os usuários internos da concessionária. ' +
+        'Você escolhe as áreas do site que cada uma acessa. As contas novas ficam ' +
+        '<b>pendentes até o administrador Fullgas aprovar</b> — o mesmo trâmite de qualquer cadastro.</p>' +
+
+        '<h3 class="sec-title">Contas internas</h3>' +
+        '<table class="table"><thead><tr><th>Nome</th><th>E-mail</th><th>Acesso</th><th>Status</th>' +
+        '<th>Ações</th></tr></thead><tbody>' +
+        (internas.length ? internas.map(function (u) {
+          return '<tr><td>' + esc(u.nome) + '</td><td>' + esc(u.email) + '</td>' +
+            '<td style="font-size:12px;">' + permTexto(u.permissoes) + '</td>' +
+            '<td><span class="pill-status ' + esc(u.status) + '">' + esc(u.status) + '</span></td>' +
+            '<td class="nowrap">' +
+              '<button class="tool" data-ed="' + u.id + '">Permissões</button> ' +
+              (u.status === 'pendente'
+                ? '<span class="muted" style="font-size:11px;">aguardando aprovação</span> '
+                : '<button class="tool" data-bl="' + u.id + '" data-st="' + u.status + '">' + (u.status === 'bloqueado' ? 'Desbloquear' : 'Bloquear') + '</button> ') +
+              '<button class="tool" data-sn="' + u.id + '">Redefinir senha</button> ' +
+              '<button class="tool danger" data-del="' + u.id + '" data-nome="' + esc(u.nome) + '">Excluir</button></td></tr>';
+        }).join('') : '<tr><td colspan="5" class="muted">Nenhuma conta interna ainda.</td></tr>') +
+        '</tbody></table>' +
+
+        /* form de nova conta interna */
+        '<div class="conta-nova" id="ct-nova">' +
+        '<h3 class="sec-title">Nova conta interna</h3>' +
+        '<div class="conta-grid">' +
+        '<div class="field"><label for="sd-nome">Nome</label><input id="sd-nome" type="text" placeholder="Nome do funcionário"></div>' +
+        '<div class="field"><label for="sd-email">E-mail</label><input id="sd-email" type="email" placeholder="email@suaempresa.com.br"></div>' +
+        '<div class="field"><label for="sd-senha">Senha</label><input id="sd-senha" type="password" placeholder="Mínimo 6 caracteres"></div>' +
+        '</div>' +
+        '<div class="field"><label>Áreas permitidas</label><div class="perm-list" id="sd-perms">' +
+        c.areas.map(function (a) {
+          return '<label class="perm-chk"><input type="checkbox" value="' + a + '" checked> ' + (AREA_LABELS[a] || a) + '</label>';
+        }).join('') +
+        '</div></div>' +
+        '<button class="btn red" id="sd-criar" type="button">Criar conta interna</button>' +
+        '</div>';
+
+      view.innerHTML = html;
 
       /* criar conta interna */
       document.getElementById('sd-criar').addEventListener('click', function () {
@@ -1526,8 +1555,8 @@
         if (dados.senha.length < 6) { FG.toast('A senha precisa de ao menos 6 caracteres.', 'erro'); return; }
         FG.subdealerCriar(dados).then(function (r) {
           if (!r.ok) { FG.toast(r.msg || 'Não foi possível criar a conta.', 'erro'); return; }
-          FG.toast('Conta interna criada — já pode entrar no portal.');
-          renderConta();
+          FG.toast(r.msg || 'Conta interna criada. Aguarde a aprovação do administrador.');
+          renderSubdealers();
         });
       });
 
@@ -1538,7 +1567,7 @@
           FG.subdealerEditar(b.getAttribute('data-bl'), { status: novo }).then(function (r) {
             if (!r.ok) { FG.toast(r.msg || 'Falhou.', 'erro'); return; }
             FG.toast(novo === 'bloqueado' ? 'Conta bloqueada.' : 'Conta desbloqueada.');
-            renderConta();
+            renderSubdealers();
           });
         });
       });
@@ -1568,7 +1597,7 @@
           FG.subdealerExcluir(b.getAttribute('data-del')).then(function (r) {
             if (!r.ok) { FG.toast(r.msg || 'Não foi possível excluir.', 'erro'); return; }
             FG.toast('Conta interna excluída.');
-            renderConta();
+            renderSubdealers();
           });
         });
       });
@@ -1600,7 +1629,7 @@
           FG.subdealerEditar(u.id, { permissoes: perms }).then(function (r) {
             if (!r.ok) { FG.toast(r.msg || 'Falhou.', 'erro'); return; }
             FG.toast('Permissões salvas — valem a partir do próximo login.');
-            fechar(); renderConta();
+            fechar(); renderSubdealers();
           });
         });
       }
@@ -1632,12 +1661,12 @@
     }
     if (mods.length) {
       html += '<h3 style="margin-top:18px;">Modelos</h3><table class="table"><tbody>' + mods.map(function (m) {
-        return '<tr><td>' + esc(m.label) + '</td><td><a href="finder.html#/modelo/' + m.id + '/chassi">Abrir no Parts Finder</a></td></tr>';
+        return '<tr><td>' + esc(m.label) + '</td><td><a href="/finder#/modelo/' + m.id + '/chassi">Abrir no Parts Finder</a></td></tr>';
       }).join('') + '</tbody></table>';
     }
     if (prods.length) {
       html += '<h3 style="margin-top:18px;">Artigos</h3><table class="table"><tbody>' + prods.slice(0, 25).map(function (p) {
-        return '<tr><td><a href="loja.html#/produto/' + p.artigo + '">' + p.artigo + '</a></td><td>' + esc(p.nome) + '</td>' +
+        return '<tr><td><a href="/loja#/produto/' + p.artigo + '">' + p.artigo + '</a></td><td>' + esc(p.nome) + '</td>' +
           '<td class="right">' + FG.fmtMoney(p.preco) + '</td></tr>';
       }).join('') + '</tbody></table>';
     }
@@ -1657,6 +1686,12 @@
       location.hash = '#home';
       return;
     }
+    // Subdealers é exclusivo do gestor: sub-dealer não gerencia (nem cria) outras contas.
+    if (rota === 'subdealers' && !ehGestor) {
+      FG.toast('Apenas a conta gestora da concessionária gerencia os sub-dealers.', 'erro');
+      location.hash = '#home';
+      return;
+    }
     switch (rota) {
       case 'home': renderHome(); break;
       case 'notificacoes': renderNotifs(); break;
@@ -1667,6 +1702,7 @@
       case 'estoque': renderEstoque(); break;
       case 'financeiro': renderFinanceiro(); break;
       case 'conta': renderConta(); break;
+      case 'subdealers': renderSubdealers(); break;
       case 'busca': renderBusca(partes.slice(1).join('/')); break;
       default: renderHome();
     }

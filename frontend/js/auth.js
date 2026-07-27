@@ -12,12 +12,23 @@
   var msg = document.getElementById('auth-msg');
 
   // se já existe sessão, vai direto para o portal
-  if (FG.session()) { location.href = 'portal.html'; return; }
+  if (FG.session()) { location.href = '/portal'; return; }
 
   function showMsg(texto, tipo) {
     msg.textContent = texto || '';
     msg.className = 'auth-msg' + (texto ? ' ' + (tipo || 'err') : '');
   }
+
+  // Se o guardião de sessão nos trouxe de volta ao login, explica o porquê.
+  (function () {
+    var m = new URLSearchParams(location.search).get('sessao');
+    if (!m) return;
+    showMsg(m === 'inatividade'
+      ? 'Sua sessão foi encerrada por inatividade. Entre novamente para continuar.'
+      : 'Sua sessão expirou. Entre novamente para continuar.', 'ok');
+    // Limpa o parâmetro da URL para a mensagem não "grudar" num F5 seguinte.
+    history.replaceState(null, '', location.pathname);
+  })();
 
   // 'login' | 'cad' | 'esq'. "Esqueci minha senha" não tem aba própria: a
   // aba Entrar segue marcada, porque é para lá que o fluxo volta.
@@ -63,7 +74,7 @@
     if (!email || !senha) { showMsg('Informe e-mail e senha.'); return; }
     var r = await FG.login(email, senha);
     if (!r.ok) { showMsg(r.msg); return; }
-    location.href = 'portal.html';
+    location.href = '/portal';
   }
   document.getElementById('btn-login').addEventListener('click', doLogin);
   formLogin.addEventListener('keydown', function (e) { if (e.key === 'Enter') doLogin(); });

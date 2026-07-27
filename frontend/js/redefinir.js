@@ -54,7 +54,7 @@
 
     form.classList.add('hidden');
     showMsg('Senha alterada! Redirecionando para o login…', 'ok');
-    setTimeout(function () { location.href = 'index.html'; }, 1800);
+    setTimeout(function () { location.href = '/'; }, 1800);
   }
   document.getElementById('btn-rd').addEventListener('click', salvar);
   form.addEventListener('keydown', function (e) { if (e.key === 'Enter') salvar(); });

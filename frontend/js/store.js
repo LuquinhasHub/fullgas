@@ -352,7 +352,7 @@
       write(SESSION_KEY, { id: u.id, nome: u.nome, email: u.email, empresa: u.empresa, papel: u.papel });
       return { ok: true };
     },
-    logout: function () { localStorage.removeItem(SESSION_KEY); location.href = 'index.html'; },
+    logout: function () { localStorage.removeItem(SESSION_KEY); location.href = '/'; },
     register: function (dados) {
       var users = FG.all('users');
       if (users.some(function (u) { return u.email.toLowerCase() === dados.email.toLowerCase(); })) {
@@ -367,10 +367,10 @@
     },
     guard: function (papel) {
       var s = FG.session();
-      if (!s) { location.href = 'index.html'; return null; }
+      if (!s) { location.href = '/'; return null; }
       if (papel === 'admin' && s.papel !== 'admin') {
         alert('Acesso restrito a administradores.');
-        location.href = 'portal.html'; return null;
+        location.href = '/portal'; return null;
       }
       return s;
     },

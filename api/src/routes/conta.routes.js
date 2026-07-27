@@ -164,9 +164,12 @@ router.put('/conta/empresa', requireAuth, requireGestor, async (req, res, next) 
   }
 });
 
-// POST /api/conta/subdealers — gestor cria conta interna já aprovada.
+// POST /api/conta/subdealers — gestor cria conta interna PENDENTE.
 // { nome, email, senha, permissoes: ['loja', ...] } (lista vazia = nenhum
 // acesso além do portal básico; omitida/null = acesso total).
+// A conta nasce 'pendente': como qualquer concessionário, só entra depois que
+// o administrador Fullgas aprova (aparece na fila de /api/usuarios). O gestor
+// não aprova a própria conta interna — só o admin (ver o PATCH abaixo).
 router.post('/conta/subdealers', requireAuth, requireGestor, async (req, res, next) => {
   try {
     const { nome, email, senha } = req.body;
@@ -189,9 +192,12 @@ router.post('/conta/subdealers', requireAuth, requireGestor, async (req, res, ne
       .input('perm', sql.VarChar(400), perm)
       .query(`INSERT INTO dbo.Usuario (EmpresaId, Nome, Email, SenhaHash, Papel, Status, Gestor, Permissoes)
               OUTPUT INSERTED.UsuarioId
-              VALUES (@eid, @nome, @email, @hash, 'cliente', 'aprovado', 0, @perm)`);
+              VALUES (@eid, @nome, @email, @hash, 'cliente', 'pendente', 0, @perm)`);
 
-    res.status(201).json({ ok: true, id: ins.recordset[0].UsuarioId });
+    res.status(201).json({
+      ok: true, id: ins.recordset[0].UsuarioId,
+      msg: 'Conta interna criada. Aguarde a aprovação do administrador para o acesso liberar.'
+    });
   } catch (e) { next(e); }
 });
 
@@ -204,7 +210,7 @@ router.patch('/conta/subdealers/:id', requireAuth, requireGestor, async (req, re
 
     // Só contas internas (Gestor = 0) da própria empresa.
     const alvo = (await query(
-      'SELECT UsuarioId FROM dbo.Usuario WHERE UsuarioId = @id AND EmpresaId = @eid AND Gestor = 0',
+      'SELECT UsuarioId, Status FROM dbo.Usuario WHERE UsuarioId = @id AND EmpresaId = @eid AND Gestor = 0',
       { id, eid: req.user.empresaId }
     ))[0];
     if (!alvo) return res.status(404).json({ erro: 'Conta interna não encontrada.' });
@@ -212,6 +218,11 @@ router.patch('/conta/subdealers/:id', requireAuth, requireGestor, async (req, re
     const { permissoes, status, senha } = req.body;
     if (status && !['aprovado', 'bloqueado'].includes(status))
       return res.status(400).json({ erro: 'Status inválido.' });
+    // O gestor bloqueia/desbloqueia, mas NÃO aprova: uma conta ainda 'pendente'
+    // só o administrador Fullgas libera. Assim a aprovação da conta interna
+    // passa pela mesma porta que a de qualquer concessionário.
+    if (status === 'aprovado' && alvo.Status === 'pendente')
+      return res.status(403).json({ erro: 'A liberação de contas pendentes é feita pelo administrador Fullgas.' });
     if (senha !== undefined && String(senha).length < 6)
       return res.status(400).json({ erro: 'A senha precisa de ao menos 6 caracteres.' });
 

@@ -450,9 +450,18 @@ server {
     # uploads (fotos de reivindicação, anexos de notificação) até 60 MB
     client_max_body_size 64M;
 
-    # front estático
+    # URLs limpas (esconder o .html):
+    #   • /index.html vira a raiz "/", e /algo.html vira /algo (301, para
+    #     favoritos e links antigos).
+    #   • O casamento é em $request_uri (a URI ORIGINAL do cliente); o
+    #     try_files interno abaixo NÃO altera $request_uri, então servir
+    #     /portal.html para o pedido /portal não dispara o redirect — sem loop.
+    if ($request_uri ~ ^/index\.html) { return 301 /; }
+    if ($request_uri ~ ^/([^?\s]+)\.html) { return 301 /$1; }
+
+    # front estático — /portal serve portal.html, /finder serve finder.html, etc.
     location / {
-        try_files $uri $uri/ =404;
+        try_files $uri $uri.html $uri/ =404;
     }
 
     # API → Node na porta 3000

@@ -14,7 +14,7 @@
   // Conta interna (sub-dealer) sem a área "finder" volta ao portal.
   if (!FG.temArea(sess, 'finder')) {
     alert('Sua conta não tem acesso ao Parts Finder. Fale com o gestor da concessionária.');
-    location.href = 'portal.html'; return;
+    location.href = '/portal'; return;
   }
 
   // Espera o cache (produtos p/ cesta) antes de montar a tela.
@@ -265,7 +265,7 @@
         var max = p.estoque > 0 ? p.estoque : null;
         var vIni = indisp ? 0 : (max ? Math.min(p.quantidadePadrao, max) : p.quantidadePadrao);
         // Ver a peça na loja abre em NOVA aba: o cliente não perde o finder.
-        var link = 'loja.html#/produto/' + encodeURIComponent(p.sku);
+        var link = '/loja#/produto/' + encodeURIComponent(p.sku);
         return '<div class="part-row' + (marcada ? ' sel' : '') + '" data-row="' + i + '" data-num="' + esc(p.numeroImagem) + '">' +
           '<input type="checkbox" class="pr-chk" data-row="' + i + '"' + (marcada ? ' checked' : '') + '>' +
           '<span>' + (i + 1) + '</span>' +
@@ -496,7 +496,7 @@
   // navegação; já na tela de busca, sai para o portal.
   document.getElementById('fd-voltar').addEventListener('click', function () {
     if ((location.hash || '').replace('#', '') && history.length > 1) history.back();
-    else location.href = 'portal.html';
+    else location.href = '/portal';
   });
 
   /* carrega os modelos (árvore) e só então liga o router */

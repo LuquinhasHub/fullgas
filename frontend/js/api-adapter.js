@@ -26,6 +26,93 @@
 
   function token() { return localStorage.getItem(TOKEN_KEY) || ''; }
 
+  /* =======================================================================
+     GUARDIÃO DE SESSÃO — expiração por tempo e por inatividade
+     -----------------------------------------------------------------------
+     Problema que isto resolve: o token JWT expira no servidor (8h), mas o
+     front guardava a sessão no localStorage SEM nenhuma validade. Se o
+     usuário deixava o PC ligado e logado, ao voltar (F5) a tela continuava
+     "logada" — mas toda chamada à API respondia 401 e o portal quebrava,
+     sem devolver o usuário ao login.
+
+     Três camadas, todas convergindo para encerrarSessao():
+       1. Validade do token: lemos o claim `exp` do próprio JWT.
+       2. Inatividade: INATIVIDADE_MS sem mouse/teclado/toque encerram a
+          sessão. O carimbo fica no localStorage porque o site tem várias
+          páginas (portal → loja → finder) e um timer em memória zeraria a
+          cada navegação.
+       3. Resposta 401 da API: qualquer chamada autenticada que volte 401
+          encerra a sessão na hora (ver função api(), logo abaixo).
+     ======================================================================= */
+  var INATIVIDADE_MS = 30 * 60 * 1000;          // 30 min sem interação
+  var ATIVIDADE_KEY  = 'fullgas_ultima_atividade';
+  var CHECAGEM_MS    = 30 * 1000;               // varredura periódica
+  var encerrando     = false;                   // trava anti-loop de redirect
+
+  // Lê o claim `exp` (segundos UNIX) de dentro do JWT e devolve em ms.
+  // 0 quando não há token ou o payload é ilegível (idle ainda cobre o caso).
+  function tokenExpiraEm() {
+    var t = token();
+    if (!t) return 0;
+    try {
+      var b64 = t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+      var exp = JSON.parse(atob(b64)).exp;
+      return exp ? exp * 1000 : 0;
+    } catch (e) { return 0; }
+  }
+
+  function marcarAtividade() {
+    try { localStorage.setItem(ATIVIDADE_KEY, String(Date.now())); } catch (e) {}
+  }
+
+  // Devolve o motivo pelo qual a sessão deve ser encerrada, ou null se está OK.
+  // 'expirada' = token venceu; 'inatividade' = tempo ocioso estourado.
+  function motivoEncerramento() {
+    if (!token()) return null;                  // não há sessão a encerrar
+    var exp = tokenExpiraEm();
+    if (exp && Date.now() >= exp) return 'expirada';
+    var ultima = parseInt(localStorage.getItem(ATIVIDADE_KEY) || '0', 10);
+    if (ultima && (Date.now() - ultima) >= INATIVIDADE_MS) return 'inatividade';
+    return null;
+  }
+
+  // Limpa a sessão e volta ao login com o motivo na URL, para que a tela de
+  // login (auth.js) explique ao usuário por que ele foi desconectado.
+  function encerrarSessao(motivo) {
+    if (encerrando) return;
+    encerrando = true;
+    try {
+      localStorage.removeItem(TOKEN_KEY);
+      localStorage.removeItem('fullgas_session_v1');
+      localStorage.removeItem(ADMIN_TOKEN_KEY);
+      localStorage.removeItem(ADMIN_SESS_KEY);
+      localStorage.removeItem(ATIVIDADE_KEY);
+    } catch (e) {}
+    location.href = '/?sessao=' + (motivo || 'expirada');
+  }
+  FG.encerrarSessao = encerrarSessao;
+
+  // FG.guard() (definido em store.js) passa a checar validade, não só presença.
+  var guardBase = FG.guard;
+  FG.guard = function (papel) {
+    var motivo = motivoEncerramento();
+    if (motivo) { encerrarSessao(motivo); return null; }
+    return guardBase ? guardBase.call(FG, papel) : null;
+  };
+
+  // Vigilância só faz sentido quando há sessão. Na tela de login não há token.
+  if (token()) {
+    marcarAtividade();                          // (re)abrir a página conta como atividade
+    ['click', 'keydown', 'mousemove', 'scroll', 'touchstart'].forEach(function (ev) {
+      window.addEventListener(ev, marcarAtividade, { passive: true });
+    });
+    // Pega o PC deixado ligado sem nenhuma chamada de API acontecendo.
+    setInterval(function () {
+      var motivo = motivoEncerramento();
+      if (motivo) encerrarSessao(motivo);
+    }, CHECAGEM_MS);
+  }
+
   // fetch autenticado que devolve JSON (REJEITA em erro HTTP, com a msg da API).
   function api(path, opts) {
     opts = opts || {};
@@ -39,7 +126,12 @@
       body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined
     }).then(function (r) {
       return r.json().catch(function () { return {}; }).then(function (data) {
-        if (!r.ok) throw new Error(data.erro || ('HTTP ' + r.status));
+        if (!r.ok) {
+          // Token vencido/invalidado no servidor: se ainda temos um token
+          // guardado, a sessão morreu — encerra na hora e volta ao login.
+          if (r.status === 401 && token()) encerrarSessao('expirada');
+          throw new Error(data.erro || ('HTTP ' + r.status));
+        }
         return data;
       });
     });
@@ -328,7 +420,7 @@
     if (t && s) {
       localStorage.setItem(TOKEN_KEY, t);
       localStorage.setItem('fullgas_session_v1', s);
-      location.href = destino || 'admin.html';
+      location.href = destino || '/admin';
       return;
     }
     FG.logout();   // sem backup não dá para voltar: cai no login
@@ -364,7 +456,7 @@
     localStorage.removeItem('fullgas_session_v1');
     localStorage.removeItem(ADMIN_TOKEN_KEY);
     localStorage.removeItem(ADMIN_SESS_KEY);
-    location.href = 'index.html';
+    location.href = '/';
   };
 
   // Produtos (admin) — gravações que atualizam o cache no fim. Após gravar,
@@ -399,6 +491,19 @@
   };
   FG.apiExcluirCategoria = function (codigo) {
     return req('DELETE', '/categorias/' + encodeURIComponent(codigo)).then(function (r) {
+      if (!r.ok) return r;
+      return recarregarCategorias().then(function () { return r; });
+    });
+  };
+  // Foto da categoria (miniatura da grade da loja). Recarrega o cache no ok.
+  FG.uploadImagemCategoria = function (codigo, file) {
+    return uploadImagem('/categorias/' + encodeURIComponent(codigo) + '/imagem', file).then(function (r) {
+      if (!r.ok) return r;
+      return recarregarCategorias().then(function () { return r; });
+    });
+  };
+  FG.removerImagemCategoria = function (codigo) {
+    return req('DELETE', '/categorias/' + encodeURIComponent(codigo) + '/imagem').then(function (r) {
       if (!r.ok) return r;
       return recarregarCategorias().then(function () { return r; });
     });
