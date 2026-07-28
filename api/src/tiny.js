@@ -28,6 +28,12 @@ const BASE = 'https://api.tiny.com.br/api2';
 // e exportação de pedido) furam a fila — entram na FRENTE do lote do cron,
 // senão o checkout ficaria minutos atrás de uma rodada de sincronização.
 const INTERVALO_MS = 1100;
+
+// Sem timeout, uma resposta pendurada do Tiny trava a rodada do cron para
+// sempre: a trava `rodando` (tiny-cron.js) só é liberada no `finally`, que
+// nunca chega a rodar. Toda rodada seguinte seria pulada em silêncio.
+const TIMEOUT_MS = Number(process.env.TINY_TIMEOUT_MS || 20000);
+
 const filaEspera = [];   // resolvers aguardando a vez de chamar o Tiny
 let despachando = false;
 let ultimaChamadaEm = 0;
@@ -72,12 +78,27 @@ async function tinyPost(endpoint, params = {}, { prioritario = false } = {}) {
     if (v !== undefined && v !== null && v !== '') body.append(k, String(v));
   }
 
-  const resp = await fetch(`${BASE}/${endpoint}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: body.toString()
-  });
-  if (!resp.ok) throw new TinyError(`Tiny respondeu HTTP ${resp.status}.`);
+  let resp;
+  try {
+    resp = await fetch(`${BASE}/${endpoint}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: body.toString(),
+      signal: AbortSignal.timeout(TIMEOUT_MS)
+    });
+  } catch (e) {
+    // Timeout e falha de rede viram TinyError para cair no mesmo tratamento
+    // que os demais erros do Tiny (log por produto no lote, aviso no checkout).
+    if (e?.name === 'TimeoutError' || e?.name === 'AbortError')
+      throw new TinyError(`Tiny não respondeu em ${TIMEOUT_MS / 1000}s.`);
+    throw new TinyError(`Falha de rede ao chamar o Tiny: ${e.message}`);
+  }
+  if (!resp.ok) {
+    // Descarta o corpo antes de lançar: sem isso o undici segura os buffers e
+    // o socket, e uma rajada de erro do Tiny faz a memória do processo crescer.
+    await resp.body?.cancel().catch(() => {});
+    throw new TinyError(`Tiny respondeu HTTP ${resp.status}.`);
+  }
 
   const data = await resp.json().catch(() => null);
   const ret = data?.retorno;
