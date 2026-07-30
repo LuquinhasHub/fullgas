@@ -213,25 +213,11 @@
     FG.toast('Informe um NIV, número de motor ou selecione um modelo.');
   });
 
-  /* ---------- usage list ---------- */
+  /* ---------- usage list ----------
+     Agora abre uma PÁGINA própria (finder-uso.html): o cliente busca uma peça
+     pelo SKU/descrição e vê todas as seções que a utilizam. */
   document.getElementById('btn-usage').addEventListener('click', function () {
-    var l = [];
-    try { l = JSON.parse(localStorage.getItem(USAGE_KEY) || '[]'); } catch (e) { /* noop */ }
-    var back = document.createElement('div');
-    back.className = 'modal-back';
-    back.innerHTML = '<div class="modal"><header><h3>Usage list</h3><button class="x">×</button></header>' +
-      '<div class="modal-body">' +
-      (l.length ? l.map(function (u) {
-        return '<p><a href="#/modelo/' + esc(u.id) + '/chassi">' + esc(u.label) + '</a>' +
-          ' <span class="muted" style="font-size:11px;">' + FG.fmtDateTime(u.data) + '</span></p>';
-      }).join('') : '<p class="muted">Nenhum modelo consultado ainda.</p>') +
-      '</div></div>';
-    document.body.appendChild(back);
-    back.querySelector('.x').addEventListener('click', function () { back.remove(); });
-    // Clicar fora NÃO fecha — pop-ups só fecham no X (pedido do dono).
-    Array.prototype.forEach.call(back.querySelectorAll('a'), function (a) {
-      a.addEventListener('click', function () { back.remove(); });
-    });
+    location.href = '/finder-uso';
   });
 
   /* miniatura de uma seção: diagrama enviado pelo admin ou moto esquemática */
@@ -316,7 +302,7 @@
       // Cabeçalho (legenda das colunas). Alinha com o grid do .part-row: as
       // duas primeiras colunas (checkbox e nº) ficam sem rótulo.
       var cabecalho = '<div class="part-head">' +
-        '<span></span><span></span>' +
+        '<span></span><span>Nº</span>' +
         '<span>SKU</span><span>Descrição</span>' +
         '<span>Status</span><span>Quantidade</span><span></span></div>';
 
@@ -330,6 +316,12 @@
       }
 
       var linhas = s.pecas.map(function (p, i) {
+        // O número da linha é o "nº na imagem" definido pelo admin — o mesmo que
+        // liga a peça à área clicável do diagrama. NÃO é a posição na tela: uma
+        // contagem sequencial faria a lista parecer fora de ordem para o cliente.
+        // Sem número cadastrado, mostra "—" (a peça não tem área no diagrama).
+        var num = (p.numeroImagem === null || p.numeroImagem === undefined || p.numeroImagem === '')
+          ? '—' : String(p.numeroImagem);
         var marcada = p.quantidadePadrao > 0;
         var indisp = !(p.estoque > 0) && !p.previsao;
         // Em estoque: quantidade limitada ao saldo (mesma regra do carrinho
@@ -340,7 +332,7 @@
         var link = '/loja#/produto/' + encodeURIComponent(p.sku);
         return '<div class="part-row' + (marcada ? ' sel' : '') + '" data-row="' + i + '" data-num="' + esc(p.numeroImagem) + '">' +
           '<input type="checkbox" class="pr-chk" data-row="' + i + '"' + (marcada ? ' checked' : '') + '>' +
-          '<span>' + (i + 1) + '</span>' +
+          '<span class="pr-num">' + esc(num) + '</span>' +
           '<a href="' + link + '" target="_blank" rel="noopener">' + esc(p.sku) + '</a>' +
           '<b><a href="' + link + '" target="_blank" rel="noopener">' + esc(p.nome) + '</a></b>' +
           statusPeca(p) +

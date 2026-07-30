@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Fullgas SpareParts Finder — Usage list</title>
+  <link rel="icon" type="image/png" href="img/favicon.png?v=20260722d">
+  <link rel="apple-touch-icon" href="img/favicon.png?v=20260722d">
+  <link rel="stylesheet" href="css/styles.css?v=20260730a">
+</head>
+<body>
+
+  <div class="finder-top">
+    <div>
+      <button class="btn-voltar" id="uso-voltar" type="button">Voltar</button>
+      <h1>SparePartsFinder</h1>
+      <div class="who" id="uso-who"></div>
+    </div>
+    <div class="finder-top-right">
+      <a class="fd-cart" href="/loja#/carrinho" title="Ir ao carrinho da loja">🛒<span class="cart-n" id="uso-cart-n">0</span></a>
+      <a href="/portal" title="Voltar ao portal" style="text-decoration:none;display:inline-flex;align-items:center;"><img src="img/Fullgas_logo003.png?v=20260730a" alt="FULLGAS" style="height:30px;width:auto;display:block;"></a>
+    </div>
+  </div>
+
+  <a class="btn usage-btn" href="/finder">‹ Voltar ao Finder</a>
+
+  <main class="finder">
+    <div class="usage-page">
+      <!-- Coluna esquerda: filtros de busca por número do artigo / descrição. -->
+      <aside class="usage-filtros">
+        <label for="uso-sku">Article Number</label>
+        <input id="uso-sku" type="text" placeholder="Ex.: A46003053000">
+
+        <label for="uso-desc" style="margin-top:12px;">Article Description</label>
+        <input id="uso-desc" type="text" placeholder="">
+
+        <button class="btn" id="uso-search" type="button" style="margin-top:16px;">Search</button>
+      </aside>
+
+      <!-- Resultado: todas as seções que possuem aquele SKU anexado. -->
+      <section class="usage-result">
+        <div class="usage-result-head">
+          <h2 id="uso-titulo">Search Text:</h2>
+          <div class="usage-quick">
+            <input id="uso-quick" type="text" placeholder="Filtrar resultado…">
+          </div>
+        </div>
+        <div id="uso-tabela"></div>
+      </section>
+    </div>
+  </main>
+
+  <script src="js/config.js?v=20260730a"></script>
+  <script src="js/store.js?v=20260730a"></script>
+  <script src="js/api-adapter.js?v=20260730a"></script>
+  <script src="js/finder-uso.js?v=20260730a"></script>
+</body>
+</html>

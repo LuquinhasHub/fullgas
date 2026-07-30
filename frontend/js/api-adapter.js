@@ -715,6 +715,13 @@
       : 'motor=' + encodeURIComponent(filtro.motor);
     return api('/finder/busca?' + qs);
   };
+  // Usage list: seções que usam uma peça, por SKU e/ou descrição do artigo.
+  FG.finderUso = function (sku, descricao) {
+    var p = [];
+    if (sku) p.push('sku=' + encodeURIComponent(sku));
+    if (descricao) p.push('descricao=' + encodeURIComponent(descricao));
+    return api('/finder/uso?' + p.join('&'));
+  };
 
   // ---- mutações admin (resolvem { ok, ... } — nunca rejeitam) ----
   FG.finderCriarModelo = function (d) { return req('POST', '/finder/modelos', d); };

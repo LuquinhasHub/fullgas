@@ -231,6 +231,48 @@ router.get('/finder/busca', requireAuth, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// GET /api/finder/uso?sku=&descricao= — todas as seções do finder que contêm
+// uma peça, buscada pelo número do artigo (SKU) e/ou pela descrição. Alimenta a
+// tela "Usage list": o cliente digita um SKU e vê em quais modelos/seções ele
+// aparece, com link para abrir a seção. Busca parcial (LIKE) em ambos os campos.
+router.get('/finder/uso', requireAuth, async (req, res, next) => {
+  try {
+    const sku = String(req.query.sku || '').trim();
+    const descricao = String(req.query.descricao || '').trim();
+    if (!sku && !descricao) return res.json([]);
+
+    const cond = [];
+    const params = {};
+    if (sku) { cond.push('p.Sku LIKE @sku'); params.sku = '%' + sku + '%'; }
+    if (descricao) { cond.push('p.Nome LIKE @desc'); params.desc = '%' + descricao + '%'; }
+
+    const rows = await query(
+      `SELECT TOP 500 ps.SecaoId, m.Codigo AS ModeloCodigo, m.Ano, m.Nome AS ModeloNome,
+              m.Etiqueta, m.Categoria, s.Lado, s.Numero, s.Nome AS SecaoNome,
+              p.Sku, p.Nome AS Artigo
+         FROM dbo.PecaSecao ps
+         JOIN dbo.Produto p ON p.ProdutoId = ps.ProdutoId
+         JOIN dbo.SecaoModelo s ON s.SecaoId = ps.SecaoId
+         JOIN dbo.ModeloMoto m ON m.ModeloId = s.ModeloId
+        WHERE ps.Ativo = 1 AND m.Ativo = 1 AND (${cond.join(' AND ')})
+        ORDER BY m.Ano DESC, m.Nome, s.Numero`,
+      params
+    );
+    res.json(rows.map(r => ({
+      secaoId: r.SecaoId,
+      modeloCodigo: r.ModeloCodigo,
+      ano: r.Ano,
+      modeloLabel: r.Etiqueta || (r.ModeloNome + ' ' + r.Ano),
+      categoria: r.Categoria || '',
+      lado: r.Lado,
+      secaoNumero: r.Numero,
+      secaoNome: r.SecaoNome,
+      sku: r.Sku,
+      artigo: r.Artigo
+    })));
+  } catch (e) { next(e); }
+});
+
 // GET /api/finder/modelos/:codigo — modelo + seções agrupadas por lado.
 router.get('/finder/modelos/:codigo', requireAuth, async (req, res, next) => {
   try {
