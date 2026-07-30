@@ -200,6 +200,9 @@
      REIVINDICAÇÕES
      ========================================================= */
   var claimFiltro = 'Em processo';
+  // Sub-aba da seção Reivindicações: 'veiculo' (garantia por NIV) | 'varejo'
+  // (garantia de peça de um pedido). Define a lista mostrada e o "Nova".
+  var claimAba = 'veiculo';
 
   // Rascunhos ("Esboço") vivem no navegador do cliente (localStorage), NÃO no
   // banco. Só viram reivindicação de verdade ao "Enviar".
@@ -225,7 +228,9 @@
   }
 
   function claimsDoFiltro() {
-    var all = FG.all('claims');
+    // Só as da sub-aba ativa (origem). Reivindicações antigas, sem origem, são
+    // tratadas como 'veiculo'.
+    var all = FG.all('claims').filter(function (c) { return (c.origem || 'veiculo') === claimAba; });
     if (claimFiltro === 'Arquivo') return all.filter(function (c) { return c.status === 'Aprovada' || c.status === 'Recusada'; });
     return all.filter(function (c) { return c.status === claimFiltro; });
   }
@@ -240,11 +245,19 @@
     }
     var fPaises = distintos('pais'), fTipos = distintos('tipo'), fStatus = distintos('status');
 
+    var ehVarejo = claimAba === 'varejo';
     var html =
-      '<button class="btn-nova-reiv" id="cl-nova"><span class="plus">＋</span><b>Nova reivindicação</b></button>' +
+      '<div class="claim-subtabs">' +
+      '<button class="claim-subtab' + (!ehVarejo ? ' on' : '') + '" data-aba="veiculo">Garantia de Veículo</button>' +
+      '<button class="claim-subtab' + (ehVarejo ? ' on' : '') + '" data-aba="varejo">Reivindicação de Varejo</button>' +
+      '</div>' +
+      '<button class="btn-nova-reiv" id="cl-nova"><span class="plus">＋</span><b>' +
+      (ehVarejo ? 'Nova reivindicação de varejo' : 'Nova reivindicação') + '</b></button>' +
       '<div class="side-layout">' +
       '<aside class="side-nav"><h2>Reivindicações</h2>' +
-      btnNav('Em processo') + btnNav('Esboço') + btnNav('Arquivo') +
+      // Rascunhos ("Esboço") só existem no fluxo de veículo (guardados no
+      // navegador); a aba de varejo não os mostra.
+      btnNav('Em processo') + (ehVarejo ? '' : btnNav('Esboço')) + btnNav('Arquivo') +
       '</aside>' +
       '<section>' +
       '<div class="toolbar">' +
@@ -275,6 +288,15 @@
 
     Array.prototype.forEach.call(view.querySelectorAll('.side-nav [data-f]'), function (b) {
       b.addEventListener('click', function () { claimFiltro = b.getAttribute('data-f'); renderClaims(); });
+    });
+
+    // Troca de sub-aba (Veículo / Varejo).
+    Array.prototype.forEach.call(view.querySelectorAll('.claim-subtab'), function (b) {
+      b.addEventListener('click', function () {
+        claimAba = b.getAttribute('data-aba');
+        if (claimAba === 'varejo' && claimFiltro === 'Esboço') claimFiltro = 'Em processo';
+        renderClaims();
+      });
     });
 
     // Aba "Esboço": lista os rascunhos do navegador (não vão ao banco).
@@ -339,8 +361,12 @@
           devolvida +
           (c.sentBack ? '<div style="margin-top:6px;"><button class="btn red cl-editar" data-id="' + esc(c.id) + '">Editar e reenviar</button></div>' : '') +
           '</div>' +
-          '<div><span class="cell-label">Tipo</span><span class="cell-value">' + esc(c.tipo) + '</span></div>' +
-          '<div>' + statusBadge(c.status) + '<br><span class="cell-label">NIV</span><a href="#acoes/' + c.niv + '">' + c.niv + '</a></div>' +
+          '<div><span class="cell-label">Tipo</span><span class="cell-value">' + esc(c.origem === 'varejo' ? 'Varejo' : c.tipo) + '</span></div>' +
+          '<div>' + statusBadge(c.status) + '<br>' +
+          (c.origem === 'varejo'
+            ? '<span class="cell-label">Pedido</span><a href="#pedido/' + esc(c.numeroPedido) + '">' + esc(c.numeroPedido) + '</a>'
+            : '<span class="cell-label">NIV</span><a href="#acoes/' + c.niv + '">' + c.niv + '</a>') +
+          '</div>' +
           '<span class="chev">&rsaquo;</span></div>';
       }).join('');
       Array.prototype.forEach.call(box.querySelectorAll('.cl-editar'), function (b) {
@@ -382,7 +408,10 @@
     if (chkAll) chkAll.addEventListener('change', function () {
       Array.prototype.forEach.call(view.querySelectorAll('.cl-sel'), function (x) { x.checked = chkAll.checked; });
     });
-    document.getElementById('cl-nova').addEventListener('click', function () { modalClaim('Manufacturer'); });
+    document.getElementById('cl-nova').addEventListener('click', function () {
+      if (claimAba === 'varejo') modalClaimVarejo();
+      else modalClaim('Manufacturer');
+    });
   }
 
   function modalClaim(tipoPadrao, ctx) {
@@ -683,6 +712,205 @@
     });
   }
 
+  // Modal de NOVA reivindicação de VAREJO: garantia de peça de um PEDIDO. O
+  // revendedor escolhe um pedido seu; a lista de peças oferece SOMENTE os itens
+  // daquele pedido. Sem NIV/prazo. Mesma estrutura (descrição + fotos/vídeos).
+  function modalClaimVarejo() {
+    // Só pedidos de venda (exclui reposições de garantia). Cliente já vê apenas
+    // os seus; admin vê todos.
+    var orders = FG.all('orders').filter(function (o) { return !o.garantia; });
+    var back = document.createElement('div');
+    back.className = 'modal-back';
+    back.innerHTML =
+      '<div class="modal"><header><h3>Nova reivindicação de varejo</h3><button class="x">×</button></header>' +
+      '<div class="modal-body">' +
+      '<div class="field"><label>Pedido *</label><select id="vj-pedido">' +
+      '<option value="">Selecione um pedido…</option>' +
+      orders.map(function (o) {
+        return '<option value="' + esc(o.id) + '">' + esc(o.id) + ' — ' + FG.fmtDate(o.data) + '</option>';
+      }).join('') +
+      '</select>' +
+      (orders.length ? '' : '<div class="muted" style="font-size:11px;margin-top:4px;">Você ainda não tem pedidos de venda.</div>') +
+      '</div>' +
+      '<div class="field"><label>Peça(s) do pedido *</label>' +
+      '<div class="peca-add">' +
+      '<select id="vj-item" disabled><option value="">Escolha o pedido primeiro</option></select>' +
+      '<input id="vj-qtd" type="number" min="1" step="1" value="1" title="Quantidade">' +
+      '<button type="button" class="btn" id="vj-add" disabled>Adicionar</button>' +
+      '</div>' +
+      '<div id="vj-qtd-max" class="muted" style="font-size:11px;margin-top:4px;"></div>' +
+      '<div id="vj-pecas-list" class="pecas-list"></div></div>' +
+      '<div class="field"><label>Descrição do problema *</label><textarea id="vj-desc" rows="4" placeholder="Descreva o defeito constatado..."></textarea></div>' +
+      '<div class="field"><label>Fotos e vídeos da peça defeituosa</label>' +
+      '<input id="vj-fotos" type="file" accept="image/*,video/*" multiple>' +
+      '<div id="vj-fotos-prev" class="media-gallery"></div></div>' +
+      '</div>' +
+      '<div class="modal-foot"><button class="btn red" id="vj-env">Enviar reivindicação</button></div></div>';
+    document.body.appendChild(back);
+
+    function fechar() { back.remove(); }
+    // Só o X fecha (não perde o preenchimento por clique fora) — igual ao veículo.
+    back.querySelector('.x').addEventListener('click', fechar);
+
+    var selPedido = document.getElementById('vj-pedido');
+    var selItem = document.getElementById('vj-item');
+    var btnAdd = document.getElementById('vj-add');
+    var inpQtd = document.getElementById('vj-qtd');
+    var hintQtd = document.getElementById('vj-qtd-max');
+    var pecasBox = document.getElementById('vj-pecas-list');
+    var pecas = [];
+
+    // Itens do pedido escolhido (SKUs disponíveis para reivindicar).
+    function itensDoPedido() {
+      var o = orders.find(function (x) { return x.id === selPedido.value; });
+      return (o && o.itens) || [];
+    }
+
+    // Item atualmente selecionado no seletor de peça (ou null).
+    function itemSelecionado() {
+      var sku = selItem.value;
+      if (!sku) return null;
+      return itensDoPedido().find(function (x) { return x.artigo === sku; }) || null;
+    }
+
+    // Teto = a quantidade comprada daquele item no pedido. Não se pode
+    // reivindicar mais peças do que se comprou. Ajusta o max do campo, o texto
+    // de ajuda e reduz o valor digitado se ele passar do teto.
+    function atualizarMaxQtd() {
+      var it = itemSelecionado();
+      var max = it ? (it.qtd || 1) : 1;
+      inpQtd.max = max;
+      if ((parseInt(inpQtd.value, 10) || 0) > max) inpQtd.value = max;
+      hintQtd.textContent = it
+        ? 'Máximo para esta peça: ' + max + ' un. (quantidade do pedido).'
+        : '';
+    }
+    function renderPecas() {
+      if (!pecas.length) {
+        pecasBox.innerHTML = '<span class="muted" style="font-size:12px;">Nenhuma peça adicionada.</span>';
+        return;
+      }
+      pecasBox.innerHTML = pecas.map(function (p) {
+        return '<div class="peca-row"><span>' + esc(p.sku) + ' — ' + esc(p.nome) +
+          ' <b>×' + p.quantidade + '</b></span>' +
+          '<button type="button" class="peca-del" data-sku="' + esc(p.sku) + '" title="Remover">×</button></div>';
+      }).join('');
+      Array.prototype.forEach.call(pecasBox.querySelectorAll('.peca-del'), function (b) {
+        b.addEventListener('click', function () {
+          var sku = b.getAttribute('data-sku');
+          pecas = pecas.filter(function (x) { return x.sku !== sku; });
+          renderPecas();
+        });
+      });
+    }
+    renderPecas();
+
+    // Trocar o pedido: recarrega os itens no seletor e zera as peças escolhidas.
+    selPedido.addEventListener('change', function () {
+      pecas = []; renderPecas();
+      var itens = itensDoPedido();
+      if (!selPedido.value || !itens.length) {
+        selItem.innerHTML = '<option value="">' + (selPedido.value ? 'Pedido sem itens' : 'Escolha o pedido primeiro') + '</option>';
+        selItem.disabled = true; btnAdd.disabled = true;
+        return;
+      }
+      selItem.innerHTML = itens.map(function (it) {
+        return '<option value="' + esc(it.artigo) + '">' + esc(it.artigo) + ' — ' + esc(it.nome) + '</option>';
+      }).join('');
+      selItem.disabled = false; btnAdd.disabled = false;
+      atualizarMaxQtd();
+    });
+
+    // Trocar a peça atualiza o teto da quantidade; digitar acima do teto corta.
+    selItem.addEventListener('change', atualizarMaxQtd);
+    inpQtd.addEventListener('input', function () {
+      var it = itemSelecionado();
+      var max = it ? (it.qtd || 1) : 1;
+      if ((parseInt(inpQtd.value, 10) || 0) > max) {
+        inpQtd.value = max;
+        FG.toast('Máximo para esta peça: ' + max + ' un. (quantidade do pedido).', 'erro');
+      }
+    });
+
+    document.getElementById('vj-add').addEventListener('click', function () {
+      var sku = selItem.value;
+      if (!sku) { FG.toast('Selecione uma peça do pedido.', 'erro'); return; }
+      var it = itensDoPedido().find(function (x) { return x.artigo === sku; });
+      if (!it) { FG.toast('Peça não pertence ao pedido.', 'erro'); return; }
+      var max = it.qtd || 1;
+      var q = Math.max(1, parseInt(inpQtd.value, 10) || 1);
+      if (q > max) { q = max; FG.toast('Máximo para esta peça: ' + max + ' un. (quantidade do pedido).', 'erro'); }
+      var ex = pecas.find(function (x) { return x.sku === sku; });
+      if (ex) ex.quantidade = q; else pecas.push({ sku: sku, nome: it.nome, quantidade: q });
+      inpQtd.value = '1';
+      renderPecas();
+    });
+
+    // Preview das fotos/vídeos (mesmo comportamento do modal de veículo).
+    var inpFotos = document.getElementById('vj-fotos');
+    var prev = document.getElementById('vj-fotos-prev');
+    inpFotos.addEventListener('change', function () {
+      prev.innerHTML = '';
+      Array.prototype.forEach.call(inpFotos.files, function (f) {
+        var url = URL.createObjectURL(f);
+        var video = f.type.indexOf('video/') === 0 || /\.(mp4|webm|mov|avi|mkv|m4v|3gp|ogv|mpe?g)$/i.test(f.name || '');
+        var item = document.createElement('div');
+        item.className = 'media-item' + (video ? ' is-video' : '');
+        var media = document.createElement(video ? 'video' : 'img');
+        if (video) { media.muted = true; media.preload = 'metadata'; }
+        media.src = url;
+        media.onload = media.onloadeddata = function () { URL.revokeObjectURL(url); };
+        item.appendChild(media);
+        if (video) { var pl = document.createElement('span'); pl.className = 'play'; pl.textContent = '▶'; item.appendChild(pl); }
+        prev.appendChild(item);
+      });
+    });
+
+    document.getElementById('vj-env').addEventListener('click', async function () {
+      var numeroPedido = selPedido.value;
+      var descricao = document.getElementById('vj-desc').value.trim();
+      if (!numeroPedido) { FG.toast('Selecione o pedido.', 'erro'); return; }
+      if (!pecas.length) { FG.toast('Adicione ao menos uma peça do pedido.', 'erro'); return; }
+      if (!descricao) { FG.toast('Descreva o problema.', 'erro'); return; }
+
+      var cortina = document.createElement('div');
+      cortina.className = 'claim-envio';
+      cortina.innerHTML = '<div class="claim-envio-card"><div class="fg-spinner"></div>' +
+        '<p><b>Enviando sua garantia…</b></p></div>';
+      back.appendChild(cortina);
+      var minimo = new Promise(function (r) { setTimeout(r, 1100); });
+
+      var c = await FG.createClaim({
+        origem: 'varejo', numeroPedido: numeroPedido, descricao: descricao,
+        pecas: pecas.map(function (p) { return { sku: p.sku, quantidade: p.quantidade }; }),
+        status: 'Em processo'
+      });
+      if (!c) { cortina.remove(); return; }   // a API já avisou o erro; o form fica intacto
+      if (inpFotos.files && inpFotos.files.length) {
+        var up = await FG.uploadClaimFotos(c.id, inpFotos.files);
+        if (!up.ok) FG.toast(up.msg || 'Salvo, mas falhou o envio das fotos.', 'erro');
+      }
+      await minimo;
+
+      cortina.innerHTML =
+        '<div class="claim-envio-card ok">' +
+        '<div class="claim-ok">✔</div>' +
+        '<h3>Garantia enviada!</h3>' +
+        '<p>Sua reivindicação <b>' + esc(c.id) + '</b> foi registrada e será avaliada por ' +
+        'nossos representantes. Acompanhe o andamento na aba Reivindicações.</p>' +
+        '<button class="btn red" id="vj-ok-fechar">Entendi</button>' +
+        '</div>';
+      function concluir() {
+        if (!back.parentNode) return;
+        fechar();
+        claimAba = 'varejo'; claimFiltro = 'Em processo';
+        renderClaims();
+      }
+      document.getElementById('vj-ok-fechar').addEventListener('click', concluir);
+      setTimeout(concluir, 5000);
+    });
+  }
+
   // Modal de VISUALIZAÇÃO (somente leitura) de uma reivindicação.
   function modalClaimDetalhe(c) {
     var back = document.createElement('div');
@@ -713,12 +941,17 @@
       '<div class="det-grid">' +
       linha('N° da reivindicação', '<b class="cl-num">' + esc(c.id) + '</b>') +
       linha('Status', esc(c.status)) +
-      linha('Tipo', esc(c.tipo)) +
-      linha('NIV', esc(c.niv || '—')) +
-      linha('Criador', esc(c.criador || '—')) +
-      linha('Data da reivindicação', FG.fmtDateTime(c.data)) +
-      linha('Data do ocorrido', c.dataDefeito ? FG.fmtDate(c.dataDefeito) : '—') +
-      linha('Uso', uso.length ? uso.join(' / ') : '—') +
+      (c.origem === 'varejo'
+        ? linha('Origem', 'Varejo (peça de pedido)') +
+          linha('Pedido', '<a href="#pedido/' + esc(c.numeroPedido) + '">' + esc(c.numeroPedido) + '</a>') +
+          linha('Criador', esc(c.criador || '—')) +
+          linha('Data da reivindicação', FG.fmtDateTime(c.data))
+        : linha('Tipo', esc(c.tipo)) +
+          linha('NIV', esc(c.niv || '—')) +
+          linha('Criador', esc(c.criador || '—')) +
+          linha('Data da reivindicação', FG.fmtDateTime(c.data)) +
+          linha('Data do ocorrido', c.dataDefeito ? FG.fmtDate(c.dataDefeito) : '—') +
+          linha('Uso', uso.length ? uso.join(' / ') : '—')) +
       '</div>' +
       '<div class="field"><label>Peça(s) defeituosa(s)</label><div class="pecas-list">' + pecas + '</div></div>' +
       '<div class="field"><label>Descrição</label><div class="cell-value">' + esc(c.descricao || '—') + '</div></div>' +
@@ -840,7 +1073,9 @@
       '<th class="right">Qtd. pedida</th><th class="right">Qtd. enviada</th>' +
       '<th class="right">Preço un.</th><th class="right">Subtotal</th></tr></thead><tbody>' +
       itens.map(function (it) {
-        return '<tr><td>' + dotItem(it, cancelado) + '</td><td>' + esc(it.artigo) + '</td><td>' + esc(it.nome) + '</td>' +
+        return '<tr><td>' + dotItem(it, cancelado) + '</td><td>' + esc(it.artigo) + '</td><td>' + esc(it.nome) +
+          (it.garantiaNumero ? ' <span class="pill-status Garantia" title="Peça com garantia de varejo aprovada">Garantia Nº ' + esc(it.garantiaNumero) + '</span>' : '') +
+          '</td>' +
           '<td class="right">' + it.qtd + '</td><td class="right">' + it.qtdEnviada + '</td>' +
           '<td class="right">' + FG.fmtMoney(it.preco) + '</td>' +
           '<td class="right">' + FG.fmtMoney(it.preco * it.qtd) + '</td></tr>';
@@ -1091,8 +1326,10 @@
   function renderFinanceiro() {
     setCrumb(['Conta financeira', 'Faturas']); setTabOn('financeiro');
     var inv = FG.all('invoices'); // faturas reais (cobrança)
+    // Total faturado: soma só o que ainda cobra. Faturas ANULADAS (pedido
+    // cancelado) permanecem na lista com a tarja, mas NÃO entram no cálculo.
     var faturado = 0;
-    inv.forEach(function (i) { faturado += i.valor; });
+    inv.forEach(function (i) { if (i.status !== 'Anulada') faturado += i.valor; });
 
     // Garantias aprovadas (substituem as antigas "notas de crédito"): as
     // reivindicações do revendedor que o admin já aprovou.
@@ -1222,10 +1459,12 @@
     var pedidos = (i.pedidos || []).length ? (i.pedidos || []).map(esc).join(', ') : '—';
 
     // Estilos inline (o print-area é isolado; nada de classes externas).
-    var thBase = 'text-align:left;padding:7px 6px;border-bottom:2px solid #e5b100;font-size:12px;';
-    var tdBase = 'padding:7px 6px;border-bottom:1px solid #e5e5e5;font-size:12px;vertical-align:top;';
-    var lbl = 'font-size:10px;color:#888;text-transform:uppercase;letter-spacing:.4px;';
-    var val = 'font-size:13px;font-weight:700;color:#222;';
+    // Corpos maiores para leitura confortável no A4 — mesma estrutura, letras
+    // proporcionais ao papel (antes saíam pequenas demais).
+    var thBase = 'text-align:left;padding:9px 8px;border-bottom:2px solid #e5b100;font-size:14px;';
+    var tdBase = 'padding:9px 8px;border-bottom:1px solid #e5e5e5;font-size:14px;vertical-align:top;';
+    var lbl = 'font-size:12px;color:#888;text-transform:uppercase;letter-spacing:.4px;';
+    var val = 'font-size:15px;font-weight:700;color:#222;';
 
     function campo(rotulo, valor) {
       return '<div style="margin-bottom:10px;"><div style="' + lbl + '">' + rotulo + '</div>' +
@@ -1253,7 +1492,7 @@
 
       /* ---- cabeçalho: título + logo ---- */
       '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;">' +
-      '<h1 style="margin:0;font-size:30px;letter-spacing:.5px;">Fatura</h1>' +
+      '<h1 style="margin:0;font-size:36px;letter-spacing:.5px;">Fatura</h1>' +
       logo +
       '</div>' +
 
@@ -1270,9 +1509,9 @@
       /* ---- destinatário ---- */
       '<div style="margin-top:8px;border-top:1px solid #e5e5e5;padding-top:14px;">' +
       '<div style="' + lbl + '">Destinatário da fatura</div>' +
-      '<div style="font-size:14px;font-weight:700;margin-top:3px;">' + nomeEmpresa + '</div>' +
-      (endLinhas ? '<div style="font-size:12px;line-height:1.5;margin-top:2px;">' + endLinhas + '</div>' : '') +
-      (i.cnpj ? '<div style="font-size:12px;margin-top:4px;">CNPJ: ' + esc(i.cnpj) + '</div>' : '') +
+      '<div style="font-size:17px;font-weight:700;margin-top:3px;">' + nomeEmpresa + '</div>' +
+      (endLinhas ? '<div style="font-size:14px;line-height:1.5;margin-top:2px;">' + endLinhas + '</div>' : '') +
+      (i.cnpj ? '<div style="font-size:14px;margin-top:4px;">CNPJ: ' + esc(i.cnpj) + '</div>' : '') +
       '</div>' +
 
       /* ---- itens ---- */
@@ -1301,11 +1540,11 @@
 
       /* ---- total ---- */
       '<div style="display:flex;justify-content:flex-end;margin-top:16px;">' +
-      '<table style="border-collapse:collapse;min-width:280px;">' +
-      '<tr><td style="padding:6px 10px;font-size:13px;">Total de itens</td>' +
-      '<td style="padding:6px 10px;text-align:right;font-size:13px;">' + itens.length + '</td></tr>' +
-      '<tr><td style="padding:10px;font-size:15px;font-weight:800;border-top:2px solid #e5b100;">Total</td>' +
-      '<td style="padding:10px;text-align:right;font-size:15px;font-weight:800;border-top:2px solid #e5b100;">' + FG.fmtMoney(total) + '</td></tr>' +
+      '<table style="border-collapse:collapse;min-width:300px;">' +
+      '<tr><td style="padding:8px 12px;font-size:15px;">Total de itens</td>' +
+      '<td style="padding:8px 12px;text-align:right;font-size:15px;">' + itens.length + '</td></tr>' +
+      '<tr><td style="padding:12px;font-size:19px;font-weight:800;border-top:2px solid #e5b100;">Total</td>' +
+      '<td style="padding:12px;text-align:right;font-size:19px;font-weight:800;border-top:2px solid #e5b100;">' + FG.fmtMoney(total) + '</td></tr>' +
       '</table></div>' +
 
       // Sem rodapé: a nota de "documento demonstrativo gerado em <data>" saiu a

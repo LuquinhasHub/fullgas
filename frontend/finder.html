@@ -20,7 +20,7 @@
     <div class="finder-top-right">
       <!-- mesma cesta da loja: as peças marcadas aqui viram pedido lá -->
       <a class="fd-cart" href="/loja#/carrinho" title="Ir ao carrinho da loja">🛒<span class="cart-n" id="fd-cart-n">0</span></a>
-      <a href="/portal" title="Voltar ao portal" style="text-decoration:none;"><span class="brand"><span class="g-badge">F</span> FULLGAS</span></a>
+      <a href="/portal" title="Voltar ao portal" style="text-decoration:none;display:inline-flex;align-items:center;"><img src="img/Fullgas_logo003.png?v=20260730a" alt="FULLGAS" style="height:30px;width:auto;display:block;"></a>
     </div>
   </div>
 
@@ -53,12 +53,16 @@
 
           <div>
             <label>Select Model</label>
-            <div class="model-select">
-              <div class="ms-box">
-                <input id="ms-input" type="text" readonly placeholder="① FG 125 2025" value="">
-                <button id="ms-open" type="button" aria-label="Abrir árvore de modelos">▾</button>
-              </div>
-              <div class="model-tree" id="model-tree"></div>
+            <!-- Filtro em cascata (Fullgas › Categoria › Ano › Tipo de motor ›
+                 Cilindrada › Etiqueta). Substitui a antiga árvore de modelos:
+                 mesmas informações, porém diretas e sempre funcionais. -->
+            <div class="model-cascade" id="model-cascade">
+              <div class="mc-root">Fullgas</div>
+              <select id="mc-categoria"><option value="">Categoria…</option></select>
+              <select id="mc-ano" disabled><option value="">Ano…</option></select>
+              <select id="mc-tipomotor" disabled><option value="">Tipo de motor…</option></select>
+              <select id="mc-cilindrada" disabled><option value="">Cilindrada…</option></select>
+              <select id="mc-etiqueta" disabled><option value="">Modelo (etiqueta)…</option></select>
             </div>
           </div>
         </div>

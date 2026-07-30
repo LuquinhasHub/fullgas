@@ -612,6 +612,7 @@
   // FG.uploadClaimFotos. Promise<claim|null>.
   FG.createClaim = function (dados) {
     return req('POST', '/reivindicacoes', {
+      origem: dados.origem, numeroPedido: dados.numeroPedido,
       tipo: dados.tipo, niv: dados.niv, descricao: dados.descricao, status: dados.status,
       pecas: dados.pecas, dataDefeito: dados.dataDefeito,
       horimetro: dados.horimetro, quilometragem: dados.quilometragem
@@ -658,6 +659,7 @@
   // devolvida). `dados` no mesmo formato de createClaim. Promise<claim|null>.
   FG.updateClaim = function (numero, dados) {
     return req('PUT', '/reivindicacoes/' + encodeURIComponent(numero), {
+      origem: dados.origem, numeroPedido: dados.numeroPedido,
       tipo: dados.tipo, niv: dados.niv, descricao: dados.descricao,
       pecas: dados.pecas, dataDefeito: dados.dataDefeito,
       horimetro: dados.horimetro, quilometragem: dados.quilometragem

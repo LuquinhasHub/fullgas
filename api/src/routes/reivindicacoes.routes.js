@@ -24,6 +24,10 @@ const STATUS_VALIDOS = ['Em processo', 'Aprovada', 'Recusada'];
 // Estados terminais: não voltam a ser editados pelo cliente.
 const STATUS_TERMINAIS = ['Aprovada', 'Recusada'];
 const TIPOS_VALIDOS = ['Manufacturer', 'Implícito'];
+// Prazo da garantia do VEÍCULO: 90 dias a partir de Veiculo.GarantiaAtivaEm
+// (ativada na venda). Vencido — ou nunca ativada — o chassi não aceita novas
+// reivindicações. O varejo (garantia por pedido) NÃO tem prazo.
+const GARANTIA_DIAS = 90;
 
 // ---- Upload de fotos (multer → disco) -----------------------------------
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -132,10 +136,18 @@ function parseReiv(body, opts) {
 }
 
 // Resolve o veículo (NIV) e valida cada peça no catálogo (dentro de uma tx).
+// Aplica o prazo de garantia: 90 dias a partir de GarantiaAtivaEm. Sem garantia
+// ativada, ou com o prazo vencido, a abertura é barrada.
 async function resolverVeicPecas(tx, niv, pecas) {
   const veic = await new sql.Request(tx).input('niv', sql.VarChar(30), niv)
-    .query('SELECT VeiculoId FROM dbo.Veiculo WHERE Niv = @niv');
+    .query('SELECT VeiculoId, GarantiaAtivaEm FROM dbo.Veiculo WHERE Niv = @niv');
   if (!veic.recordset.length) return { erro: 'Veículo não encontrado: ' + niv };
+  const { VeiculoId, GarantiaAtivaEm } = veic.recordset[0];
+  if (!GarantiaAtivaEm)
+    return { erro: 'Garantia não ativada para este veículo — registre a venda primeiro.' };
+  const limite = new Date(GarantiaAtivaEm).getTime() + GARANTIA_DIAS * 24 * 60 * 60 * 1000;
+  if (Date.now() > limite)
+    return { erro: `Garantia expirada (${GARANTIA_DIAS} dias). Este chassi não aceita novas reivindicações de garantia.` };
   const pecasResolvidas = [];
   for (const p of pecas) {
     const prod = await new sql.Request(tx).input('sku', sql.VarChar(40), p.sku)
@@ -143,7 +155,61 @@ async function resolverVeicPecas(tx, niv, pecas) {
     if (!prod.recordset.length) return { erro: 'Peça não encontrada no catálogo: ' + p.sku };
     pecasResolvidas.push({ sku: p.sku, nome: prod.recordset[0].Nome, quantidade: p.quantidade });
   }
-  return { veiculoId: veic.recordset[0].VeiculoId, pecasResolvidas };
+  return { veiculoId: VeiculoId, pecasResolvidas };
+}
+
+// Varejo: valida o corpo (número do pedido, descrição e peças). Sem NIV/data/
+// horas/km — esses campos não se aplicam à garantia de peça. Devolve { dados }
+// ou { erro }.
+function parseReivVarejo(body) {
+  const numeroPedido = String(body?.numeroPedido || '').trim();
+  const descricao = String(body?.descricao || '').trim();
+  const { pecas, erro } = lerPecas(body);
+  if (erro) return { erro };
+  if (!numeroPedido) return { erro: 'Informe o número do pedido.' };
+  if (!pecas.length) return { erro: 'Informe ao menos uma peça defeituosa do pedido.' };
+  if (!descricao) return { erro: 'Descreva o problema.' };
+  return { dados: { numeroPedido, descricao, pecas } };
+}
+
+// Resolve o pedido (dentro do escopo da empresa) e valida que CADA peça está
+// entre os itens daquele pedido — só o que foi comprado ali pode ter garantia.
+// Pedidos de garantia (reposição) não abrem nova garantia. Devolve o PedidoId e
+// as peças com o nome do snapshot do item.
+async function resolverPedidoPecas(tx, numeroPedido, user, pecas) {
+  const eid = user.papel === 'admin' ? null : user.empresaId;
+  const ped = await new sql.Request(tx)
+    .input('num', sql.VarChar(20), numeroPedido)
+    .input('eid', sql.Int, eid)
+    .query(`SELECT PedidoId, Tipo FROM dbo.Pedido
+             WHERE NumeroPedido = @num AND (@eid IS NULL OR EmpresaId = @eid)`);
+  if (!ped.recordset.length) return { erro: 'Pedido não encontrado: ' + numeroPedido };
+  if (ped.recordset[0].Tipo === 'garantia')
+    return { erro: 'Este pedido é uma reposição de garantia e não abre nova garantia.' };
+  const pedidoId = ped.recordset[0].PedidoId;
+
+  const itens = (await new sql.Request(tx).input('pid', sql.Int, pedidoId)
+    .query('SELECT Sku, NomeProduto, Quantidade FROM dbo.PedidoItem WHERE PedidoId = @pid')).recordset;
+  // Agrega por SKU (o mesmo item pode aparecer em mais de uma linha): guarda o
+  // nome e a quantidade TOTAL comprada — o teto do que pode ser reivindicado.
+  const porSku = new Map();
+  for (const i of itens) {
+    const cur = porSku.get(i.Sku);
+    if (cur) cur.quantidade += i.Quantidade;
+    else porSku.set(i.Sku, { nome: i.NomeProduto, quantidade: i.Quantidade });
+  }
+
+  const pecasResolvidas = [];
+  for (const p of pecas) {
+    const item = porSku.get(p.sku);
+    if (!item)
+      return { erro: `A peça ${p.sku} não está no pedido ${numeroPedido}.` };
+    // Não se pode reivindicar mais peças do que se comprou naquele pedido.
+    if (p.quantidade > item.quantidade)
+      return { erro: `A peça ${p.sku} teve ${item.quantidade} un. no pedido ${numeroPedido}; não é possível reivindicar ${p.quantidade}.` };
+    pecasResolvidas.push({ sku: p.sku, nome: item.nome, quantidade: p.quantidade });
+  }
+  return { pedidoId, pecasResolvidas };
 }
 async function inserirPecas(tx, reivId, pecasResolvidas) {
   for (const p of pecasResolvidas) {
@@ -161,10 +227,12 @@ const SELECT_REIV =
           r.Devolvido, r.Reenviada, r.FaltaInformacao, r.Descricao, r.DataAbertura,
           r.AtualizadoEm, r.DataAprovacao, r.ValorGarantia, r.EmpresaId,
           r.NumeroPeca, r.DataDefeito, r.Horimetro, r.Quilometragem,
+          r.Origem, r.PedidoId, ped.NumeroPedido AS NumeroPedido,
           e.RazaoSocial AS Empresa, v.Niv AS Niv
      FROM dbo.Reivindicacao r
      LEFT JOIN dbo.Empresa e ON e.EmpresaId = r.EmpresaId
-     LEFT JOIN dbo.Veiculo v ON v.VeiculoId = r.VeiculoId`;
+     LEFT JOIN dbo.Veiculo v ON v.VeiculoId = r.VeiculoId
+     LEFT JOIN dbo.Pedido ped ON ped.PedidoId = r.PedidoId`;
 
 // Carrega registros-filho (anexos/peças) agrupados por ReivindicacaoId.
 async function filhosPorReiv(ids, cols, tabela) {
@@ -198,6 +266,8 @@ function montar(r, extras, req) {
     criador: r.Empresa || '',
     pais: r.Pais,
     tipo: r.Tipo,
+    origem: r.Origem || 'veiculo',
+    numeroPedido: r.NumeroPedido || '',
     niv: r.Niv || '',
     status: r.Status,
     preAuth: r.PreAutorizacao ? 'Sim' : 'Não',
@@ -257,8 +327,11 @@ router.get('/reivindicacoes/:numero', requireAuth, async (req, res, next) => {
 });
 
 // POST /api/reivindicacoes — cria (sempre "Em processo", tudo obrigatório).
+// origem='varejo' abre garantia de peça de um PEDIDO (sem NIV/prazo); o padrão
+// 'veiculo' mantém o fluxo por NIV, agora com o prazo de 90 dias.
 router.post('/reivindicacoes', requireAuth, async (req, res, next) => {
-  const { dados, erro } = parseReiv(req.body);
+  const varejo = String(req.body?.origem || '').trim() === 'varejo';
+  const { dados, erro } = varejo ? parseReivVarejo(req.body) : parseReiv(req.body);
   if (erro) return res.status(400).json({ erro });
 
   const pool = await getPool();
@@ -266,7 +339,10 @@ router.post('/reivindicacoes', requireAuth, async (req, res, next) => {
   try {
     await tx.begin();
 
-    const rv = await resolverVeicPecas(tx, dados.niv, dados.pecas);
+    // Resolve alvo (veículo por NIV, ou pedido por número) e valida as peças.
+    const rv = varejo
+      ? await resolverPedidoPecas(tx, dados.numeroPedido, req.user, dados.pecas)
+      : await resolverVeicPecas(tx, dados.niv, dados.pecas);
     if (rv.erro) { await tx.rollback(); return res.status(400).json({ erro: rv.erro }); }
 
     // Numero único de 8 dígitos.
@@ -283,19 +359,23 @@ router.post('/reivindicacoes', requireAuth, async (req, res, next) => {
       .input('num', sql.VarChar(20), numero)
       .input('eid', sql.Int, req.user.empresaId)
       .input('uid', sql.Int, req.user.id)
-      .input('vid', sql.Int, rv.veiculoId)
-      .input('tipo', sql.VarChar(16), dados.tipo)
+      .input('vid', sql.Int, varejo ? null : rv.veiculoId)
+      .input('pid', sql.Int, varejo ? rv.pedidoId : null)
+      .input('origem', sql.VarChar(10), varejo ? 'varejo' : 'veiculo')
+      // Varejo não tem "Tipo" de garantia (Manufacturer/Implícito): grava o
+      // padrão aceito pelo CHECK só para satisfazer a coluna NOT NULL.
+      .input('tipo', sql.VarChar(16), varejo ? 'Manufacturer' : dados.tipo)
       .input('desc', sql.NVarChar(1000), dados.descricao)
       .input('peca', sql.VarChar(40), rv.pecasResolvidas[0]?.sku || null)
-      .input('ddef', sql.Date, dados.dataDefeito)
-      .input('hor', sql.Int, dados.horimetro)
-      .input('km', sql.Int, dados.quilometragem)
+      .input('ddef', sql.Date, varejo ? null : dados.dataDefeito)
+      .input('hor', sql.Int, varejo ? null : dados.horimetro)
+      .input('km', sql.Int, varejo ? null : dados.quilometragem)
       .query(`INSERT INTO dbo.Reivindicacao
-                (Numero, EmpresaId, UsuarioId, VeiculoId, Tipo, Status, Descricao,
-                 NumeroPeca, DataDefeito, Horimetro, Quilometragem)
+                (Numero, EmpresaId, UsuarioId, VeiculoId, PedidoId, Origem, Tipo,
+                 Status, Descricao, NumeroPeca, DataDefeito, Horimetro, Quilometragem)
               OUTPUT inserted.ReivindicacaoId
-              VALUES (@num, @eid, @uid, @vid, @tipo, 'Em processo', @desc,
-                      @peca, @ddef, @hor, @km)`);
+              VALUES (@num, @eid, @uid, @vid, @pid, @origem, @tipo, 'Em processo',
+                      @desc, @peca, @ddef, @hor, @km)`);
     const reivId = ins.recordset[0].ReivindicacaoId;
     await inserirPecas(tx, reivId, rv.pecasResolvidas);
 
@@ -312,10 +392,6 @@ router.post('/reivindicacoes', requireAuth, async (req, res, next) => {
 // admin). Usado quando a reivindicação foi DEVOLVIDA: o revendedor completa e
 // reenvia, o que limpa o estado "devolvido". Bloqueado se já estiver terminal.
 router.put('/reivindicacoes/:numero', requireAuth, async (req, res, next) => {
-  // Tipo é imutável após o 1º envio — não é validado nem alterado aqui.
-  const { dados, erro } = parseReiv(req.body, { comTipo: false });
-  if (erro) return res.status(400).json({ erro });
-
   const pool = await getPool();
   const tx = new sql.Transaction(pool);
   try {
@@ -325,7 +401,7 @@ router.put('/reivindicacoes/:numero', requireAuth, async (req, res, next) => {
     const cur = await new sql.Request(tx)
       .input('num', sql.VarChar(20), req.params.numero)
       .input('eid', sql.Int, eid)
-      .query('SELECT ReivindicacaoId, Status, Devolvido FROM dbo.Reivindicacao WHERE Numero = @num AND (@eid IS NULL OR EmpresaId = @eid)');
+      .query('SELECT ReivindicacaoId, Status, Devolvido, Origem FROM dbo.Reivindicacao WHERE Numero = @num AND (@eid IS NULL OR EmpresaId = @eid)');
     if (!cur.recordset.length) { await tx.rollback(); return res.status(404).json({ erro: 'Reivindicação não encontrada.' }); }
     if (STATUS_TERMINAIS.includes(cur.recordset[0].Status)) {
       await tx.rollback();
@@ -334,21 +410,30 @@ router.put('/reivindicacoes/:numero', requireAuth, async (req, res, next) => {
     const reivId = cur.recordset[0].ReivindicacaoId;
     // Reenvio em resposta a uma devolução → sinaliza ao admin que foi atualizada.
     const reenviada = cur.recordset[0].Devolvido ? 1 : 0;
+    const varejo = cur.recordset[0].Origem === 'varejo';
 
-    const rv = await resolverVeicPecas(tx, dados.niv, dados.pecas);
+    // Tipo é imutável após o 1º envio — não é validado nem alterado aqui.
+    const parsed = varejo ? parseReivVarejo(req.body) : parseReiv(req.body, { comTipo: false });
+    if (parsed.erro) { await tx.rollback(); return res.status(400).json({ erro: parsed.erro }); }
+    const dados = parsed.dados;
+
+    const rv = varejo
+      ? await resolverPedidoPecas(tx, dados.numeroPedido, req.user, dados.pecas)
+      : await resolverVeicPecas(tx, dados.niv, dados.pecas);
     if (rv.erro) { await tx.rollback(); return res.status(400).json({ erro: rv.erro }); }
 
     await new sql.Request(tx)
       .input('id', sql.Int, reivId)
-      .input('vid', sql.Int, rv.veiculoId)
+      .input('vid', sql.Int, varejo ? null : rv.veiculoId)
+      .input('pid', sql.Int, varejo ? rv.pedidoId : null)
       .input('desc', sql.NVarChar(1000), dados.descricao)
       .input('peca', sql.VarChar(40), rv.pecasResolvidas[0]?.sku || null)
-      .input('ddef', sql.Date, dados.dataDefeito)
-      .input('hor', sql.Int, dados.horimetro)
-      .input('km', sql.Int, dados.quilometragem)
+      .input('ddef', sql.Date, varejo ? null : dados.dataDefeito)
+      .input('hor', sql.Int, varejo ? null : dados.horimetro)
+      .input('km', sql.Int, varejo ? null : dados.quilometragem)
       .input('reenv', sql.Bit, reenviada)
       .query(`UPDATE dbo.Reivindicacao
-                 SET VeiculoId=@vid, Descricao=@desc, NumeroPeca=@peca,
+                 SET VeiculoId=@vid, PedidoId=@pid, Descricao=@desc, NumeroPeca=@peca,
                      DataDefeito=@ddef, Horimetro=@hor, Quilometragem=@km,
                      Status='Em processo', Devolvido=0, FaltaInformacao=NULL,
                      Reenviada=@reenv, AtualizadoEm=SYSUTCDATETIME()
@@ -485,7 +570,7 @@ router.put('/reivindicacoes/:numero/status', requireAuth, requireAdmin, async (r
   try {
     await tx.begin();
     const cur = await new sql.Request(tx).input('num', sql.VarChar(20), req.params.numero)
-      .query('SELECT ReivindicacaoId, EmpresaId, UsuarioId, Status FROM dbo.Reivindicacao WHERE Numero = @num');
+      .query('SELECT ReivindicacaoId, Numero, EmpresaId, UsuarioId, Status, Origem, PedidoId FROM dbo.Reivindicacao WHERE Numero = @num');
     if (!cur.recordset.length) { await tx.rollback(); return res.status(404).json({ erro: 'Reivindicação não encontrada.' }); }
     const reiv = cur.recordset[0];
     if (STATUS_TERMINAIS.includes(reiv.Status)) {
@@ -505,6 +590,19 @@ router.put('/reivindicacoes/:numero/status', requireAuth, requireAdmin, async (r
                  WHERE rp.ReivindicacaoId = @rid`);
       valorGarantia = Number(val.recordset[0].Total) || 0;
       pedidoGarantia = await criarPedidoGarantia(tx, reiv);
+
+      // Varejo: registra no PEDIDO ORIGINAL quais peças tiveram garantia
+      // aprovada (grava o nº da reivindicação em cada item reclamado).
+      if (reiv.Origem === 'varejo' && reiv.PedidoId) {
+        await new sql.Request(tx)
+          .input('num', sql.VarChar(20), reiv.Numero)
+          .input('pid', sql.Int, reiv.PedidoId)
+          .input('rid', sql.Int, reiv.ReivindicacaoId)
+          .query(`UPDATE pi SET pi.GarantiaNumero = @num
+                    FROM dbo.PedidoItem pi
+                   WHERE pi.PedidoId = @pid
+                     AND pi.Sku IN (SELECT Sku FROM dbo.ReivindicacaoPeca WHERE ReivindicacaoId = @rid)`);
+      }
     }
 
     await new sql.Request(tx)
