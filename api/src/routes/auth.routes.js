@@ -80,6 +80,10 @@ router.post('/register', async (req, res, next) => {
     if (errEnd) return res.status(400).json({ erro: errEnd });
     const ie = limparIe(req.body.inscricaoEstadual);
 
+    // Padronização: nome do usuário e razão social entram sempre em MAIÚSCULAS.
+    const nomeUp = String(nome).trim().toUpperCase();
+    const empresaUp = String(empresa).trim().toUpperCase();
+
     const existe = await query('SELECT 1 FROM dbo.Usuario WHERE Email = @email', { email });
     if (existe.length) return res.status(409).json({ erro: 'Já existe um usuário com este e-mail.' });
 
@@ -98,7 +102,7 @@ router.post('/register', async (req, res, next) => {
         .query('SELECT EmpresaId FROM dbo.Empresa WHERE Cnpj = @cnpj')).recordset[0];
       if (!empRow) {
         empRow = (await new sql.Request(tx)
-          .input('r', sql.NVarChar(160), empresa)
+          .input('r', sql.NVarChar(160), empresaUp)
           .query('SELECT EmpresaId FROM dbo.Empresa WHERE RazaoSocial = @r')).recordset[0];
       }
 
@@ -121,7 +125,7 @@ router.post('/register', async (req, res, next) => {
                    WHERE EmpresaId = @id`);
       } else {
         empresaId = (await new sql.Request(tx)
-          .input('r', sql.NVarChar(160), empresa)
+          .input('r', sql.NVarChar(160), empresaUp)
           .input('cnpj', sql.VarChar(18), cnpj)
           .input('ie', sql.VarChar(20), ie)
           .input('email', sql.NVarChar(160), email)
@@ -154,7 +158,7 @@ router.post('/register', async (req, res, next) => {
       // (sub-dealers) criadas depois no painel "Minha conta".
       await new sql.Request(tx)
         .input('empresaId', sql.Int, empresaId)
-        .input('nome', sql.NVarChar(120), nome)
+        .input('nome', sql.NVarChar(120), nomeUp)
         .input('email', sql.NVarChar(160), email)
         .input('hash', sql.VarBinary(256), Buffer.from(hash, 'utf8'))
         .query(`INSERT INTO dbo.Usuario (EmpresaId, Nome, Email, SenhaHash, Papel, Status, Gestor)

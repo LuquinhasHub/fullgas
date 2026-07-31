@@ -797,7 +797,8 @@
       '<input id="ct-foto" type="file" accept="image/*">' +
       (cat && cat.imagem ? '<button class="btn-line btn-mini" id="ct-foto-del" type="button">Remover foto</button>' : '') +
       '</div>' +
-      '<p class="muted" style="font-size:12px;margin:4px 0 0;">Opcional. Sem foto, a loja usa o ícone padrão.</p></div>' +
+      '<p class="muted" style="font-size:12px;margin:4px 0 0;">Opcional. Sem foto, a loja usa o ícone padrão.</p>' +
+      '<p class="muted" style="font-size:12px;margin:2px 0 0;">📐 Para caber perfeitamente no círculo, use uma imagem <b>quadrada (proporção 1:1)</b> — ideal 480×480 px (mínimo 240×240 px). Ela é exibida recortada num círculo de 120 px.</p></div>' +
       '</div>' +
       '<div class="modal-foot"><button class="btn-line" id="ct-canc">Cancelar</button>' +
       '<button class="btn-orange" id="ct-ok">' + (novo ? 'Criar' : 'Salvar') + '</button></div></div>';
@@ -1200,7 +1201,8 @@
       if (termo) {
         if (String(c.id || '').toLowerCase().indexOf(termo) < 0 &&
             String(c.criador || '').toLowerCase().indexOf(termo) < 0 &&
-            String(c.niv || '').toLowerCase().indexOf(termo) < 0) return false;
+            String(c.niv || '').toLowerCase().indexOf(termo) < 0 &&
+            String(c.numeroPedido || '').toLowerCase().indexOf(termo) < 0) return false;
       }
       return true;
     });
@@ -1226,7 +1228,9 @@
           '<td><b class="cl-num">' + c.id + '</b></td>' +
           '<td>' + FG.fmtDate(c.data) + '</td>' +
           '<td>' + esc(c.criador) + '</td>' +
-          '<td>' + esc(c.tipo) + '</td>' +
+          '<td>' + (c.origem === 'varejo'
+            ? '<span class="pill-status Tiny">Varejo</span> <span class="muted">' + esc(c.numeroPedido || '') + '</span>'
+            : esc(c.tipo)) + '</td>' +
           '<td>' + pill(c.status) +
           (c.reenviada ? ' <span class="pill-status Reenviada">↩ Devolvida pelo revendedor</span>' : '') +
           (c.sentBack ? ' <span class="pill-status Devolvida">↩ Devolvida</span>' : '') +
@@ -1295,13 +1299,19 @@
       '<div class="det-grid">' +
       linha('N° da reivindicação', '<b class="cl-num">' + esc(c.id) + '</b>') +
       linha('Status', esc(c.status)) +
-      linha('Tipo', esc(c.tipo)) +
-      linha('NIV', esc(c.niv || '—')) +
-      linha('Criador', esc(c.criador || '—')) +
-      linha('Data da reivindicação', FG.fmtDateTime(c.data)) +
-      (c.dataAprovacao ? linha('Data de aprovação', FG.fmtDateTime(c.dataAprovacao)) : '') +
-      linha('Data do ocorrido', c.dataDefeito ? FG.fmtDate(c.dataDefeito) : '—') +
-      linha('Uso', uso.length ? uso.join(' / ') : '—') +
+      (c.origem === 'varejo'
+        ? linha('Origem', 'Varejo (peça de pedido)') +
+          linha('Pedido', '<a href="#pedido/' + esc(c.numeroPedido) + '">' + esc(c.numeroPedido) + '</a>') +
+          linha('Criador', esc(c.criador || '—')) +
+          linha('Data da reivindicação', FG.fmtDateTime(c.data)) +
+          (c.dataAprovacao ? linha('Data de aprovação', FG.fmtDateTime(c.dataAprovacao)) : '')
+        : linha('Tipo', esc(c.tipo)) +
+          linha('NIV', esc(c.niv || '—')) +
+          linha('Criador', esc(c.criador || '—')) +
+          linha('Data da reivindicação', FG.fmtDateTime(c.data)) +
+          (c.dataAprovacao ? linha('Data de aprovação', FG.fmtDateTime(c.dataAprovacao)) : '') +
+          linha('Data do ocorrido', c.dataDefeito ? FG.fmtDate(c.dataDefeito) : '—') +
+          linha('Uso', uso.length ? uso.join(' / ') : '—')) +
       '</div>' +
       '<div class="field"><label>Peça(s) defeituosa(s)</label><div class="pecas-list">' + pecas + '</div></div>' +
       '<div class="field"><label>Descrição</label><div class="cell-value">' + esc(c.descricao || '—') + '</div></div>' +

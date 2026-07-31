@@ -306,6 +306,8 @@ h1, h2, h3 { margin: 0 0 .5em; }
    ========================================================= */
 .topbar { display: flex; align-items: center; gap: 22px; padding: 14px 22px 6px; flex-wrap: wrap; }
 .topbar .logo { font-size: 25px; font-weight: 800; letter-spacing: -.5px; white-space: nowrap; }
+/* Logo em imagem: altura fixa, largura proporcional. */
+img.logo { display: block; height: 38px; width: auto; }
 .topbar .logo span { color: var(--red); }
 .searchbox { display: flex; }
 .searchbox input { width: 340px; max-width: 56vw; padding: 8px 10px; border: 1px solid var(--line); border-right: none; color: #555; }
@@ -347,6 +349,12 @@ h1, h2, h3 { margin: 0 0 .5em; }
 .tabs .drop.open .menu { display: block; }
 .tabs .drop .menu a { display: block; background: none; padding: 9px 16px; color: var(--ink); font-size: 13px; }
 .tabs .drop .menu a:hover { background: #f4f4f4; }
+/* Quebra de linha dentro das abas: o que vem depois cai numa faixa própria,
+   separada por um filete, no fim da barra ("Subdealers" e "Minha conta"). */
+.tabs-quebra {
+  flex-basis: 100%; height: 0; margin-top: 10px;
+  border-top: 1px solid var(--line);
+}
 
 .crumb { padding: 6px 22px 14px; font-size: 13px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .crumb a { color: var(--red); }
@@ -615,7 +623,28 @@ main.finder { padding: 8px 28px 70px; }
 .finder-top-right { display: flex; align-items: center; gap: 22px; }
 .fd-cart { position: relative; font-size: 22px; text-decoration: none; line-height: 1; }
 .fd-cart .cart-n { position: absolute; top: -7px; right: -12px; background: var(--red); color: var(--ink); border-radius: 9px; font-size: 10px; font-weight: 800; padding: 0 5px; }
-.usage-btn { margin: 14px 28px 0 auto; display: block; }
+.usage-btn { margin: 14px 28px 0 auto; display: block; width: max-content; }
+
+/* ---- Usage list (finder-uso.html): busca reversa por SKU ---- */
+.usage-page { display: grid; grid-template-columns: 240px 1fr; gap: 26px; align-items: start; margin-top: 8px; }
+.usage-filtros { display: flex; flex-direction: column; }
+.usage-filtros label { font-size: 12px; color: #888; }
+.usage-filtros input { border: 1px solid #bbb; padding: 8px 10px; font-size: 14px; margin-top: 3px; }
+.usage-result { min-width: 0; border: 1px solid #ddd; }
+.usage-result-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; background: #f2f2f2; border-bottom: 1px solid #ddd; flex-wrap: wrap; }
+.usage-result-head h2 { font-size: 16px; margin: 0; }
+.usage-quick input { border: 1px solid #bbb; padding: 6px 10px; font-size: 13px; min-width: 200px; }
+.usage-table-wrap { overflow-x: auto; }
+.usage-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.usage-table th { text-align: left; padding: 10px 12px; border-bottom: 2px solid #ddd; color: var(--red); white-space: nowrap; font-weight: 700; }
+.usage-table td { padding: 9px 12px; border-bottom: 1px solid #eee; vertical-align: top; }
+.usage-table tbody tr:nth-child(even) { background: #fafafa; }
+.usage-row { cursor: pointer; }
+.usage-row:hover { background: #fff3f3 !important; }
+.usage-go a { color: var(--red); font-weight: 800; text-decoration: none; font-size: 18px; }
+.usage-vazio { padding: 26px 14px; color: #888; text-align: right; }
+.usage-count { padding: 8px 14px; font-size: 12px; }
+@media (max-width: 720px) { .usage-page { grid-template-columns: 1fr; } }
 
 .search-panel { border: 1px solid #ccc; border-bottom: 6px solid #e6e6e6; margin: 16px 0 22px; padding: 14px 26px 22px; position: relative; }
 .search-panel .sp-title { color: var(--red); font-weight: 700; cursor: pointer; background: none; border: none; font-size: 14px; padding: 0; }
@@ -638,6 +667,12 @@ main.finder { padding: 8px 28px 70px; }
 .model-tree .node:hover { background: #f6f6f6; }
 .model-tree .leaf { font-weight: 600; color: var(--ink); }
 .model-tree .leaf:hover { color: var(--red); }
+/* filtro em cascata (Fullgas › Categoria › Ano › ...) — substitui a árvore */
+.model-cascade { display: flex; flex-direction: column; gap: 8px; }
+.model-cascade .mc-root { font-size: 11px; font-weight: 700; color: var(--ink); text-transform: uppercase; letter-spacing: .6px; }
+.model-cascade select { width: 100%; padding: 8px 10px; border: 1px solid var(--line); background: #fff; font-size: 13px; color: var(--ink); }
+.model-cascade select:disabled { background: #f2f2f2; color: #aaa; cursor: not-allowed; }
+.model-cascade select:focus { outline: none; border-color: var(--red); }
 
 .finder-model-name { color: var(--red); font-weight: 600; margin: 6px 0 10px; }
 .finder-links { display: flex; gap: 28px; margin-bottom: 20px; font-size: 13px; flex-wrap: wrap; align-items: center; }
@@ -664,7 +699,9 @@ main.finder { padding: 8px 28px 70px; }
 @media (max-width: 1020px) { .part-layout { grid-template-columns: 1fr; } }
 /* grid compartilhado pela legenda (.part-head) e pelas linhas (.part-row):
    checkbox | nº | SKU | descrição | quantidade | (qtd de referência) */
-.part-head, .part-row { display: grid; grid-template-columns: 26px 26px 150px 1fr 130px 70px 44px; gap: 8px; align-items: center; }
+.part-head, .part-row { display: grid; grid-template-columns: 26px 40px 150px 1fr 130px 70px 44px; gap: 8px; align-items: center; }
+/* nº definido pelo admin (o mesmo da área clicável do diagrama) */
+.part-row .pr-num { font-weight: 700; text-align: center; overflow: hidden; text-overflow: ellipsis; }
 .part-head { padding: 6px 8px; border-bottom: 2px solid #ccc; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: #666; }
 .part-row { border-bottom: 1px solid #e3e3e3; padding: 9px 8px; font-size: 12px; }
 .part-row:nth-child(even) { background: #f6f6f6; }
@@ -850,6 +887,16 @@ main.finder { padding: 8px 28px 70px; }
 .rasc-acoes { display: flex; gap: 8px; align-items: center; }
 
 /* Botão "Nova reivindicação" — compacto, alinhado com os botões de navegação */
+/* Sub-abas da seção Reivindicações (Veículo | Varejo) */
+.claim-subtabs { display: flex; gap: 4px; border-bottom: 2px solid #e6e6e6; margin-bottom: 16px; }
+.claim-subtab {
+  padding: 9px 16px; border: none; background: transparent; cursor: pointer;
+  font-size: 13px; font-weight: 600; color: #777; border-bottom: 2px solid transparent;
+  margin-bottom: -2px; transition: color .12s, border-color .12s;
+}
+.claim-subtab:hover { color: var(--ink); }
+.claim-subtab.on { color: var(--red); border-bottom-color: var(--red); }
+
 .btn-nova-reiv {
   display: inline-flex; align-items: center; gap: 8px; margin-bottom: 18px;
   padding: 8px 14px; border: 1px solid var(--red); border-radius: 8px;

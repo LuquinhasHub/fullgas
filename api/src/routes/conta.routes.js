@@ -186,7 +186,7 @@ router.post('/conta/subdealers', requireAuth, requireGestor, async (req, res, ne
     const hash = await bcrypt.hash(senha, 10);
     const ins = await (await getPool()).request()
       .input('eid', sql.Int, req.user.empresaId)
-      .input('nome', sql.NVarChar(120), nome)
+      .input('nome', sql.NVarChar(120), String(nome).trim().toUpperCase())
       .input('email', sql.NVarChar(160), email)
       .input('hash', sql.VarBinary(256), Buffer.from(hash, 'utf8'))
       .input('perm', sql.VarChar(400), perm)

@@ -69,59 +69,131 @@
     location.hash = '';
     document.getElementById('sp-vin').value = '';
     document.getElementById('sp-eng').value = '';
-    document.getElementById('ms-input').value = '';
+    resetCascade();
     atual = { modelo: null, lado: 'chassi' };
     fdView.innerHTML = '';
     spBody.classList.remove('hidden');
     spToggle.textContent = '▾ Search';
   });
 
-  /* ---------- árvore de modelos (a partir de m.arvore, vinda da API) ------ */
-  var tree = document.getElementById('model-tree');
-  function buildTree() {
-    var root = {};
-    MODELOS.forEach(function (m) {
-      var arvore = (m.arvore && m.arvore.length) ? m.arvore : [m.label];
-      var nivel = root;
-      arvore.forEach(function (nome, i) {
-        nivel[nome] = nivel[nome] || { filhos: {}, folha: null };
-        if (i === arvore.length - 1) nivel[nome].folha = m;
-        nivel = nivel[nome].filhos;
-      });
-    });
-    function nodeHTML(obj, prof) {
-      var html = '';
-      Object.keys(obj).forEach(function (nome) {
-        var n = obj[nome];
-        var temFilhos = Object.keys(n.filhos).length > 0;
-        if (n.folha) {
-          html += '<div class="node leaf" data-id="' + esc(n.folha.id) + '" style="padding-left:' + (10 + prof * 18) + 'px;">' +
-            esc(n.folha.label) + '</div>';
-        } else {
-          html += '<div class="node" style="padding-left:' + (10 + prof * 18) + 'px;"><span class="tw">' +
-            (temFilhos ? '◢' : '') + '</span>' + esc(nome) + '</div>';
-        }
-        if (temFilhos) html += nodeHTML(n.filhos, prof + 1);
-      });
-      return html;
-    }
-    tree.innerHTML = nodeHTML(root, 0) ||
-      '<div class="node muted" style="padding:8px 12px;">Nenhum modelo cadastrado.</div>';
-    Array.prototype.forEach.call(tree.querySelectorAll('.leaf'), function (el) {
-      el.addEventListener('click', function () {
-        tree.classList.remove('open');
-        location.hash = '#/modelo/' + el.getAttribute('data-id') + '/' + atual.lado;
-      });
+  /* ---------- filtro em cascata de modelos ------------------------------
+     Substitui a antiga árvore de seleção por seletores diretos e sempre
+     funcionais: Categoria › Ano › Tipo de motor › Cilindrada › Etiqueta
+     (raiz fixa "Fullgas"). Os quatro primeiros são atributos do modelo
+     (vindos da API); o último lista os modelos que sobraram e resolve o
+     código para navegar — respeitando o lado (Frame/Engine) escolhido. */
+  var CASC = [
+    { id: 'mc-categoria',  campo: 'categoria',  ph: 'Categoria' },
+    { id: 'mc-ano',        campo: 'ano',        ph: 'Ano' },
+    { id: 'mc-tipomotor',  campo: 'tipoMotor',  ph: 'Tipo de motor' },
+    { id: 'mc-cilindrada', campo: 'cilindrada', ph: 'Cilindrada' },
+    { id: 'mc-etiqueta',   campo: 'label',      ph: 'Modelo' } // final: escolhe o modelo
+  ];
+  var FINAL = CASC.length - 1;
+  var sel = [null, null, null, null, null]; // valor escolhido por nível
+  var SEM = '—';                        // rótulo interno p/ atributo vazio (—)
+
+  function elNivel(i) { return document.getElementById(CASC[i].id); }
+  function valNivel(m, campo) {
+    var v = m[campo];
+    return (v === null || v === undefined || v === '') ? SEM : String(v);
+  }
+  function optEl(v, t) { var o = document.createElement('option'); o.value = v; o.textContent = t; return o; }
+  function rotulo(campo, v) {
+    if (v === SEM) return 'Não especificado';
+    if (campo === 'cilindrada' && /^\d+$/.test(v)) return v + ' cc';
+    return v;
+  }
+  // Modelos que casam com as escolhas dos níveis 0..i-1.
+  function modelosAcima(i) {
+    return MODELOS.filter(function (m) {
+      for (var j = 0; j < i; j++) if (valNivel(m, CASC[j].campo) !== sel[j]) return false;
+      return true;
     });
   }
-
-  document.getElementById('ms-open').addEventListener('click', function (e) {
-    e.stopPropagation(); tree.classList.toggle('open');
-  });
-  document.getElementById('ms-input').addEventListener('click', function (e) {
-    e.stopPropagation(); tree.classList.toggle('open');
-  });
-  document.addEventListener('click', function () { tree.classList.remove('open'); });
+  function valoresDistintos(base, campo) {
+    var vistos = {}, out = [];
+    base.forEach(function (m) { var v = valNivel(m, campo); if (!vistos[v]) { vistos[v] = true; out.push(v); } });
+    out.sort(function (a, b) {
+      if (a === SEM) return 1; if (b === SEM) return -1;
+      var na = parseFloat(a), nb = parseFloat(b);
+      if (!isNaN(na) && !isNaN(nb)) return campo === 'ano' ? nb - na : na - nb; // ano: recente primeiro
+      return a.localeCompare(b, 'pt-BR');
+    });
+    return out;
+  }
+  // Preenche as opções do nível i (sem mexer em sel/disabled).
+  function preencherOpcoes(i) {
+    var el = elNivel(i);
+    var base = modelosAcima(i);
+    el.innerHTML = '';
+    el.appendChild(optEl('', CASC[i].ph + '…'));
+    if (i === FINAL) base.forEach(function (m) { el.appendChild(optEl(m.id, m.label)); });
+    else valoresDistintos(base, CASC[i].campo).forEach(function (v) { el.appendChild(optEl(v, rotulo(CASC[i].campo, v))); });
+  }
+  // Zera e desabilita os níveis de i até o fim.
+  function limparAbaixo(i) {
+    for (var k = i; k < CASC.length; k++) {
+      var el = elNivel(k);
+      el.innerHTML = '';
+      el.appendChild(optEl('', CASC[k].ph + '…'));
+      el.value = ''; el.disabled = true; sel[k] = null;
+    }
+  }
+  // Se um nível tem exatamente uma opção real (fora o placeholder), seleciona-a
+  // e segue — evita passos vazios quando o atributo é único ou ausente. Nunca
+  // escolhe o modelo (nível final) sozinho.
+  function autoAvancar(i) {
+    if (i >= FINAL) return;
+    var el = elNivel(i);
+    var reais = Array.prototype.filter.call(el.options, function (o) { return o.value !== ''; });
+    if (reais.length === 1) { el.value = reais[0].value; selecionar(i); }
+  }
+  function selecionar(i) {
+    sel[i] = elNivel(i).value || null;
+    if (i === FINAL) {
+      atual.modelo = sel[i];
+      if (sel[i]) {
+        var lado = document.querySelector('input[name="sp-cat"]:checked').value;
+        location.hash = '#/modelo/' + sel[i] + '/' + lado;
+      }
+      return;
+    }
+    limparAbaixo(i + 1);
+    atual.modelo = null;
+    if (sel[i]) {
+      preencherOpcoes(i + 1);
+      elNivel(i + 1).disabled = false;
+      autoAvancar(i + 1);
+    }
+  }
+  function initCascade() {
+    limparAbaixo(0);
+    preencherOpcoes(0);
+    elNivel(0).disabled = false;
+    CASC.forEach(function (c, i) {
+      elNivel(i).addEventListener('change', function () { selecionar(i); });
+    });
+    autoAvancar(0);
+  }
+  function resetCascade() {
+    limparAbaixo(0);
+    preencherOpcoes(0);
+    elNivel(0).disabled = false;
+    atual.modelo = null;
+    autoAvancar(0);
+  }
+  // Reflete um modelo já resolvido (via VIN, usage list ou rota direta) nos
+  // seletores, para o usuário ver onde está na cascata.
+  function sincronizarCascade(m) {
+    if (!m) return;
+    for (var i = 0; i < CASC.length; i++) {
+      preencherOpcoes(i);
+      var el = elNivel(i);
+      var v = (i === FINAL) ? m.id : valNivel(m, CASC[i].campo);
+      el.value = v; el.disabled = false; sel[i] = v;
+    }
+  }
 
   /* ---------- busca por VIN / número de motor ---------- */
   document.getElementById('sp-search').addEventListener('click', function () {
@@ -141,25 +213,11 @@
     FG.toast('Informe um NIV, número de motor ou selecione um modelo.');
   });
 
-  /* ---------- usage list ---------- */
+  /* ---------- usage list ----------
+     Agora abre uma PÁGINA própria (finder-uso.html): o cliente busca uma peça
+     pelo SKU/descrição e vê todas as seções que a utilizam. */
   document.getElementById('btn-usage').addEventListener('click', function () {
-    var l = [];
-    try { l = JSON.parse(localStorage.getItem(USAGE_KEY) || '[]'); } catch (e) { /* noop */ }
-    var back = document.createElement('div');
-    back.className = 'modal-back';
-    back.innerHTML = '<div class="modal"><header><h3>Usage list</h3><button class="x">×</button></header>' +
-      '<div class="modal-body">' +
-      (l.length ? l.map(function (u) {
-        return '<p><a href="#/modelo/' + esc(u.id) + '/chassi">' + esc(u.label) + '</a>' +
-          ' <span class="muted" style="font-size:11px;">' + FG.fmtDateTime(u.data) + '</span></p>';
-      }).join('') : '<p class="muted">Nenhum modelo consultado ainda.</p>') +
-      '</div></div>';
-    document.body.appendChild(back);
-    back.querySelector('.x').addEventListener('click', function () { back.remove(); });
-    // Clicar fora NÃO fecha — pop-ups só fecham no X (pedido do dono).
-    Array.prototype.forEach.call(back.querySelectorAll('a'), function (a) {
-      a.addEventListener('click', function () { back.remove(); });
-    });
+    location.href = '/finder-uso';
   });
 
   /* miniatura de uma seção: diagrama enviado pelo admin ou moto esquemática */
@@ -176,7 +234,7 @@
     FG.finderModelo(codigo).then(function (m) {
       atual.modelo = m.id; atual.lado = lado;
       logUsage(m);
-      document.getElementById('ms-input').value = m.label;
+      sincronizarCascade(m);
       document.querySelector('input[name="sp-cat"][value="' + (lado === 'engine' ? 'engine' : 'chassi') + '"]').checked = true;
       recolherBusca();
 
@@ -238,13 +296,13 @@
     FG.finderSecao(secaoId).then(function (s) {
       atual.modelo = s.modelo.id; atual.lado = s.lado;
       recolherBusca();
-      document.getElementById('ms-input').value = s.modelo.label;
+      sincronizarCascade(modeloPorCodigo(s.modelo.id));
       var outro = s.lado === 'chassi' ? 'engine' : 'chassi';
 
       // Cabeçalho (legenda das colunas). Alinha com o grid do .part-row: as
       // duas primeiras colunas (checkbox e nº) ficam sem rótulo.
       var cabecalho = '<div class="part-head">' +
-        '<span></span><span></span>' +
+        '<span></span><span>Nº</span>' +
         '<span>SKU</span><span>Descrição</span>' +
         '<span>Status</span><span>Quantidade</span><span></span></div>';
 
@@ -258,6 +316,12 @@
       }
 
       var linhas = s.pecas.map(function (p, i) {
+        // O número da linha é o "nº na imagem" definido pelo admin — o mesmo que
+        // liga a peça à área clicável do diagrama. NÃO é a posição na tela: uma
+        // contagem sequencial faria a lista parecer fora de ordem para o cliente.
+        // Sem número cadastrado, mostra "—" (a peça não tem área no diagrama).
+        var num = (p.numeroImagem === null || p.numeroImagem === undefined || p.numeroImagem === '')
+          ? '—' : String(p.numeroImagem);
         var marcada = p.quantidadePadrao > 0;
         var indisp = !(p.estoque > 0) && !p.previsao;
         // Em estoque: quantidade limitada ao saldo (mesma regra do carrinho
@@ -268,7 +332,7 @@
         var link = '/loja#/produto/' + encodeURIComponent(p.sku);
         return '<div class="part-row' + (marcada ? ' sel' : '') + '" data-row="' + i + '" data-num="' + esc(p.numeroImagem) + '">' +
           '<input type="checkbox" class="pr-chk" data-row="' + i + '"' + (marcada ? ' checked' : '') + '>' +
-          '<span>' + (i + 1) + '</span>' +
+          '<span class="pr-num">' + esc(num) + '</span>' +
           '<a href="' + link + '" target="_blank" rel="noopener">' + esc(p.sku) + '</a>' +
           '<b><a href="' + link + '" target="_blank" rel="noopener">' + esc(p.nome) + '</a></b>' +
           statusPeca(p) +
@@ -502,7 +566,7 @@
   /* carrega os modelos (árvore) e só então liga o router */
   FG.finderModelos().then(function (lista) {
     MODELOS = lista || [];
-    buildTree();
+    initCascade();
     window.addEventListener('hashchange', route);
     route();
   }, function (e) {

@@ -36,7 +36,9 @@ function montarItem(r) {
     preco: Number(r.PrecoUnitario),
     qtd: r.Quantidade,
     qtdEnviada: r.QuantidadeEnviada,
-    backorder: !!r.EmBackorder
+    backorder: !!r.EmBackorder,
+    // Nº da reivindicação de varejo aprovada que atingiu este item (ou null).
+    garantiaNumero: r.GarantiaNumero || null
   };
 }
 
@@ -80,7 +82,7 @@ const SELECT_PEDIDO =
 
 const SELECT_ITENS =
   `SELECT pi.PedidoId, pi.PedidoItemId, pi.Sku, pi.NomeProduto, pi.PrecoUnitario,
-          pi.Quantidade, pi.QuantidadeEnviada, pi.EmBackorder`;
+          pi.Quantidade, pi.QuantidadeEnviada, pi.EmBackorder, pi.GarantiaNumero`;
 
 // Gera a Fatura "original" do pedido: valor cheio (total do pedido, todas as
 // peças, inclusive as em pré-venda) + vínculo PedidoFatura. É o ÚNICO documento
@@ -102,6 +104,23 @@ async function gerarFaturaPedido(tx, pedidoId, empresaId, total) {
 /* Entregas e rastreios foram RETIRADOS do fluxo (não há módulo de entrega no
    projeto): o envio só atualiza itens e status. As tabelas Entrega/Rastreio
    continuam no banco por causa dos pedidos antigos, mas nada novo é gerado. */
+
+// Agenda a exportação 'normal' do pedido de venda ao Tiny, na MESMA transação —
+// mas SÓ na APROVAÇÃO do admin (quando o pedido sai de 'Pendente'), não no
+// checkout. Idempotente: não duplica se já houver uma exportação 'normal', e
+// nada faz se o pedido só tem itens em pré-venda (esses saem por escopo
+// 'backorder' quando liberados). Devolve true se agendou (o chamador dispara
+// processarExportacoes após o commit).
+async function agendarExportacaoNaAprovacao(tx, pedidoId) {
+  const ja = await new sql.Request(tx).input('pid', sql.Int, pedidoId)
+    .query("SELECT 1 FROM dbo.TinyPedidoExport WHERE PedidoId = @pid AND Escopo = 'normal'");
+  if (ja.recordset.length) return false;
+  const temItens = await new sql.Request(tx).input('pid', sql.Int, pedidoId)
+    .query('SELECT TOP 1 1 FROM dbo.PedidoItem WHERE PedidoId = @pid AND EmBackorder = 0');
+  if (!temItens.recordset.length) return false;
+  await inserirExportacao(tx, pedidoId, 'normal');
+  return true;
+}
 
 // GET /api/pedidos — cliente vê os da sua empresa; admin vê todos.
 router.get('/pedidos', requireAuth, async (req, res, next) => {
@@ -313,18 +332,11 @@ router.post('/pedidos', requireAuth, async (req, res, next) => {
     // pré-venda são acompanhadas pelo rastreador de envio (sem cobrança própria).
     await gerarFaturaPedido(tx, pedidoId, req.user.empresaId, total);
 
-    // Agenda a exportação ao Tiny na MESMA transação: ou o pedido nasce com a
-    // exportação agendada, ou nada. Só os itens em estoque — a pré-venda vira
-    // exportação própria quando o admin liberar o envio (escopo 'backorder').
-    if (exportacaoLigada() && itensSnap.some(i => !i.backorder)) {
-      await inserirExportacao(tx, pedidoId, 'normal');
-    }
-
+    // NÃO exporta ao Tiny no checkout: o pedido de venda nasce 'Pendente' e só é
+    // lançado no Tiny quando o ADMIN aprovar (tirar de 'Pendente' em
+    // PUT /pedidos/:numero/status). Aqui o estoque LOCAL já foi segurado; o Tiny
+    // é notificado na aprovação. A checagem de saldo no Tiny (acima) continua.
     await tx.commit();
-
-    // Fire-and-forget: cria e aprova o pedido no Tiny (baixa o estoque lá).
-    // Falha não afeta a resposta — a linha fica 'erro' e o cron re-tenta.
-    processarExportacoes();
 
     const emp = await query('SELECT RazaoSocial FROM dbo.Empresa WHERE EmpresaId = @id', { id: req.user.empresaId });
     const itensEmBackorder = itensSnap.filter(i => i.backorder)
@@ -387,6 +399,9 @@ router.put('/pedidos/:numero/status', requireAuth, requireAdmin, async (req, res
       await tx.rollback();
       return res.status(409).json({ erro: `Pedido ${ped.Status.toLowerCase()} não pode mudar de status.` });
     }
+    // Sair de 'Pendente' (para qualquer estado que não seja 'Cancelado') é a
+    // APROVAÇÃO do admin — o gatilho que exporta o pedido de venda ao Tiny.
+    const eraPendente = ped.Status === 'Pendente';
 
     // ---- Cancelamento ----
     if (status === 'Cancelado') {
@@ -510,9 +525,13 @@ router.put('/pedidos/:numero/status', requireAuth, requireAdmin, async (req, res
       if (exportacaoLigada() && liberados.length) {
         await inserirExportacao(tx, ped.PedidoId, 'backorder', liberados);
       }
+      // Enviar direto um pedido ainda 'Pendente' também é aprovação: exporta o
+      // pedido de venda (itens em estoque) ao Tiny agora.
+      const exportouNormal = eraPendente && exportacaoLigada()
+        ? await agendarExportacaoNaAprovacao(tx, ped.PedidoId) : false;
 
       await tx.commit();
-      if (liberados.length) processarExportacoes(); // fire-and-forget
+      if (liberados.length || exportouNormal) processarExportacoes(); // fire-and-forget
       return res.json({ ok: true, status: novoStatus, parcial: faltam });
     }
 
@@ -522,7 +541,13 @@ router.put('/pedidos/:numero/status', requireAuth, requireAdmin, async (req, res
       .input('st', sql.NVarChar(14), status)  // NVarChar: preserva "Em separação"
       .query('UPDATE dbo.Pedido SET Status = @st, AtualizadoEm = SYSUTCDATETIME() WHERE NumeroPedido = @num');
 
+    // Aprovação do admin: ao tirar o pedido de 'Pendente', exporta o pedido de
+    // venda ao Tiny (uma vez só). Até aqui o pedido só segurava estoque local.
+    const exportouNormal = eraPendente && exportacaoLigada()
+      ? await agendarExportacaoNaAprovacao(tx, ped.PedidoId) : false;
+
     await tx.commit();
+    if (exportouNormal) processarExportacoes(); // fire-and-forget
     res.json({ ok: true, status });
   } catch (e) {
     try { await tx.rollback(); } catch { /* já desfeita */ }

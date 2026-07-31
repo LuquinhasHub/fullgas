@@ -12,7 +12,7 @@
 
   <!-- ====== barra superior ====== -->
   <header class="topbar">
-    <a href="/portal" title="Página principal" style="text-decoration:none;"><span class="logo">Fullgas<span>Net</span></span></a>
+    <a href="/portal" title="Página principal" style="text-decoration:none;"><img src="img/logo-fullgas-nome.png?v=20260729a" alt="FullgasNet" class="logo"></a>
 
     <form class="searchbox" id="search-form">
       <input id="search-input" type="text" placeholder="Pesquisar por NIV, Motos, Artigos">
@@ -30,7 +30,7 @@
     </a>
 
     <span class="spacer"></span>
-    <a href="/portal" title="Página principal" style="text-decoration:none;"><span class="brand"><span class="g-badge">F</span> FULLGAS</span></a>
+    <a href="/portal" title="Página principal" style="text-decoration:none;display:inline-flex;align-items:center;"><img src="img/Fullgas_logo003.png?v=20260730a" alt="FULLGAS" style="height:34px;width:auto;display:block;"></a>
   </header>
 
   <div class="userline">
@@ -57,15 +57,17 @@
     <a href="#acoes" data-rota="acoes">Ações do veículo</a>
     <a href="#estoque" data-rota="estoque">Estoque do revendedor</a>
     <a href="/finder">Parts Finder</a>
+    </div>
+    <!-- Empurra "Subdealers" e "Minha conta" para uma linha própria, separadas do resto. -->
+    <div class="tabs-quebra"></div>
+    <a href="#conta" data-rota="conta">Minha conta</a>
+    <a href="#subdealers" data-rota="subdealers" id="tab-subdealers" class="hidden">Subdealers</a>
     <div class="drop" id="tab-fin">
       <button type="button">Conta financeira</button>
       <div class="menu">
         <a href="#financeiro">Faturas</a>
         <a href="#financeiro">Resumo financeiro</a>
       </div>
-    </div>
-    <a href="#subdealers" data-rota="subdealers" id="tab-subdealers" class="hidden">Subdealers</a>
-    <a href="#conta" data-rota="conta">Minha conta</a>
   </nav>
 
   <div class="crumb" id="crumb"><a href="#home">Página inicial</a></div>
