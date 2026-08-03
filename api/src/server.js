@@ -21,6 +21,7 @@ import reivindicacoesRoutes from './routes/reivindicacoes.routes.js';
 import notificacoesRoutes from './routes/notificacoes.routes.js';
 import finderRoutes from './routes/finder.routes.js';
 import tinyRoutes from './routes/tiny.routes.js';
+import arquivosRoutes from './routes/arquivos.routes.js';
 import { iniciarSincronizacaoAgendada } from './tiny-cron.js';
 
 const app = express();
@@ -96,10 +97,19 @@ app.use(cors({
 // escrito evita que uma mudança futura abra a porta para payload gigante.
 app.use(express.json({ limit: '1mb' }));
 
-// Arquivos enviados (fotos de reivindicação, etc.) servidos estaticamente.
-// O banco guarda a URL relativa (/uploads/...); aqui ela vira acessível.
+// Arquivos enviados. O banco guarda a URL relativa (/uploads/...).
+//
+// ATENÇÃO: só as pastas de CATÁLOGO ficam no estático público — o conteúdo
+// delas é o mesmo para todos os revendedores (foto de produto, de categoria e
+// diagrama do finder). As pastas com material de cliente (reivindicacoes,
+// notificacoes) NÃO entram aqui: saem por /api/arquivos/:tipo/:nome, que
+// confere no banco se o arquivo é mesmo da empresa de quem pediu.
+// Ver api/src/routes/arquivos.routes.js.
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
+const UPLOADS_DIR = path.join(__dirname, '..', 'uploads');
+for (const pasta of ['produtos', 'categorias', 'finder']) {
+  app.use(`/uploads/${pasta}`, express.static(path.join(UPLOADS_DIR, pasta)));
+}
 
 // Log simples de requisições.
 app.use((req, _res, next) => {
@@ -123,6 +133,7 @@ app.use('/api', reivindicacoesRoutes);
 app.use('/api', notificacoesRoutes);
 app.use('/api', finderRoutes);
 app.use('/api', tinyRoutes);
+app.use('/api', arquivosRoutes);
 
 // Frontend estático com URLs LIMPAS (esconder o .html).
 // `extensions: ['html']` faz /portal servir portal.html, /loja → loja.html,

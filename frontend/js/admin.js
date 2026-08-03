@@ -457,12 +457,13 @@
           '<td>' + (n.tipo === 'critica' ? '⚠ Crítica' : 'Aviso') + '</td>' +
           '<td>' + esc(n.titulo) + '</td>' +
           '<td style="font-size:12px;max-width:320px;">' + esc((n.texto || '').slice(0, 140)) + ((n.texto || '').length > 140 ? '…' : '') + '</td>' +
-          '<td>' + (n.anexo ? '<a href="' + esc(n.anexo) + '" target="_blank" rel="noopener">📎 ' + esc(n.anexoTipo || 'anexo') + '</a>' : '<span class="muted">—</span>') + '</td>' +
+          '<td>' + (n.anexo ? '<a data-arquivo="' + esc(n.anexo) + '" target="_blank" rel="noopener">📎 ' + esc(n.anexoTipo || 'anexo') + '</a>' : '<span class="muted">—</span>') + '</td>' +
           '<td><button class="btn-line btn-mini usr-del" data-del="' + n.id + '">Apagar</button></td></tr>';
       }).join('') : '<tr><td colspan="7" class="muted">Nenhuma notificação enviada ainda.</td></tr>') +
       '</tbody></table></div></div>';
 
     bindAcEmpresas('nt-emp');
+    FG.carregarArquivos(view);       // busca os anexos protegidos da tabela
 
     document.getElementById('nt-enviar').addEventListener('click', function () {
       var empEl = document.getElementById('nt-emp');
@@ -1268,12 +1269,14 @@
     var pecas = (c.pecas || []).map(function (p) {
       return '<div class="peca-row"><span>' + esc(p.sku) + ' — ' + esc(p.nome) + ' <b>×' + p.quantidade + '</b></span></div>';
     }).join('') || '<span class="muted">—</span>';
+    // data-arquivo (em vez de src/href): o arquivo é privado e vem por fetch
+    // autenticado. FG.carregarArquivos() preenche depois de montar o HTML.
     function anexoThumb(a) {
       var video = (a.tipo && a.tipo.indexOf('video/') === 0) || /\.(mp4|webm|mov|avi|mkv|m4v|3gp|ogv|mpe?g)$/i.test(a.url || a.nome || '');
       var inner = video
-        ? '<video src="' + esc(a.url) + '" muted preload="metadata"></video><span class="play">▶</span>'
-        : '<img src="' + esc(a.url) + '" alt="' + esc(a.nome || 'foto') + '">';
-      return '<a class="media-item' + (video ? ' is-video' : '') + '" href="' + esc(a.url) + '" target="_blank" rel="noopener">' + inner + '</a>';
+        ? '<video data-arquivo="' + esc(a.url) + '" muted preload="metadata"></video><span class="play">▶</span>'
+        : '<img data-arquivo="' + esc(a.url) + '" alt="' + esc(a.nome || 'foto') + '">';
+      return '<a class="media-item' + (video ? ' is-video' : '') + '" data-arquivo="' + esc(a.url) + '" target="_blank" rel="noopener">' + inner + '</a>';
     }
     var fotos = (c.anexos && c.anexos.length)
       ? '<div class="media-gallery">' + c.anexos.map(anexoThumb).join('') + '</div>'
@@ -1321,6 +1324,7 @@
       '<div style="margin-right:auto;">' + acoes + '</div>' +
       '<button class="btn-line" id="ad-fechar">Fechar</button></div></div>';
     document.body.appendChild(back);
+    FG.carregarArquivos(back);       // busca as fotos/vídeos protegidos
 
     function fechar() { back.remove(); }
     back.querySelector('.x').addEventListener('click', fechar);

@@ -142,6 +142,55 @@
     return api(path).then(function (d) { return d; }, function () { return null; });
   }
 
+  /* =======================================================================
+     ARQUIVOS PROTEGIDOS — fotos de reivindicação e anexos de notificação
+     -----------------------------------------------------------------------
+     Esse material é de cliente: a foto da peça quebrada de uma concessionária
+     não pode ser vista por outra. Ele deixou de ser servido abertamente em
+     /uploads e passou a sair por /api/arquivos/..., que confere no banco de
+     quem é o arquivo.
+
+     O problema: <img src> e <a href> não mandam o cabeçalho de autenticação.
+     Então buscamos o arquivo por fetch (aí o token vai junto) e trocamos a URL
+     por um blob local. O HTML marca esses elementos com data-arquivo em vez de
+     src/href, e quem renderiza chama FG.carregarArquivos() depois.
+     ======================================================================= */
+  var PROTEGIDO_RE = /\/uploads\/(reivindicacoes|notificacoes)\/([A-Za-z0-9._-]+)/;
+  var cacheBlob = {};        // URL original -> Promise<URL de blob>
+
+  function urlBlob(url) {
+    if (cacheBlob[url]) return cacheBlob[url];
+    var m = String(url || '').match(PROTEGIDO_RE);
+    if (!m) return Promise.resolve(url);   // catálogo: continua no estático
+    var headers = { 'ngrok-skip-browser-warning': '1' };
+    if (token()) headers['Authorization'] = 'Bearer ' + token();
+    cacheBlob[url] = fetch(API_BASE + '/arquivos/' + m[1] + '/' + m[2], { headers: headers })
+      .then(function (r) {
+        if (r.status === 401 && token()) encerrarSessao('expirada');
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.blob();
+      })
+      .then(function (b) { return URL.createObjectURL(b); });
+    // Falha não fica grudada no cache: a próxima tentativa refaz a busca.
+    cacheBlob[url]['catch'](function () { delete cacheBlob[url]; });
+    return cacheBlob[url];
+  }
+
+  // Resolve todo elemento com data-arquivo dentro de `raiz` (padrão: a página).
+  // Em <a> preenche href; nos demais (img, video) preenche src.
+  FG.carregarArquivos = function (raiz) {
+    var els = (raiz || document).querySelectorAll('[data-arquivo]');
+    Array.prototype.forEach.call(els, function (el) {
+      var u = el.getAttribute('data-arquivo');
+      el.removeAttribute('data-arquivo');       // não recarrega se rodar de novo
+      urlBlob(u).then(function (b) {
+        if (el.tagName === 'A') el.href = b; else el.src = b;
+      }, function () {
+        el.setAttribute('alt', 'Não foi possível carregar o arquivo');
+      });
+    });
+  };
+
   // Cache em memória que espelha o antigo "db".
   var CACHE = { products: [], categories: [], models: [], vehicles: [],
                 orders: [], claims: [], invoices: [], deliveries: [],
