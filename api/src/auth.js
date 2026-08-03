@@ -4,7 +4,20 @@
 import jwt from 'jsonwebtoken';
 import 'dotenv/config';
 
-const SECRET = process.env.JWT_SECRET || 'dev-secret-trocar';
+// A chave de assinatura NÃO tem valor padrão de propósito. Antes havia um
+// fallback ('dev-secret-trocar'): se a variável faltasse no servidor, a API
+// subia normalmente assinando com uma chave que está publicada no código —
+// qualquer pessoa conseguiria forjar um token de admin. Falhar no boot é ruim;
+// subir inseguro em silêncio é pior.
+const SECRET = process.env.JWT_SECRET || '';
+if (SECRET.length < 32) {
+  console.error(
+    'JWT_SECRET ausente ou curto demais (mínimo de 32 caracteres).\n' +
+    'Defina no .env antes de subir a API. Para gerar uma chave nova:\n' +
+    "  node -e \"console.log(require('crypto').randomBytes(48).toString('base64url'))\""
+  );
+  process.exit(1);
+}
 const EXPIRES = process.env.JWT_EXPIRES || '8h';
 
 // Áreas do site que podem ser restringidas por conta interna (sub-dealer).

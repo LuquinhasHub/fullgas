@@ -3,6 +3,7 @@
 // ============================================================
 import express from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import 'dotenv/config';
@@ -24,24 +25,76 @@ import { iniciarSincronizacaoAgendada } from './tiny-cron.js';
 
 const app = express();
 
+// Atrás do Nginx: confia no X-Forwarded-For para enxergar o IP real do cliente.
+// Sem isto o rate limit abaixo veria 127.0.0.1 para todo mundo e viraria um
+// limite global — o primeiro a estourar bloquearia os demais.
+app.set('trust proxy', 1);
+
+// Headers de segurança (nosniff, X-Frame-Options, Referrer-Policy, HSTS...).
+// O `nosniff` é o mais importante aqui: sem ele o navegador "adivinha" o tipo
+// de um arquivo enviado pelo usuário e pode executar como HTML algo que foi
+// salvo como imagem em /uploads.
+app.use(helmet({
+  // CSP fica DESLIGADA nesta camada de propósito: quem serve o front em
+  // produção é o Nginx, e a política precisa liberar os `style=` inline que o
+  // front gera aos montes via innerHTML. Ligar a CSP padrão do helmet aqui
+  // quebraria as telas. A CSP entra no Nginx, com as diretivas certas.
+  contentSecurityPolicy: false,
+  // As imagens de /uploads são carregadas pelo front, que em desenvolvimento
+  // roda em outra porta (Live Server). O padrão `same-origin` as bloquearia.
+  crossOriginResourcePolicy: { policy: 'cross-origin' }
+}));
+
 // Origens permitidas via CORS_ORIGIN (lista separada por vírgula). Sem a var
-// definida — ou com '*' — libera qualquer origem (modo dev/LAN). Origem não
-// permitida NÃO derruba a resposta: apenas não recebe os headers de CORS (o
-// navegador bloqueia), em vez de virar 500.
-const allowedOrigins = (process.env.CORS_ORIGIN || '')
-  .split(',').map(o => o.trim()).filter(Boolean);
-const liberarTudo = allowedOrigins.length === 0 || allowedOrigins.includes('*');
+// definida, liberamos APENAS origens locais / de rede privada, para o modo dev
+// continuar funcionando sem configuração. Origem não permitida NÃO derruba a
+// resposta: apenas não recebe os headers de CORS (o navegador bloqueia), em vez
+// de virar 500.
+//
+// Por que não liberar tudo: `credentials: true` combinado com origem refletida
+// significa que QUALQUER site da internet poderia chamar esta API com a sessão
+// do usuário logado e ler a resposta. Hoje o token vai num header (o navegador
+// não anexa sozinho), então o estrago seria limitado — mas quando a sessão
+// passar a viajar em cookie isso vira bypass total de autenticação.
+// O curinga '*' era aceito antes e liberava tudo. Não derrubamos a API por
+// causa dele (isso tiraria o site do ar num deploy), mas ele deixa de liberar
+// geral: cai no mesmo modo de quando a variável está vazia (só rede local).
+// Produção não sente, porque lá o front e a API são a MESMA origem — e
+// requisição de mesma origem nem passa pela checagem de CORS.
+const corsBruto = (process.env.CORS_ORIGIN || '').split(',').map(o => o.trim()).filter(Boolean);
+const temCuringa = corsBruto.includes('*');
+const allowedOrigins = corsBruto.filter(o => o !== '*');
+
+if (temCuringa) {
+  console.warn(
+    "⚠ CORS_ORIGIN contém '*' — ignorado. Liberando apenas localhost e rede\n" +
+    '  local. Para permitir uma origem externa (Live Server, ngrok, outro\n' +
+    '  domínio), liste-a explicitamente: CORS_ORIGIN=https://seusite.com'
+  );
+}
+
+// localhost, 127.0.0.1 e as três faixas privadas da RFC 1918.
+const ehOrigemLocal = o =>
+  /^https?:\/\/(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)(:\d+)?$/.test(o);
+
 app.use(cors({
   origin: function (origin, callback) {
-    if (liberarTudo || !origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(null, false);
-    }
+    // Sem Origin = mesma origem, curl, app nativo. Não é caso de CORS.
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+    if (allowedOrigins.length === 0 && ehOrigemLocal(origin)) return callback(null, true);
+    callback(null, false);
   },
-  credentials: true
+  credentials: true,
+  // X-CSRF-Token não é um header "seguro" da lista do CORS: sem declará-lo
+  // aqui, todo preflight de origem cruzada (ex.: Live Server na :5500) falha
+  // assim que o front começar a enviá-lo.
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-CSRF-Token', 'ngrok-skip-browser-warning']
 }));
-app.use(express.json());
+
+// Limite explícito do corpo JSON. O padrão do Express já é 100 kb, mas deixar
+// escrito evita que uma mudança futura abra a porta para payload gigante.
+app.use(express.json({ limit: '1mb' }));
 
 // Arquivos enviados (fotos de reivindicação, etc.) servidos estaticamente.
 // O banco guarda a URL relativa (/uploads/...); aqui ela vira acessível.
@@ -92,6 +145,12 @@ app.use((err, _req, res, _next) => {
   // ao cliente. Qualquer outro erro vira 500 genérico — nada de vazar detalhe.
   if (err && err.publica) {
     return res.status(err.status || 400).json({ erro: err.message });
+  }
+  // Corpo maior que o limite do express.json(): é erro do cliente, não nosso.
+  // Sem este caso o body-parser cairia no 500 genérico abaixo e o front
+  // mostraria "erro interno" para um upload grande demais.
+  if (err && err.type === 'entity.too.large') {
+    return res.status(413).json({ erro: 'Conteúdo grande demais.' });
   }
   console.error('ERRO:', err.message);
   res.status(500).json({ erro: 'Erro interno do servidor.' });
