@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# ============================================================================
+#  Deploy do Fullgas — um único comando faz tudo, na ordem certa.
+#  Uso na VPS (como usuário fullgas, já no grupo docker):
+#      SA_PASSWORD='senha_do_sa' ./deploy.sh
+#  Ou deixe a senha num arquivo fora do git (ex.: ~/.fullgas-deploy.env) e:
+#      source ~/.fullgas-deploy.env && ./deploy.sh
+#
+#  Pré-requisitos (configurados UMA vez — ver README de deploy):
+#    - Nginx servindo direto de /var/www/fullgas-app/frontend
+#    - usuário fullgas no grupo docker  (sudo usermod -aG docker fullgas)
+# ============================================================================
+set -euo pipefail
+
+REPO=/var/www/fullgas-app
+DB_CONTAINER=fullgas-sql
+DB_NAME=FullgasB2B
+PM2_APP=fullgas-api
+SQLCMD=/opt/mssql-tools18/bin/sqlcmd
+
+# A senha do sa NUNCA fica no git — vem de variável de ambiente.
+: "${SA_PASSWORD:?Defina SA_PASSWORD antes de rodar (export SA_PASSWORD=... )}"
+
+cd "$REPO"
+
+echo "==> [1/3] Atualizando código (git) ..."
+git fetch origin
+git reset --hard origin/main          # produção = espelho fiel da main
+
+echo "==> [2/3] Aplicando migrations (são idempotentes, podem rodar sempre) ..."
+for f in database/migrations/*.sql; do
+  echo "        - $(basename "$f")"
+  docker exec -i "$DB_CONTAINER" "$SQLCMD" \
+    -S localhost -U sa -P "$SA_PASSWORD" -C -d "$DB_NAME" < "$f"
+done
+
+echo "==> [3/3] Reiniciando a API ..."
+pm2 restart "$PM2_APP"
+
+echo ""
+echo "==> Deploy concluido. Confira: https://fullgas.app.br"
+echo "    (se algo nao atualizar no navegador, limpe o cache do Cloudflare)"
