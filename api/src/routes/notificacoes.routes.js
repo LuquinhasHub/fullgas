@@ -17,6 +17,7 @@ import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { query } from '../db.js';
 import { requireAuth, requireAdmin } from '../auth.js';
+import { EXT_IMAGEM, EXT_VIDEO, EXT_DOCUMENTO, nomeArquivo, filtroAnexo } from '../middlewares/upload-comum.js';
 
 const router = Router();
 
@@ -27,16 +28,17 @@ const NOTIF_DIR = path.join(UPLOADS_ROOT, 'notificacoes');
 fs.mkdirSync(NOTIF_DIR, { recursive: true });
 const URL_BASE = '/uploads/notificacoes/';
 
+const EXT_ANEXO = [...EXT_IMAGEM, ...EXT_VIDEO, ...EXT_DOCUMENTO];
+
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, NOTIF_DIR),
-  filename: (_req, file, cb) => {
-    const ext = path.extname(file.originalname || '').toLowerCase().slice(0, 10);
-    cb(null, Date.now() + '-' + Math.random().toString(36).slice(2, 10) + ext);
-  }
+  filename: (_req, file, cb) => cb(null, nomeArquivo(file, EXT_ANEXO))
 });
 const upload = multer({
   storage,
-  limits: { fileSize: 60 * 1024 * 1024, files: 1 }  // 60 MB (vídeos curtos)
+  limits: { fileSize: 60 * 1024 * 1024, files: 1 },  // 60 MB (vídeos curtos)
+  // Antes NÃO havia filtro nenhum aqui: qualquer tipo de arquivo entrava.
+  fileFilter: filtroAnexo()
 });
 
 // Wrapper: erros do multer viram 400 com mensagem clara. O anexo é OPCIONAL.

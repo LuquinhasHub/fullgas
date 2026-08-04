@@ -18,6 +18,7 @@ import multer from 'multer';
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { EXT_IMAGEM, nomeArquivo, filtroImagem } from '../middlewares/upload-comum.js';
 import { query, getPool, sql } from '../db.js';
 import { requireAuth, requireAdmin } from '../auth.js';
 
@@ -31,24 +32,15 @@ const UPLOADS_ROOT = path.join(__dirname, '..', '..', 'uploads');
 const FINDER_DIR = path.join(UPLOADS_ROOT, 'finder');
 fs.mkdirSync(FINDER_DIR, { recursive: true });
 const URL_BASE = '/uploads/finder/';
-const IMG_EXT = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.svg'];
 
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, FINDER_DIR),
-  filename: (_req, file, cb) => {
-    const ext = path.extname(file.originalname || '').toLowerCase().slice(0, 10);
-    cb(null, Date.now() + '-' + Math.random().toString(36).slice(2, 10) + ext);
-  }
+  filename: (_req, file, cb) => cb(null, nomeArquivo(file, EXT_IMAGEM))
 });
 const upload = multer({
   storage,
   limits: { fileSize: 15 * 1024 * 1024, files: 1 }, // 15 MB por imagem
-  fileFilter: (_req, file, cb) => {
-    const mime = file.mimetype || '';
-    const ext = path.extname(file.originalname || '').toLowerCase();
-    if (mime.startsWith('image/') || IMG_EXT.includes(ext)) return cb(null, true);
-    cb(new Error('Envie apenas imagens.'));
-  }
+  fileFilter: filtroImagem()
 });
 // Wrapper que transforma erros do multer em 400 com mensagem clara.
 function uploadImagem(req, res, next) {
