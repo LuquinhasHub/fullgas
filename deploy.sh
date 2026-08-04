@@ -23,19 +23,37 @@ SQLCMD=/opt/mssql-tools18/bin/sqlcmd
 
 cd "$REPO"
 
-echo "==> [1/3] Atualizando código (git) ..."
+echo "==> [1/4] Atualizando código (git) ..."
 git fetch origin
 git reset --hard origin/main          # produção = espelho fiel da main
 
-echo "==> [2/3] Aplicando migrations (são idempotentes, podem rodar sempre) ..."
+echo "==> [2/4] Instalando dependencias da API ..."
+# Obrigatorio: quando um commit acrescenta um pacote (helmet, express-rate-limit
+# etc.), sem este passo o `pm2 restart` sobe a API sem a dependencia e ela entra
+# em crash-loop com ERR_MODULE_NOT_FOUND. `npm ci` instala exatamente o que esta
+# no package-lock.json — nao "resolve" versoes por conta propria como o install.
+( cd "$REPO/api" && npm ci --omit=dev )
+
+echo "==> [3/4] Aplicando migrations (são idempotentes, podem rodar sempre) ..."
 for f in database/migrations/*.sql; do
   echo "        - $(basename "$f")"
   docker exec -i "$DB_CONTAINER" "$SQLCMD" \
     -S localhost -U sa -P "$SA_PASSWORD" -C -d "$DB_NAME" < "$f"
 done
 
-echo "==> [3/3] Reiniciando a API ..."
+echo "==> [4/4] Reiniciando a API ..."
 pm2 restart "$PM2_APP"
+
+# A API se recusa a subir sem JWT_SECRET (e outras checagens de configuracao).
+# O pm2 restart nao falha nesses casos — ele reporta sucesso e o processo morre
+# logo depois. Entao conferimos o estado alguns segundos depois.
+sleep 4
+if ! pm2 describe "$PM2_APP" | grep -q "status.*online"; then
+  echo ""
+  echo "!! A API NAO esta online depois do restart."
+  echo "!! Veja o motivo com:  pm2 logs $PM2_APP --lines 30"
+  exit 1
+fi
 
 echo ""
 echo "==> Deploy concluido. Confira: https://fullgas.app.br"
