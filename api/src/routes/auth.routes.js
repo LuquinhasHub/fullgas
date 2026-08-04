@@ -9,6 +9,7 @@ import { signToken, parsePermissoes } from '../auth.js';
 import { erroEndereco, limparIe } from '../validacao.js';
 import { vincularContatoTiny } from '../tiny-contatos.js';
 import { enviarEmail, emailRecuperacaoSenha, appUrl } from '../mail.js';
+import { limiteLogin, limiteSenha, limiteCadastro } from '../middlewares/rate-limit.js';
 
 const router = Router();
 
@@ -19,7 +20,7 @@ const RESET_ESPERA_MS = 60 * 1000;
 const ultimoPedidoReset = new Map();   // email -> timestamp
 
 // POST /api/auth/login  { email, senha }
-router.post('/login', async (req, res, next) => {
+router.post('/login', limiteLogin, async (req, res, next) => {
   try {
     const { email, senha } = req.body;
     if (!email || !senha) return res.status(400).json({ erro: 'Informe e-mail e senha.' });
@@ -35,15 +36,20 @@ router.post('/login', async (req, res, next) => {
     const u = rows[0];
     if (!u) return res.status(401).json({ erro: 'Credenciais inválidas.' });
 
-    if (u.Status === 'pendente')
-      return res.status(403).json({ erro: 'Cadastro aguardando aprovação do administrador.' });
-    if (u.Status === 'bloqueado')
-      return res.status(403).json({ erro: 'Usuário bloqueado. Procure o administrador.' });
-
+    // A SENHA É CONFERIDA ANTES DO STATUS, de propósito. Antes era o
+    // contrário: quem digitasse um e-mail qualquer descobria, sem provar nada,
+    // se aquela conta existia e em que estado estava ("aguardando aprovação",
+    // "bloqueado"). Isso entrega ao atacante uma lista de alvos válidos.
     // SenhaHash é VARBINARY no banco; o bcrypt gera string -> guardamos os bytes da string.
     const hashStr = u.SenhaHash ? Buffer.from(u.SenhaHash).toString('utf8') : '';
     const ok = hashStr && await bcrypt.compare(senha, hashStr);
     if (!ok) return res.status(401).json({ erro: 'Credenciais inválidas.' });
+
+    // Senha correta: agora sim pode saber por que não entra.
+    if (u.Status === 'pendente')
+      return res.status(403).json({ erro: 'Cadastro aguardando aprovação do administrador.' });
+    if (u.Status === 'bloqueado')
+      return res.status(403).json({ erro: 'Usuário bloqueado. Procure o administrador.' });
 
     const token = signToken(u);
     res.json({
@@ -66,7 +72,7 @@ router.post('/login', async (req, res, next) => {
 // pedido exportado ao Tiny sai com os dados do cliente e o admin vê tudo.
 // Após o commit, o CNPJ é atrelado a um contato no Tiny (tiny-contatos.js):
 // existente → vincula; inexistente → cria lá com os dados do cadastro.
-router.post('/register', async (req, res, next) => {
+router.post('/register', limiteCadastro, async (req, res, next) => {
   try {
     const { nome, empresa, email, senha, cnpj, telefone } = req.body;
     const end = req.body.endereco || {};
@@ -222,7 +228,7 @@ async function tokenValido(tokenCru) {
 // possível descobrir quais e-mails têm conta aqui. Aceitável neste portal
 // fechado (concessionárias cadastradas e aprovadas a dedo) e a janela mínima
 // entre pedidos evita varredura em massa pela mesma origem.
-router.post('/senha/esqueci', async (req, res, next) => {
+router.post('/senha/esqueci', limiteSenha, async (req, res, next) => {
   const enviado = {
     ok: true,
     msg: 'Enviamos as instruções para o seu e-mail. Confira também o spam.'

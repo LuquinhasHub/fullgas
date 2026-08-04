@@ -173,11 +173,13 @@
     if (!list.length) html += '<p class="muted">Nenhuma notificação.</p>';
     list.forEach(function (n) {
       // Anexo enviado pelo admin: imagem inline, vídeo com player ou link.
+      // data-arquivo em vez de src/href — o anexo é privado e vem por fetch
+      // autenticado (FG.carregarArquivos, chamado depois de montar a lista).
       var anexo = '';
       if (n.anexo) {
-        if (n.anexoTipo === 'imagem') anexo = '<img class="nt-img" src="' + esc(n.anexo) + '" alt="Anexo" loading="lazy">';
-        else if (n.anexoTipo === 'video') anexo = '<video class="nt-video" src="' + esc(n.anexo) + '" controls preload="metadata"></video>';
-        else anexo = '<a class="link-action" href="' + esc(n.anexo) + '" target="_blank" rel="noopener">📎 Abrir anexo</a>';
+        if (n.anexoTipo === 'imagem') anexo = '<img class="nt-img" data-arquivo="' + esc(n.anexo) + '" alt="Anexo" loading="lazy">';
+        else if (n.anexoTipo === 'video') anexo = '<video class="nt-video" data-arquivo="' + esc(n.anexo) + '" controls preload="metadata"></video>';
+        else anexo = '<a class="link-action" data-arquivo="' + esc(n.anexo) + '" target="_blank" rel="noopener">📎 Abrir anexo</a>';
       }
       html += '<div class="notif ' + n.tipo + (n.lida ? '' : ' unread') + '">' +
         '<div class="nt-body"><div class="nt-title">' + (n.tipo === 'critica' ? '⚠ ' : '') + esc(n.titulo) + '</div>' +
@@ -188,6 +190,7 @@
         '</div>';
     });
     view.innerHTML = html;
+    FG.carregarArquivos(view);       // busca os anexos protegidos
     Array.prototype.forEach.call(view.querySelectorAll('[data-id]'), function (b) {
       b.addEventListener('click', function () {
         FG.markNotif(b.getAttribute('data-id'), b.getAttribute('data-lida') === 'true');
@@ -921,12 +924,14 @@
     var pecas = (c.pecas || []).map(function (p) {
       return '<div class="peca-row"><span>' + esc(p.sku) + ' — ' + esc(p.nome) + ' <b>×' + p.quantidade + '</b></span></div>';
     }).join('') || '<span class="muted">—</span>';
+    // data-arquivo (em vez de src/href): o arquivo é privado e vem por fetch
+    // autenticado. FG.carregarArquivos() preenche depois de montar o HTML.
     function anexoThumb(a) {
       var video = (a.tipo && a.tipo.indexOf('video/') === 0) || /\.(mp4|webm|mov|avi|mkv|m4v|3gp|ogv|mpe?g)$/i.test(a.url || a.nome || '');
       var inner = video
-        ? '<video src="' + esc(a.url) + '" muted preload="metadata"></video><span class="play">▶</span>'
-        : '<img src="' + esc(a.url) + '" alt="' + esc(a.nome || 'foto') + '">';
-      return '<a class="media-item' + (video ? ' is-video' : '') + '" href="' + esc(a.url) + '" target="_blank" rel="noopener">' + inner + '</a>';
+        ? '<video data-arquivo="' + esc(a.url) + '" muted preload="metadata"></video><span class="play">▶</span>'
+        : '<img data-arquivo="' + esc(a.url) + '" alt="' + esc(a.nome || 'foto') + '">';
+      return '<a class="media-item' + (video ? ' is-video' : '') + '" data-arquivo="' + esc(a.url) + '" target="_blank" rel="noopener">' + inner + '</a>';
     }
     var fotos = (c.anexos && c.anexos.length)
       ? '<div class="media-gallery">' + c.anexos.map(anexoThumb).join('') + '</div>'
@@ -961,6 +966,7 @@
       (c.sentBack ? '<button class="btn red" id="det-editar">Editar e reenviar</button>' : '') +
       '<button class="btn-line" id="det-fechar">Fechar</button></div></div>';
     document.body.appendChild(back);
+    FG.carregarArquivos(back);       // busca as fotos/vídeos protegidos
     function fechar() { back.remove(); }
     back.querySelector('.x').addEventListener('click', fechar);
     document.getElementById('det-fechar').addEventListener('click', fechar);

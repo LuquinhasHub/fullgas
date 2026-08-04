@@ -70,12 +70,26 @@ function obterTransporte() {
 // Nunca lança por falta de configuração; lança só em erro real de SMTP.
 export async function enviarEmail({ para, assunto, texto, html }) {
   if (!mailConfigurado()) {
-    console.warn(
-      '\n──────── E-MAIL NÃO ENVIADO (SMTP não configurado) ────────\n' +
-      `Para:    ${para}\nAssunto: ${assunto}\n\n${texto}\n` +
-      '───────────────────────────────────────────────────────────\n' +
-      'Defina SMTP_HOST/SMTP_PORT/SMTP_USER/SMTP_PASS no api/.env para enviar de verdade.\n'
-    );
+    // Em DESENVOLVIMENTO despejamos o e-mail inteiro no console — é assim que
+    // se testa a recuperação de senha sem servidor SMTP.
+    //
+    // Em PRODUÇÃO isso seria um vazamento grave: o corpo do e-mail de
+    // recuperação contém o link COM o token, válido por uma hora. Se a API
+    // subisse sem SMTP_HOST, qualquer pessoa com acesso ao log do PM2
+    // conseguiria trocar a senha de qualquer conta. Então lá o corpo não sai.
+    if (process.env.NODE_ENV === 'production') {
+      console.error(
+        `E-MAIL NÃO ENVIADO para ${para} ("${assunto}"): SMTP não configurado. ` +
+        'Defina SMTP_HOST/SMTP_PORT/SMTP_USER/SMTP_PASS no .env do servidor.'
+      );
+    } else {
+      console.warn(
+        '\n──────── E-MAIL NÃO ENVIADO (SMTP não configurado) ────────\n' +
+        `Para:    ${para}\nAssunto: ${assunto}\n\n${texto}\n` +
+        '───────────────────────────────────────────────────────────\n' +
+        'Defina SMTP_HOST/SMTP_PORT/SMTP_USER/SMTP_PASS no api/.env para enviar de verdade.\n'
+      );
+    }
     return { enviado: false };
   }
   await obterTransporte().sendMail({

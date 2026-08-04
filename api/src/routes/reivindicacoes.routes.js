@@ -13,6 +13,7 @@ import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { query, getPool, sql } from '../db.js';
 import { requireAuth, requireAdmin } from '../auth.js';
+import { EXT_IMAGEM, EXT_VIDEO, nomeArquivo, filtroMidia } from '../middlewares/upload-comum.js';
 import {
   exportacaoLigada, atualizarEstoqueCesta, inserirExportacao, processarExportacoes
 } from '../tiny-pedidos.js';
@@ -34,34 +35,27 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const UPLOAD_DIR = path.join(__dirname, '..', '..', 'uploads', 'reivindicacoes');
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 const URL_BASE = '/uploads/reivindicacoes/';
-// Extensões aceitas — fallback quando o navegador não informa o mimetype
-// (envia 'application/octet-stream' ou vazio), o que é comum com vídeos.
-const EXT_OK = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.heic', '.heif',
-  '.mp4', '.webm', '.mov', '.avi', '.mkv', '.m4v', '.3gp', '.ogv', '.ogg', '.mpg', '.mpeg'];
+
+// Antes eram 200 MB por arquivo — número que nunca valeu na prática: o Nginx
+// da produção corta o corpo em 64 MB, então o revendedor levava um 413 seco do
+// servidor em vez de uma mensagem explicando. 60 MB alinha os dois e ainda
+// limita o estrago de um envio abusivo (10 arquivos = 600 MB no pior caso).
+const LIMITE_BYTES = 60 * 1024 * 1024;
 
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, UPLOAD_DIR),
-  filename: (_req, file, cb) => {
-    const ext = path.extname(file.originalname || '').toLowerCase().slice(0, 10);
-    cb(null, Date.now() + '-' + Math.random().toString(36).slice(2, 10) + ext);
-  }
+  filename: (_req, file, cb) => cb(null, nomeArquivo(file, [...EXT_IMAGEM, ...EXT_VIDEO]))
 });
 const upload = multer({
   storage,
-  limits: { fileSize: 200 * 1024 * 1024, files: 10 }, // 200 MB por arquivo, até 10
-  fileFilter: (_req, file, cb) => {
-    const mime = file.mimetype || '';
-    const ext = path.extname(file.originalname || '').toLowerCase();
-    // Aceita imagens/vídeos por mimetype OU por extensão (cobre mimetype vazio).
-    if (mime.startsWith('image/') || mime.startsWith('video/') || EXT_OK.includes(ext)) return cb(null, true);
-    cb(new Error('Envie apenas imagens ou vídeos.'));
-  }
+  limits: { fileSize: LIMITE_BYTES, files: 10 },
+  fileFilter: filtroMidia()
 });
 // Wrapper que transforma erros do multer em 400 com mensagem clara.
 function uploadFotos(req, res, next) {
   upload.array('fotos', 10)(req, res, (err) => {
     if (err) {
-      const msg = err.code === 'LIMIT_FILE_SIZE' ? 'Arquivo muito grande (máximo 200 MB por arquivo).'
+      const msg = err.code === 'LIMIT_FILE_SIZE' ? 'Arquivo muito grande (máximo 60 MB por arquivo).'
         : err.code === 'LIMIT_FILE_COUNT' ? 'Máximo de 10 arquivos por envio.'
           : (err.message || 'Falha no upload.');
       return res.status(400).json({ erro: msg });

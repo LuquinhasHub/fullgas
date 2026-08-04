@@ -7,6 +7,7 @@ import multer from 'multer';
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { EXT_IMAGEM, nomeArquivo, filtroImagem } from './upload-comum.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const CAT_DIR = path.join(__dirname, '..', '..', 'uploads', 'categorias');
@@ -16,23 +17,13 @@ fs.mkdirSync(CAT_DIR, { recursive: true });
 // service para montar o caminho gravado no banco.
 export const CAT_URL_BASE = '/uploads/categorias/';
 
-const IMG_EXT = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.svg'];
-
 const uploadCat = multer({
   storage: multer.diskStorage({
     destination: (_req, _file, cb) => cb(null, CAT_DIR),
-    filename: (_req, file, cb) => {
-      const ext = path.extname(file.originalname || '').toLowerCase().slice(0, 10);
-      cb(null, Date.now() + '-' + Math.random().toString(36).slice(2, 10) + ext);
-    }
+    filename: (_req, file, cb) => cb(null, nomeArquivo(file, EXT_IMAGEM))
   }),
   limits: { fileSize: 15 * 1024 * 1024, files: 1 },
-  fileFilter: (_req, file, cb) => {
-    const mime = file.mimetype || '';
-    const ext = path.extname(file.originalname || '').toLowerCase();
-    if (mime.startsWith('image/') || IMG_EXT.includes(ext)) return cb(null, true);
-    cb(new Error('Envie apenas imagens.'));
-  }
+  fileFilter: filtroImagem()
 });
 
 // Recebe o campo multipart "imagem" e traduz erros do multer em 400 legível.
