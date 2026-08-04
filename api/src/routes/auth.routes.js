@@ -36,15 +36,20 @@ router.post('/login', limiteLogin, async (req, res, next) => {
     const u = rows[0];
     if (!u) return res.status(401).json({ erro: 'Credenciais inválidas.' });
 
-    if (u.Status === 'pendente')
-      return res.status(403).json({ erro: 'Cadastro aguardando aprovação do administrador.' });
-    if (u.Status === 'bloqueado')
-      return res.status(403).json({ erro: 'Usuário bloqueado. Procure o administrador.' });
-
+    // A SENHA É CONFERIDA ANTES DO STATUS, de propósito. Antes era o
+    // contrário: quem digitasse um e-mail qualquer descobria, sem provar nada,
+    // se aquela conta existia e em que estado estava ("aguardando aprovação",
+    // "bloqueado"). Isso entrega ao atacante uma lista de alvos válidos.
     // SenhaHash é VARBINARY no banco; o bcrypt gera string -> guardamos os bytes da string.
     const hashStr = u.SenhaHash ? Buffer.from(u.SenhaHash).toString('utf8') : '';
     const ok = hashStr && await bcrypt.compare(senha, hashStr);
     if (!ok) return res.status(401).json({ erro: 'Credenciais inválidas.' });
+
+    // Senha correta: agora sim pode saber por que não entra.
+    if (u.Status === 'pendente')
+      return res.status(403).json({ erro: 'Cadastro aguardando aprovação do administrador.' });
+    if (u.Status === 'bloqueado')
+      return res.status(403).json({ erro: 'Usuário bloqueado. Procure o administrador.' });
 
     const token = signToken(u);
     res.json({
