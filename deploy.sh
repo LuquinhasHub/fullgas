@@ -9,13 +9,19 @@
 #  Pré-requisitos (configurados UMA vez — ver README de deploy):
 #    - Nginx servindo direto de /var/www/fullgas-app/frontend
 #    - usuário fullgas no grupo docker  (sudo usermod -aG docker fullgas)
+#    - permissão para reiniciar a API sem senha. Como root, rode:
+#        echo 'fullgas ALL=(root) NOPASSWD: /usr/bin/systemctl restart fullgas-api' \
+#          > /etc/sudoers.d/fullgas-deploy && chmod 440 /etc/sudoers.d/fullgas-deploy
+#
+#  NOTA: só o systemd gerencia a API. O pm2 NÃO é usado (havia os dois
+#  configurados, brigando pela porta 3000 — ver comentário no passo 4).
 # ============================================================================
 set -euo pipefail
 
 REPO=/var/www/fullgas-app
 DB_CONTAINER=fullgas-sql
 DB_NAME=FullgasB2B
-PM2_APP=fullgas-api
+SERVICO=fullgas-api          # unidade systemd (NAO e' o pm2 — ver nota abaixo)
 SQLCMD=/opt/mssql-tools18/bin/sqlcmd
 
 # A senha do sa NUNCA fica no git — vem de variável de ambiente.
@@ -42,16 +48,20 @@ for f in database/migrations/*.sql; do
 done
 
 echo "==> [4/4] Reiniciando a API ..."
-pm2 restart "$PM2_APP"
+# ATENCAO: quem roda a API e' o SYSTEMD, nao o pm2. Ate 2026-08-04 este script
+# terminava com `pm2 restart`, que reiniciava um processo que nem estava
+# atendendo (o systemd ja segurava a porta 3000). Resultado: o deploy dizia
+# "concluido" e a producao seguia com o codigo antigo por mais de um dia.
+sudo systemctl restart "$SERVICO"
 
-# A API se recusa a subir sem JWT_SECRET (e outras checagens de configuracao).
-# O pm2 restart nao falha nesses casos — ele reporta sucesso e o processo morre
-# logo depois. Entao conferimos o estado alguns segundos depois.
+# A API se recusa a subir sem JWT_SECRET valido (e outras checagens de config).
+# Nesses casos o processo morre logo depois de iniciar, entao conferimos o
+# estado alguns segundos depois em vez de confiar no retorno do restart.
 sleep 4
-if ! pm2 describe "$PM2_APP" | grep -q "status.*online"; then
+if ! systemctl is-active --quiet "$SERVICO"; then
   echo ""
-  echo "!! A API NAO esta online depois do restart."
-  echo "!! Veja o motivo com:  pm2 logs $PM2_APP --lines 30"
+  echo "!! A API NAO esta ativa depois do restart."
+  echo "!! Veja o motivo com:  sudo journalctl -u $SERVICO -n 40 --no-pager"
   exit 1
 fi
 
