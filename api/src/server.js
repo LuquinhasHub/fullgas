@@ -4,11 +4,13 @@
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
+import cookieParser from 'cookie-parser';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import 'dotenv/config';
 
 import { getPool } from './db.js';
+import { carregarSessao, csrfProtect } from './auth.js';
 import authRoutes from './routes/auth.routes.js';
 import usuariosRoutes from './routes/usuarios.routes.js';
 import contaRoutes from './routes/conta.routes.js';
@@ -96,6 +98,7 @@ app.use(cors({
 // Limite explícito do corpo JSON. O padrão do Express já é 100 kb, mas deixar
 // escrito evita que uma mudança futura abra a porta para payload gigante.
 app.use(express.json({ limit: '1mb' }));
+app.use(cookieParser());
 
 // Arquivos enviados. O banco guarda a URL relativa (/uploads/...).
 //
@@ -116,6 +119,13 @@ app.use((req, _res, next) => {
   console.log(`${req.method} ${req.url}`);
   next();
 });
+
+// Sessão e CSRF, antes de qualquer rota. carregarSessao só preenche req.user
+// (nunca barra); csrfProtect exige o header X-CSRF-Token nas escritas feitas
+// com sessão em cookie. Rotas públicas e clientes antigos (Bearer) passam
+// direto — ver os comentários em auth.js.
+app.use(carregarSessao);
+app.use(csrfProtect);
 
 // Healthcheck — útil pra testar se a API subiu.
 app.get('/api/health', (_req, res) => res.json({ ok: true, ts: new Date().toISOString() }));

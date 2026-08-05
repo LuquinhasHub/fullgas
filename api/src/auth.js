@@ -2,6 +2,7 @@
 // Autenticação por JWT
 // ============================================================
 import jwt from 'jsonwebtoken';
+import crypto from 'node:crypto';
 import 'dotenv/config';
 
 // A chave de assinatura NÃO tem valor padrão de propósito. Antes havia um
@@ -47,24 +48,180 @@ export function signToken(usuario, extra) {
       empresaId: usuario.EmpresaId,
       gestor: !!usuario.Gestor,
       perm: parsePermissoes(usuario.Permissoes),  // null = acesso total
-      ...claims
+      ...claims,
+      // Segredo anti-CSRF. Vem DEPOIS do spread para que `extra` não consiga
+      // sobrescrevê-lo — quem escolhesse o próprio csrf contornaria a proteção.
+      // O mesmo valor é copiado para o cookie fg_csrf; o navegador o devolve no
+      // header X-CSRF-Token e csrfProtect compara os dois. Ver o comentário do
+      // csrfProtect para o porquê do desenho.
+      csrf: crypto.randomBytes(16).toString('hex')
     },
     SECRET,
     { expiresIn: expiresIn || EXPIRES }
   );
 }
 
-// Middleware: exige um token válido no header Authorization: Bearer <token>.
-export function requireAuth(req, res, next) {
+/* ============================================================
+   COOKIES DE SESSÃO
+   ------------------------------------------------------------
+   A sessão saiu do localStorage e passou a viajar em cookie. O motivo é
+   XSS: qualquer script injetado na página consegue ler o localStorage e
+   roubar o token; um cookie httpOnly é invisível para o JavaScript.
+
+   São três cookies, e só o primeiro é secreto:
+     fg_sess  (httpOnly) — o JWT. O navegador manda, o JS não lê.
+     fg_csrf             — cópia do claim csrf, para o front devolver no header.
+     fg_exp              — validade do token, para o guardião de sessão do
+                           front saber quando expirou sem precisar ler o JWT.
+   ============================================================ */
+export const COOKIE_SESS = 'fg_sess';
+export const COOKIE_CSRF = 'fg_csrf';
+export const COOKIE_EXP = 'fg_exp';
+
+// Secure só em produção: sob HTTP puro (desenvolvimento) o navegador
+// DESCARTA cookie marcado como Secure, e ninguém consegue entrar.
+const COOKIE_SECURE = process.env.COOKIE_SECURE === '1' ||
+                      process.env.NODE_ENV === 'production';
+
+// SameSite=Lax basta: em produção o Nginx serve front e API na mesma origem,
+// e SameSite compara o SITE (ignora a porta), então o Live Server em :5500
+// falando com a API em :3000 também é considerado same-site.
+// 'Strict' derrubaria a sessão ao entrar no portal por link de e-mail.
+function baseCookie(maxAgeMs) {
+  return { sameSite: 'lax', secure: COOKIE_SECURE, path: '/', maxAge: maxAgeMs };
+}
+
+// Grava os três cookies a partir de um token já assinado.
+export function abrirSessao(res, token) {
+  const p = jwt.decode(token) || {};
+  const restanteMs = Math.max(0, (p.exp - Math.floor(Date.now() / 1000)) * 1000);
+  const base = baseCookie(restanteMs);
+  res.cookie(COOKIE_SESS, token, { ...base, httpOnly: true });
+  res.cookie(COOKIE_CSRF, p.csrf || '', { ...base, httpOnly: false });
+  res.cookie(COOKIE_EXP, String(p.exp || ''), { ...base, httpOnly: false });
+}
+
+// Apaga os três. Os atributos precisam ser IGUAIS aos do res.cookie, senão o
+// navegador entende que é outro cookie e ignora a remoção — é o motivo nº 1
+// de "logout que não desloga" neste padrão.
+export function fecharSessao(res) {
+  const o = { path: '/', sameSite: 'lax', secure: COOKIE_SECURE };
+  res.clearCookie(COOKIE_SESS, { ...o, httpOnly: true });
+  res.clearCookie(COOKIE_CSRF, o);
+  res.clearCookie(COOKIE_EXP, o);
+}
+
+/* ============================================================
+   Carregamento da sessão (middleware GLOBAL)
+   ------------------------------------------------------------
+   Roda em toda requisição e apenas PREENCHE req.user quando há credencial
+   válida — nunca responde 401. Quem barra é o requireAuth, rota a rota.
+   Essa separação existe para o csrfProtect poder saber, antes de qualquer
+   rota, se a credencial veio de cookie (vulnerável a CSRF) ou de header
+   (imune, porque o navegador não anexa sozinho).
+
+   Aceita as duas formas durante a transição: o front antigo, já carregado
+   no navegador dos usuários, continua mandando Bearer e segue funcionando.
+   Nenhuma sessão é derrubada por esta mudança.
+   ============================================================ */
+export function carregarSessao(req, _res, next) {
   const header = req.headers.authorization || '';
-  const token = header.startsWith('Bearer ') ? header.slice(7) : null;
-  if (!token) return res.status(401).json({ erro: 'Token ausente.' });
-  try {
-    req.user = jwt.verify(token, SECRET);
-    next();
-  } catch {
-    res.status(401).json({ erro: 'Token inválido ou expirado.' });
+  const bearer = header.startsWith('Bearer ') ? header.slice(7) : null;
+  const cookie = req.cookies?.[COOKIE_SESS] || null;
+  // O BEARER tem precedência enquanto durar a transição, e isso é essencial:
+  // em produção o front e a API são a mesma origem, então o navegador anexa o
+  // fg_sess SOZINHO (fetch usa credentials:'same-origin' por padrão). O front
+  // antigo continuaria mandando Bearer e ganharia o cookie de brinde; se o
+  // cookie vencesse, ele seria classificado como authVia='cookie' e levaria 403
+  // do csrfProtect em toda escrita — sem nunca ter aprendido a mandar o header.
+  // Quem manda Authorization está declarando ser cliente antigo; o front novo
+  // (Fase 3) não manda header nenhum e cai no cookie naturalmente.
+  // Este ramo inteiro desaparece na Fase 5.
+  let token = bearer, via = 'bearer';
+  if (bearer) {
+    // Bearer vencido/corrompido não pode cegar um cookie bom: o front antigo
+    // guarda o token no localStorage e ele expira lá, parado.
+    try { jwt.verify(bearer, SECRET); }
+    catch { token = cookie; via = 'cookie'; }
+  } else if (cookie) {
+    token = cookie; via = 'cookie';
   }
+  if (token) {
+    try {
+      req.user = jwt.verify(token, SECRET);
+      req.authVia = via;
+    } catch {
+      req.tokenInvalido = true;
+    }
+  }
+  next();
+}
+
+// Middleware: exige sessão. O trabalho pesado já foi feito por carregarSessao.
+export function requireAuth(req, res, next) {
+  if (!req.user) {
+    return res.status(401).json({
+      erro: req.tokenInvalido ? 'Token inválido ou expirado.' : 'Token ausente.'
+    });
+  }
+  next();
+}
+
+/* ============================================================
+   Proteção CSRF
+   ------------------------------------------------------------
+   Com a sessão em cookie surge um risco que não existia com Bearer: o
+   navegador anexa o cookie SOZINHO. Um site malicioso poderia fazer o
+   navegador da vítima enviar um POST autenticado para cá.
+
+   O segredo comparado aqui vem do JWT ASSINADO, não do cookie fg_csrf.
+   Isso é de propósito: no double-submit clássico (cookie contra header) um
+   atacante que consiga escrever cookie — subdomínio, MITM em HTTP — planta
+   as duas metades com o mesmo valor e passa. Aqui a metade autoritativa
+   está dentro de uma assinatura que ele não consegue forjar, então um
+   fg_csrf plantado simplesmente não bate. Dá a força de um token
+   sincronizador sem guardar estado nenhum no servidor.
+   ============================================================ */
+const METODOS_SEGUROS = new Set(['GET', 'HEAD', 'OPTIONS']);
+
+// Rotas de ENTRADA E SAÍDA da sessão, isentas por desenho. Duas razões:
+//
+// 1) Recuperabilidade. O fg_csrf é legível por JavaScript (tem de ser), logo
+//    apagável por script, extensão ou limpeza parcial do navegador — enquanto
+//    o fg_sess é httpOnly e sobrevive. Nesse estado o usuário teria sessão
+//    válida e nenhum segredo para provar: sem esta isenção, login e logout
+//    responderiam 403 e ele ficaria trancado, sem caminho de saída pela
+//    interface.
+// 2) O que um atacante ganharia aqui é pequeno e conhecido: login CSRF
+//    (empurrar a vítima para uma conta dele) e logout forçado. Nenhum toca
+//    dado do cliente. Já o preço da alternativa é ficar preso do lado de fora.
+//
+// A isenção vale só para estas rotas — qualquer escrita que mexa em dado do
+// cliente continua exigindo o header.
+const ROTAS_SEM_CSRF = new Set([
+  '/api/auth/login', '/api/auth/register', '/api/auth/logout',
+  '/api/auth/senha/esqueci', '/api/auth/senha/verificar', '/api/auth/senha/redefinir'
+]);
+
+export function csrfProtect(req, res, next) {
+  if (METODOS_SEGUROS.has(req.method)) return next();
+  if (ROTAS_SEM_CSRF.has(req.path)) return next();
+  // Sem sessão por cookie não há o que sequestrar: rota pública (login,
+  // cadastro, recuperação de senha) ou cliente antigo usando Bearer.
+  if (req.authVia !== 'cookie') return next();
+
+  // Comparação em BYTES, não em caracteres: uma string de 32 caracteres
+  // acentuados vira um buffer de 64 bytes, e o timingSafeEqual LANÇA quando os
+  // tamanhos diferem. Comparar o length da string deixaria um jeito trivial de
+  // transformar o 403 num 500.
+  const enviado = Buffer.from(String(req.headers['x-csrf-token'] || ''), 'utf8');
+  const esperado = Buffer.from(String(req.user?.csrf || ''), 'utf8');
+  const ok = esperado.length > 0 &&
+             enviado.length === esperado.length &&
+             crypto.timingSafeEqual(enviado, esperado);
+
+  if (ok) return next();
+  res.status(403).json({ erro: 'Sessão desatualizada. Recarregue a página e tente de novo.' });
 }
 
 // Middleware: exige que o usuário autenticado seja admin.
