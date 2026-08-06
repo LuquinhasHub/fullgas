@@ -14,6 +14,14 @@
   // se já existe sessão, vai direto para o portal
   if (FG.session()) { location.href = '/portal'; return; }
 
+  // Cookie de sessão válido, mas sem o perfil no localStorage. Acontece quando
+  // o perfil se perde e o cookie sobrevive — por exemplo, um logout cujo POST
+  // não chegou ao servidor, ou uma limpeza de localStorage sem limpar cookies.
+  // A sessão EXISTE; só o cache local da tela sumiu. O adaptador já refaz o
+  // perfil pelo GET /auth/sessao no carregamento, então basta esperar e seguir
+  // em frente, em vez de exigir uma senha de quem já está autenticado.
+  FG.pronto.then(function () { if (FG.session()) location.href = '/portal'; });
+
   function showMsg(texto, tipo) {
     msg.textContent = texto || '';
     msg.className = 'auth-msg' + (texto ? ' ' + (tipo || 'err') : '');

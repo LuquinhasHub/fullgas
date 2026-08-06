@@ -156,6 +156,9 @@ router.post('/usuarios/:id/identidade', requireAuth, requireAdmin, async (req, r
 
     res.json({
       token,
+      // Quem assumiu. O front usa para desenhar a tarja de aviso já na
+      // primeira renderização, sem esperar o GET /auth/sessao.
+      imp: req.user.id,
       usuario: {
         id: alvo.UsuarioId, nome: alvo.Nome, email: alvo.Email,
         papel: alvo.Papel, empresa: alvo.Empresa, empresaId: alvo.EmpresaId,
