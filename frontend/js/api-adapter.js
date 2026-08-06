@@ -469,12 +469,21 @@
     } catch (e) {}
   }
 
-  // Login. Devolve Promise<{ ok, msg? }>. Não guarda mais token nenhum: a
-  // resposta do /auth/login já veio com os cookies de sessão em Set-Cookie, e
-  // o navegador os aplicou antes desta linha rodar.
+  // Chave pública do widget anti-robô, ou '' quando não há configuração no
+  // servidor. Nunca rejeita: sem captcha, a tela de login continua inteira.
+  FG.captchaConfig = function () {
+    return api('/auth/captcha/config').then(function (d) { return (d && d.siteKey) || ''; },
+                                            function () { return ''; });
+  };
+
+  // Login. Devolve Promise<{ ok, msg? }>. Não guarda token nenhum: a resposta
+  // do /auth/login já veio com os cookies de sessão em Set-Cookie, e o
+  // navegador os aplicou antes desta linha rodar.
+  // `captcha` é o token do widget — vazio quando não há captcha configurado,
+  // e nesse caso o servidor simplesmente não o exige.
   // O cache é (re)carregado na próxima página (redirect recarrega o app).
-  FG.login = function (email, senha) {
-    return api('/auth/login', { method: 'POST', body: { email: email, senha: senha } })
+  FG.login = function (email, senha, captcha) {
+    return api('/auth/login', { method: 'POST', body: { email: email, senha: senha, captcha: captcha || '' } })
       .then(function (data) {
         guardarPerfil(data.usuario);
         return { ok: true };

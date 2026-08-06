@@ -9,6 +9,7 @@ import { signToken, parsePermissoes, abrirSessao, fecharSessao, requireAuth } fr
 import { erroEndereco, limparIe } from '../validacao.js';
 import { vincularContatoTiny } from '../tiny-contatos.js';
 import { enviarEmail, emailRecuperacaoSenha, appUrl } from '../mail.js';
+import { verificarCaptcha, captchaSiteKey } from '../captcha.js';
 import { limiteLogin, limiteSenha, limiteCadastro } from '../middlewares/rate-limit.js';
 
 const router = Router();
@@ -19,11 +20,25 @@ const RESET_MINUTOS = 60;
 const RESET_ESPERA_MS = 60 * 1000;
 const ultimoPedidoReset = new Map();   // email -> timestamp
 
-// POST /api/auth/login  { email, senha }
+// GET /api/auth/captcha/config
+// Entrega a site key ao front, para o widget se AUTO-OCULTAR quando não há
+// configuração — em vez de renderizar uma caixa quebrada. A site key é
+// pública: ela aparece no HTML de qualquer site que use o widget.
+router.get('/captcha/config', (_req, res) => {
+  res.json({ siteKey: captchaSiteKey() });
+});
+
+// POST /api/auth/login  { email, senha, captcha? }
 router.post('/login', limiteLogin, async (req, res, next) => {
   try {
-    const { email, senha } = req.body;
+    const { email, senha, captcha } = req.body;
     if (!email || !senha) return res.status(400).json({ erro: 'Informe e-mail e senha.' });
+
+    // ANTES de tocar no banco: é o ponto de a verificação anti-robô valer a
+    // pena, poupando uma consulta e uma comparação de bcrypt (que é cara de
+    // propósito) em cada tentativa automatizada.
+    const cap = await verificarCaptcha(captcha, req.ip);
+    if (!cap.ok) return res.status(400).json({ erro: cap.erro });
 
     const rows = await query(
       `SELECT u.UsuarioId, u.Nome, u.Email, u.SenhaHash, u.Papel, u.Status,
@@ -51,13 +66,11 @@ router.post('/login', limiteLogin, async (req, res, next) => {
     if (u.Status === 'bloqueado')
       return res.status(403).json({ erro: 'Usuário bloqueado. Procure o administrador.' });
 
-    const token = signToken(u);
-    abrirSessao(res, token);   // sessão em cookie httpOnly (fora do alcance de XSS)
+    // A sessão sai daqui SÓ pelo Set-Cookie. O token não volta mais no corpo:
+    // devolvê-lo era o que permitia ao front antigo guardá-lo no localStorage,
+    // e um valor que o JavaScript nunca vê é um valor que um XSS não rouba.
+    abrirSessao(res, signToken(u));
     res.json({
-      // `token` continua na resposta durante a transição: o front antigo, já
-      // carregado no navegador dos usuários, guarda esse valor e o manda como
-      // Bearer. Some quando todo mundo estiver na versão nova (Fase 5).
-      token,
       usuario: {
         id: u.UsuarioId, nome: u.Nome, email: u.Email,
         papel: u.Papel, empresa: u.Empresa, empresaId: u.EmpresaId,
@@ -408,11 +421,9 @@ router.post('/identidade/voltar', requireAuth, async (req, res, next) => {
         erro: 'Sua conta de administrador não está mais ativa. Faça login de novo.'
       });
     }
-    const token = signToken(adm);
-    abrirSessao(res, token);
+    abrirSessao(res, signToken(adm));
     console.log(`↩ Identidade devolvida: admin #${adm.UsuarioId} (${adm.Email})`);
     res.json({
-      token,
       usuario: {
         id: adm.UsuarioId, nome: adm.Nome, email: adm.Email,
         papel: adm.Papel, empresa: adm.Empresa, empresaId: adm.EmpresaId,

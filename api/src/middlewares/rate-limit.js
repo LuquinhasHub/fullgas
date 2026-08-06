@@ -23,7 +23,7 @@ const COMUM = {
   legacyHeaders: false          // sem os X-RateLimit-* antigos
 };
 
-// Login (e-mail/senha e Google). `skipSuccessfulRequests` faz só as tentativas
+// Login (e-mail/senha). `skipSuccessfulRequests` faz só as tentativas
 // FRACASSADAS contarem: quem acerta a senha nunca é barrado, mesmo em rede
 // compartilhada (a concessionária inteira costuma sair pelo mesmo IP).
 export const limiteLogin = rateLimit({

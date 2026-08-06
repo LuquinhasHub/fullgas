@@ -75,17 +75,69 @@
   document.getElementById('btn-esq').addEventListener('click', doEsqueci);
   formEsq.addEventListener('keydown', function (e) { if (e.key === 'Enter') doEsqueci(); });
 
+  /* ---------- verificação anti-robô ----------
+     Três detalhes que decidem se isto funciona ou vira suporte:
+
+     1. O script do provedor só é BAIXADO se houver chave configurada no NOSSO
+        servidor. Sem chave, nenhuma requisição sai para fora e o bloco nem
+        aparece — o desenvolvimento local segue sem depender de rede.
+
+     2. Renderização EXPLÍCITA (render=explicit + turnstile.render), e não a
+        automática por atributo `class="cf-turnstile"` no HTML. O motivo é o
+        mesmo de antes: nada de configuração pendurada em atributo de
+        marcação, para a CSP estrita continuar viável.
+
+     3. O token vale UMA VEZ SÓ e expira. Por isso o widget é REINICIADO a
+        cada tentativa que falha — sem isso, o segundo clique em "Entrar"
+        reenviaria um token já queimado e o usuário ficaria preso num erro
+        que não tem como entender. É o erro clássico desta integração. */
+  var captchaId = null;   // id do widget renderizado, ou null se não há captcha
+
+  function iniciarCaptcha(siteKey) {
+    var bloco = document.getElementById('captcha-bloco');
+    var s = document.createElement('script');
+    s.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+    s.async = true;
+    s.onload = function () {
+      if (!window.turnstile) return;
+      captchaId = turnstile.render('#captcha-widget', {
+        sitekey: siteKey,
+        language: 'pt-br',
+        // Expirou sozinho na tela parada: renova em silêncio, para o usuário
+        // não descobrir só ao clicar em Entrar.
+        'expired-callback': function () { turnstile.reset(captchaId); }
+      });
+      bloco.classList.remove('hidden');
+    };
+    // Provedor fora do ar ou bloqueado na rede do cliente: o bloco fica
+    // escondido e o login continua. O servidor também libera nesse caso.
+    s.onerror = function () { bloco.classList.add('hidden'); };
+    document.head.appendChild(s);
+  }
+
+  FG.captchaConfig().then(function (siteKey) { if (siteKey) iniciarCaptcha(siteKey); });
+
   /* ---------- login ---------- */
   async function doLogin() {
     var email = document.getElementById('lg-email').value.trim();
     var senha = document.getElementById('lg-senha').value;
     if (!email || !senha) { showMsg('Informe e-mail e senha.'); return; }
-    var r = await FG.login(email, senha);
-    if (!r.ok) { showMsg(r.msg); return; }
+
+    var token = captchaId !== null ? turnstile.getResponse(captchaId) : '';
+    if (captchaId !== null && !token) { showMsg('Confirme que você não é um robô.'); return; }
+
+    var r = await FG.login(email, senha, token);
+    if (!r.ok) {
+      // Queima o token junto com a tentativa: ele não serve para a próxima.
+      if (captchaId !== null) turnstile.reset(captchaId);
+      showMsg(r.msg);
+      return;
+    }
     location.href = '/portal';
   }
   document.getElementById('btn-login').addEventListener('click', doLogin);
   formLogin.addEventListener('keydown', function (e) { if (e.key === 'Enter') doLogin(); });
+
 
   /* ---------- cadastro ---------- */
   function val(id) { var el = document.getElementById(id); return el ? el.value.trim() : ''; }
