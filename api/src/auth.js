@@ -116,40 +116,20 @@ export function fecharSessao(res) {
    ------------------------------------------------------------
    Roda em toda requisição e apenas PREENCHE req.user quando há credencial
    válida — nunca responde 401. Quem barra é o requireAuth, rota a rota.
-   Essa separação existe para o csrfProtect poder saber, antes de qualquer
-   rota, se a credencial veio de cookie (vulnerável a CSRF) ou de header
-   (imune, porque o navegador não anexa sozinho).
 
-   Aceita as duas formas durante a transição: o front antigo, já carregado
-   no navegador dos usuários, continua mandando Bearer e segue funcionando.
-   Nenhuma sessão é derrubada por esta mudança.
+   O COOKIE É A ÚNICA FORMA DE AUTENTICAÇÃO. Até a fase anterior este
+   middleware também aceitava `Authorization: Bearer <token>`, para o front
+   antigo — já carregado no navegador dos usuários — continuar funcionando
+   durante a migração. Esse ramo saiu: enquanto ele existia, um token roubado
+   do localStorage ainda valia como credencial, e era exatamente isso que a
+   mudança para cookie httpOnly veio impedir. Guardar sessão no localStorage
+   deixa de ser possível, não apenas desaconselhado.
    ============================================================ */
 export function carregarSessao(req, _res, next) {
-  const header = req.headers.authorization || '';
-  const bearer = header.startsWith('Bearer ') ? header.slice(7) : null;
-  const cookie = req.cookies?.[COOKIE_SESS] || null;
-  // O BEARER tem precedência enquanto durar a transição, e isso é essencial:
-  // em produção o front e a API são a mesma origem, então o navegador anexa o
-  // fg_sess SOZINHO (fetch usa credentials:'same-origin' por padrão). O front
-  // antigo continuaria mandando Bearer e ganharia o cookie de brinde; se o
-  // cookie vencesse, ele seria classificado como authVia='cookie' e levaria 403
-  // do csrfProtect em toda escrita — sem nunca ter aprendido a mandar o header.
-  // Quem manda Authorization está declarando ser cliente antigo; o front novo
-  // (Fase 3) não manda header nenhum e cai no cookie naturalmente.
-  // Este ramo inteiro desaparece na Fase 5.
-  let token = bearer, via = 'bearer';
-  if (bearer) {
-    // Bearer vencido/corrompido não pode cegar um cookie bom: o front antigo
-    // guarda o token no localStorage e ele expira lá, parado.
-    try { jwt.verify(bearer, SECRET); }
-    catch { token = cookie; via = 'cookie'; }
-  } else if (cookie) {
-    token = cookie; via = 'cookie';
-  }
+  const token = req.cookies?.[COOKIE_SESS] || null;
   if (token) {
     try {
       req.user = jwt.verify(token, SECRET);
-      req.authVia = via;
     } catch {
       req.tokenInvalido = true;
     }
@@ -206,9 +186,10 @@ const ROTAS_SEM_CSRF = new Set([
 export function csrfProtect(req, res, next) {
   if (METODOS_SEGUROS.has(req.method)) return next();
   if (ROTAS_SEM_CSRF.has(req.path)) return next();
-  // Sem sessão por cookie não há o que sequestrar: rota pública (login,
-  // cadastro, recuperação de senha) ou cliente antigo usando Bearer.
-  if (req.authVia !== 'cookie') return next();
+  // Sem sessão não há o que sequestrar. Toda sessão agora é cookie, então
+  // basta perguntar se existe uma — a distinção cookie × Bearer que morava
+  // aqui saiu junto com o Bearer.
+  if (!req.user) return next();
 
   // Comparação em BYTES, não em caracteres: uma string de 32 caracteres
   // acentuados vira um buffer de 64 bytes, e o timingSafeEqual LANÇA quando os

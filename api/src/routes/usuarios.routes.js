@@ -151,11 +151,9 @@ router.post('/usuarios/:id/identidade', requireAuth, requireAdmin, async (req, r
     // Sobrescreve os cookies de sessão com a identidade assumida. O token do
     // admin não é guardado em lugar nenhum: a volta reemite a partir do claim
     // `imp` (POST /api/auth/identidade/voltar).
-    const token = signToken(alvo, { imp: req.user.id, expiresIn: '1h' });
-    abrirSessao(res, token);
+    abrirSessao(res, signToken(alvo, { imp: req.user.id, expiresIn: '1h' }));
 
     res.json({
-      token,
       // Quem assumiu. O front usa para desenhar a tarja de aviso já na
       // primeira renderização, sem esperar o GET /auth/sessao.
       imp: req.user.id,

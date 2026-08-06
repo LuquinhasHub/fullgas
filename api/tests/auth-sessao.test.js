@@ -1,5 +1,5 @@
-// Testes da camada de sessão: como a credencial é lida (cookie x Bearer) e
-// quando a proteção CSRF morde. É lógica de segurança pura — roda sem banco,
+// Testes da camada de sessão: o cookie é a única credencial aceita, e quando
+// a proteção CSRF morde. É lógica de segurança pura — roda sem banco,
 // montando req/res falsos.
 import { describe, it, expect, beforeAll } from 'vitest';
 
@@ -60,45 +60,35 @@ describe('carregarSessao', () => {
     const r = req({ cookies: { fg_sess: auth.signToken(USUARIO) } });
     corre(auth.carregarSessao, r, res());
     expect(r.user.email).toBe('a@b.com');
-    expect(r.authVia).toBe('cookie');
   });
 
-  it('le a sessao do header Bearer (front antigo)', () => {
+  it('IGNORA o header Bearer — o cookie e a unica credencial', () => {
+    // O ramo Bearer existiu so durante a migracao. Enquanto ele viveu, um token
+    // roubado do localStorage ainda valia como credencial -- exatamente o que a
+    // mudanca para cookie httpOnly veio impedir.
     const r = req({ headers: { authorization: 'Bearer ' + auth.signToken(USUARIO) } });
     corre(auth.carregarSessao, r, res());
-    expect(r.user.email).toBe('a@b.com');
-    expect(r.authVia).toBe('bearer');
+    expect(r.user).toBeUndefined();
   });
 
-  it('Bearer valido tem precedencia sobre o cookie (front antigo)', () => {
-    // Em producao front e API sao a mesma origem, entao o navegador anexa o
-    // cookie sozinho e o front antigo fica com os dois. Se o cookie vencesse,
-    // ele seria tratado como sessao de cookie e levaria 403 do csrfProtect em
-    // toda escrita — sem nunca ter aprendido a mandar o header.
-    const bearer = auth.signToken({ ...USUARIO, UsuarioId: 99, Email: 'velho@b.com' });
-    const r = req({ cookies: { fg_sess: auth.signToken(USUARIO) }, headers: { authorization: 'Bearer ' + bearer } });
+  it('Bearer nao sobrepoe nem complementa o cookie', () => {
+    const outro = auth.signToken({ ...USUARIO, UsuarioId: 99, Email: 'velho@b.com' });
+    const r = req({ cookies: { fg_sess: auth.signToken(USUARIO) }, headers: { authorization: 'Bearer ' + outro } });
     corre(auth.carregarSessao, r, res());
-    expect(r.user.email).toBe('velho@b.com');
-    expect(r.authVia).toBe('bearer');
+    expect(r.user.email).toBe('a@b.com');
   });
 
-  it('front antigo (Bearer + cookie de brinde) escreve sem X-CSRF-Token', () => {
-    // O cenario que a Fase 2 promete nao quebrar: ninguem e' deslogado.
+  it('sessao por cookie SEM X-CSRF-Token nao escapa mais pelo caminho do Bearer', () => {
+    // Se o Bearer ainda fosse aceito, mandar o header Authorization seria um
+    // jeito de contornar a protecao CSRF.
+    const resposta = res();
     const r = req({
       cookies: { fg_sess: auth.signToken(USUARIO) },
       headers: { authorization: 'Bearer ' + auth.signToken(USUARIO) }
     });
     corre(auth.carregarSessao, r, res());
-    expect(corre(auth.csrfProtect, r, res())).toBe(true);
-  });
-
-  it('Bearer vencido nao cega um cookie bom', () => {
-    // O token do localStorage expira parado la'; o cookie e' a sessao viva.
-    const vencido = jwt.sign({ id: 99, email: 'velho@b.com' }, process.env.JWT_SECRET, { expiresIn: '-1s' });
-    const r = req({ cookies: { fg_sess: auth.signToken(USUARIO) }, headers: { authorization: 'Bearer ' + vencido } });
-    corre(auth.carregarSessao, r, res());
-    expect(r.user.email).toBe('a@b.com');
-    expect(r.authVia).toBe('cookie');
+    expect(corre(auth.csrfProtect, r, resposta)).toBe(false);
+    expect(resposta.codigo).toBe(403);
   });
 
   it('NUNCA responde 401 — so marca o problema e segue', () => {
@@ -151,12 +141,6 @@ describe('csrfProtect', () => {
   it('libera leitura (GET) sem header', () => {
     const r = comCookie(undefined);
     r.method = 'GET';
-    expect(corre(auth.csrfProtect, r, res())).toBe(true);
-  });
-
-  it('libera Bearer sem header — o navegador nao anexa header sozinho', () => {
-    const r = req({ headers: { authorization: 'Bearer ' + auth.signToken(USUARIO) } });
-    corre(auth.carregarSessao, r, res());
     expect(corre(auth.csrfProtect, r, res())).toBe(true);
   });
 
