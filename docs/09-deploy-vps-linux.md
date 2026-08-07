@@ -428,78 +428,49 @@ var API_PRODUCAO = '/api';
 ```
 Faça commit/push (ou edite direto no VPS depois de copiar).
 
-### 5.2 Copiar o front pro VPS
-```bash
-sudo mkdir -p /var/www/fullgas
-sudo cp -r /var/www/fullgas-app/frontend/* /var/www/fullgas/
-sudo chown -R www-data:www-data /var/www/fullgas
-```
+### 5.2 Servir o front
+
+Nao copie os arquivos para outro diretorio. O Nginx serve DIRETO de
+`/var/www/fullgas-app/frontend`, que e o repositorio que o `deploy.sh`
+atualiza. Uma copia paralela em `/var/www/fullgas` ficaria velha a cada deploy
+sem ninguem perceber — foi assim que esta secao ficou desatualizada.
 
 ### 5.3 Configurar o Nginx
+
+> **A configuracao do Nginx agora e versionada** em
+> [`deploy/nginx/fullgas.conf`](../deploy/nginx/fullgas.conf), com o HTTPS, os
+> headers de seguranca, a CSP e — o mais importante — as regras que impedem
+> qualquer resposta de `/api` de ser cacheada. As respostas de autenticacao
+> carregam `Set-Cookie`; uma copia guardada entrega a sessao de um usuario ao
+> proximo que pedir a mesma URL.
+>
+> O texto que existia aqui foi removido em vez de atualizado: manter duas
+> versoes da mesma configuracao foi o que produziu os erros acima (o `root`
+> apontando para um diretorio abandonado, e o bloco HTTPS sem a regra de URL
+> limpa, que faz `/portal` responder 404).
+
 ```bash
-sudo nano /etc/nginx/sites-available/fullgas
-```
-```nginx
-server {
-    listen 80;
-    server_name fullgas.app.br www.fullgas.app.br;   # ex.: fullgas.app.br
-
-    root /var/www/fullgas;
-    index index.html;
-
-    # uploads (fotos de reivindicação, anexos de notificação) até 60 MB
-    client_max_body_size 64M;
-
-    # URLs limpas (esconder o .html):
-    #   • /index.html vira a raiz "/", e /algo.html vira /algo (301, para
-    #     favoritos e links antigos).
-    #   • O casamento é em $request_uri (a URI ORIGINAL do cliente); o
-    #     try_files interno abaixo NÃO altera $request_uri, então servir
-    #     /portal.html para o pedido /portal não dispara o redirect — sem loop.
-    if ($request_uri ~ ^/index\.html) { return 301 /; }
-    if ($request_uri ~ ^/([^?\s]+)\.html) { return 301 /$1; }
-
-    # front estático — /portal serve portal.html, /finder serve finder.html, etc.
-    location / {
-        try_files $uri $uri.html $uri/ =404;
-    }
-
-    # API → Node na porta 3000
-    location /api/ {
-        proxy_pass http://127.0.0.1:3000;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-
-    # arquivos enviados (servidos pela API)
-    location /uploads/ {
-        proxy_pass http://127.0.0.1:3000;
-        proxy_set_header Host $host;
-    }
-}
-```
-```bash
-sudo ln -s /etc/nginx/sites-available/fullgas /etc/nginx/sites-enabled/
+cd /var/www/fullgas-app
+sudo cp deploy/nginx/fullgas.conf /etc/nginx/sites-available/fullgas
+sudo ln -sf /etc/nginx/sites-available/fullgas /etc/nginx/sites-enabled/fullgas
 sudo rm -f /etc/nginx/sites-enabled/default
-sudo nginx -t          # testa a config
-sudo systemctl reload nginx
+sudo nginx -t && sudo systemctl reload nginx
 ```
 
-Neste ponto, acessando `http://fullgas.app.br` já deve abrir o site (a Cloudflare
-força HTTPS na frente). Falta o certificado de origem pro modo Full (strict).
+O certificado de origem da Cloudflare (Parte 6, abaixo) precisa estar em
+`/etc/nginx/ssl/` **antes** do `nginx -t`, porque a configuracao ja escuta em
+443. Os quatro itens criticos de deploy e como conferir cada um estao em
+[`deploy/README.md`](../deploy/README.md).
 
 ---
 
 ## Parte 6 — HTTPS (certificado de origem da Cloudflare)
 
-Como o domínio está **proxied** na Cloudflare, o jeito mais simples é usar um
-**Origin Certificate** da própria Cloudflare (vale 15 anos, sem renovação).
+Como o dominio esta **proxied** na Cloudflare, o jeito mais simples e usar um
+**Origin Certificate** da propria Cloudflare (vale 15 anos, sem renovacao).
 
 1. Cloudflare → **SSL/TLS** → **Origin Server** → **Create Certificate**.
-2. Deixe o padrão (RSA, `*.fullgas.app.br` e `fullgas.app.br`) → **Create**.
+2. Deixe o padrao (RSA, `*.fullgas.app.br` e `fullgas.app.br`) → **Create**.
 3. Copie os dois blocos exibidos.
 
 No VPS:
@@ -510,50 +481,10 @@ sudo nano /etc/nginx/ssl/fullgas.key   # cole a "Private Key"
 sudo chmod 600 /etc/nginx/ssl/fullgas.key
 ```
 
-Ajuste o server block para 443:
-```bash
-sudo nano /etc/nginx/sites-available/fullgas
-```
-Troque a primeira linha `listen 80;` por um bloco HTTPS e um redirect:
-```nginx
-server {
-    listen 80;
-    server_name fullgas.app.br www.fullgas.app.br;
-    return 301 https://$host$request_uri;      # tudo vai pra HTTPS
-}
-
-server {
-    listen 443 ssl;
-    server_name fullgas.app.br www.fullgas.app.br;
-
-    ssl_certificate     /etc/nginx/ssl/fullgas.pem;
-    ssl_certificate_key /etc/nginx/ssl/fullgas.key;
-
-    root /var/www/fullgas;
-    index index.html;
-    client_max_body_size 64M;
-
-    location / { try_files $uri $uri/ =404; }
-    location /api/ {
-        proxy_pass http://127.0.0.1:3000;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-    location /uploads/ {
-        proxy_pass http://127.0.0.1:3000;
-        proxy_set_header Host $host;
-    }
-}
-```
-```bash
-sudo nginx -t && sudo systemctl reload nginx
-```
+Depois recarregue o Nginx (`sudo nginx -t && sudo systemctl reload nginx`).
 
 Pronto: `https://fullgas.app.br` abre com cadeado. Login inicial:
-o e-mail e a senha que você definiu no passo 4.4.
+o e-mail e a senha que voce definiu no passo 4.4.
 
 ---
 
