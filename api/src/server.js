@@ -120,10 +120,29 @@ app.use((req, _res, next) => {
   next();
 });
 
+/* ============================================================
+   NADA DE /api PODE SER GUARDADO EM CACHE
+   ------------------------------------------------------------
+   É a regra mais importante desta lista, e a razão é específica: as respostas
+   de autenticação carregam Set-Cookie. Se QUALQUER camada entre a API e o
+   navegador guardar uma cópia — Nginx com proxy_cache, uma regra "Cache
+   Everything" na Cloudflare, um proxy corporativo na rede do cliente —, o
+   cookie de sessão de um usuário é entregue ao próximo que pedir a mesma URL.
+   A sessão troca de dono sem que ninguém perceba.
+
+   Isto fica AQUI, e não só na configuração do Nginx, porque assim a garantia
+   viaja junto com a aplicação: vale em qualquer ambiente, com qualquer proxy
+   na frente, e não depende de alguém lembrar de replicar uma diretiva ao
+   mexer na infraestrutura. O Nginx repete a regra como segunda camada.
+   ============================================================ */
+app.use('/api', (_req, res, next) => {
+  res.set('Cache-Control', 'no-store');
+  next();
+});
+
 // Sessão e CSRF, antes de qualquer rota. carregarSessao só preenche req.user
 // (nunca barra); csrfProtect exige o header X-CSRF-Token nas escritas feitas
-// com sessão em cookie. Rotas públicas e clientes antigos (Bearer) passam
-// direto — ver os comentários em auth.js.
+// com sessão em cookie. Rotas públicas passam direto — ver auth.js.
 app.use(carregarSessao);
 app.use(csrfProtect);
 
@@ -178,6 +197,22 @@ app.use((err, _req, res, _next) => {
 });
 
 const PORT = Number(process.env.PORT || 3000);
+
+// Aviso alto sobre a falha mais silenciosa que existe neste projeto.
+// Os cookies de sessão só saem marcados como Secure quando NODE_ENV=production
+// ou COOKIE_SECURE=1. Se a unidade do systemd em produção não define nenhum
+// dos dois, tudo continua FUNCIONANDO — o portal abre, o login entra — e o
+// cookie de sessão simplesmente trafega sem a marca que impede o navegador de
+// mandá-lo por HTTP. Não há erro, não há log, não há sintoma. Por isso a
+// checagem grita aqui, no arranque.
+if (process.env.NODE_ENV !== 'production' && process.env.COOKIE_SECURE !== '1') {
+  console.warn(
+    '⚠ Cookies de sessão SEM a marca Secure (NODE_ENV != production e\n' +
+    '  COOKIE_SECURE != 1). Correto em desenvolvimento sob http://.\n' +
+    '  Se esta mensagem apareceu em PRODUÇÃO, corrija antes de seguir:\n' +
+    '  a sessão está trafegando sem a proteção contra envio em texto claro.'
+  );
+}
 
 // Tenta conectar no banco antes de abrir a porta (falha cedo se o DB estiver fora).
 getPool()
