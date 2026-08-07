@@ -22,9 +22,57 @@
 
   // Ajuste para a URL onde a API está publicada.
   var API_BASE = window.FULLGAS_API_BASE || 'http://localhost:3000/api';
-  var TOKEN_KEY = 'fullgas_token_v1';
 
-  function token() { return localStorage.getItem(TOKEN_KEY) || ''; }
+  /* =======================================================================
+     A SESSÃO SAIU DO ALCANCE DESTE ARQUIVO
+     -----------------------------------------------------------------------
+     Antes o token JWT ficava no localStorage e era colado à mão no header
+     Authorization. O problema é que localStorage é lido por QUALQUER script
+     que rode na página — um XSS levava a sessão inteira embora.
+
+     Agora o token vive no cookie fg_sess, marcado httpOnly: o navegador o
+     envia sozinho em toda requisição e o JavaScript não consegue lê-lo. Nem
+     este arquivo. É o objetivo, não uma limitação.
+
+     Mas o front ainda precisa saber DUAS coisas que lia dentro do token, e
+     por isso a API manda dois cookies legíveis junto:
+       fg_exp  — quando a sessão expira (segundos UNIX). Substitui o `exp`
+                 que líamos decodificando o JWT com atob.
+       fg_csrf — o segredo que devolvemos no header X-CSRF-Token.
+
+     Por que cookie companheiro e não um endpoint: o guardião abaixo roda a
+     cada 30 s e a cada carregamento de página, de forma SÍNCRONA. Perguntar
+     ao servidor exigiria await em todo lugar que hoje só lê uma variável.
+     ======================================================================= */
+  function cookie(nome) {
+    var m = document.cookie.match(new RegExp('(?:^|; )' + nome + '=([^;]*)'));
+    return m ? decodeURIComponent(m[1]) : '';
+  }
+
+  // Há sessão? É um palpite do lado do cliente, e é o suficiente: serve para
+  // decidir o que RENDERIZAR. Quem decide de verdade é a API, que valida a
+  // assinatura do fg_sess — este cookie aqui é só o aviso legível.
+  function temSessao() { return !!cookie('fg_exp'); }
+
+  /* Cabeçalhos comuns a TODA chamada à API.
+     -----------------------------------------------------------------------
+     O X-CSRF-Token é o que separa uma requisição nossa de uma forjada por
+     outro site. O raciocínio: o navegador anexa o cookie sozinho, mas
+     NENHUM site consegue fazer o navegador anexar um header customizado a
+     uma requisição para outra origem — para isso ele precisaria passar pelo
+     preflight de CORS, que a nossa API só concede a origens conhecidas.
+     Então "sabe o valor e conseguiu mandá-lo num header" prova que o código
+     rodou dentro do fullgas.app.br.
+
+     Repare que não montamos Authorization em lugar nenhum. É o coração da
+     Fase 3: a credencial deixou de passar por aqui. */
+  function cabecalhos(extra) {
+    var h = extra || {};
+    h['ngrok-skip-browser-warning'] = '1';
+    var c = cookie('fg_csrf');
+    if (c) h['X-CSRF-Token'] = c;
+    return h;
+  }
 
   /* =======================================================================
      GUARDIÃO DE SESSÃO — expiração por tempo e por inatividade
@@ -49,16 +97,13 @@
   var CHECAGEM_MS    = 30 * 1000;               // varredura periódica
   var encerrando     = false;                   // trava anti-loop de redirect
 
-  // Lê o claim `exp` (segundos UNIX) de dentro do JWT e devolve em ms.
-  // 0 quando não há token ou o payload é ilegível (idle ainda cobre o caso).
+  // Quando a sessão expira, em ms. Vem do cookie fg_exp — antes era preciso
+  // fatiar o JWT e decodificar o payload com atob. Some um pedaço de código
+  // que só existia porque o front tinha o token na mão.
+  // 0 = sem sessão ou cookie ilegível (a inatividade ainda cobre o caso).
   function tokenExpiraEm() {
-    var t = token();
-    if (!t) return 0;
-    try {
-      var b64 = t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
-      var exp = JSON.parse(atob(b64)).exp;
-      return exp ? exp * 1000 : 0;
-    } catch (e) { return 0; }
+    var exp = parseInt(cookie('fg_exp'), 10);
+    return exp ? exp * 1000 : 0;
   }
 
   function marcarAtividade() {
@@ -68,7 +113,7 @@
   // Devolve o motivo pelo qual a sessão deve ser encerrada, ou null se está OK.
   // 'expirada' = token venceu; 'inatividade' = tempo ocioso estourado.
   function motivoEncerramento() {
-    if (!token()) return null;                  // não há sessão a encerrar
+    if (!temSessao()) return null;              // não há sessão a encerrar
     var exp = tokenExpiraEm();
     if (exp && Date.now() >= exp) return 'expirada';
     var ultima = parseInt(localStorage.getItem(ATIVIDADE_KEY) || '0', 10);
@@ -76,19 +121,42 @@
     return null;
   }
 
-  // Limpa a sessão e volta ao login com o motivo na URL, para que a tela de
-  // login (auth.js) explique ao usuário por que ele foi desconectado.
-  function encerrarSessao(motivo) {
-    if (encerrando) return;
-    encerrando = true;
+  // Apaga o que é do lado do cliente. As três primeiras chaves são LIXO DA
+  // ERA DO localStorage: ninguém mais grava nelas. Continuam sendo removidas
+  // por um release para limpar a máquina de quem volta com elas guardadas —
+  // podem sair na Fase 5.
+  function limparLocal() {
     try {
-      localStorage.removeItem(TOKEN_KEY);
-      localStorage.removeItem('fullgas_session_v1');
+      localStorage.removeItem('fullgas_token_v1');
       localStorage.removeItem(ADMIN_TOKEN_KEY);
       localStorage.removeItem(ADMIN_SESS_KEY);
+      localStorage.removeItem('fullgas_session_v1');
+      localStorage.removeItem(IMP_KEY);
       localStorage.removeItem(ATIVIDADE_KEY);
     } catch (e) {}
-    location.href = '/?sessao=' + (motivo || 'expirada');
+  }
+
+  // Encerra de verdade e vai para `destino`.
+  //
+  // O ponto importante: o fg_sess é httpOnly, então ESTE ARQUIVO NÃO CONSEGUE
+  // APAGÁ-LO. Só o servidor apaga, respondendo com Set-Cookie vazio. Sem esta
+  // chamada, "sair" apenas limparia o localStorage e o navegador continuaria
+  // portando uma sessão válida — o usuário voltaria logado no próximo acesso.
+  // Por isso o logout deixou de ser uma operação local e virou uma requisição.
+  //
+  // O redirecionamento acontece de qualquer jeito, dando ou não certo: um
+  // usuário que quer sair não pode ficar preso na tela porque a rede caiu.
+  function encerrarSessao(motivo, destino) {
+    if (encerrando) return;                     // trava anti-loop de redirect
+    encerrando = true;
+    limparLocal();
+    var url = destino || ('/?sessao=' + (motivo || 'expirada'));
+    var ir = function () { location.href = url; };
+    fetch(API_BASE + '/auth/logout', {
+      method: 'POST',
+      credentials: 'include',
+      headers: cabecalhos()
+    }).then(ir, ir);
   }
   FG.encerrarSessao = encerrarSessao;
 
@@ -100,8 +168,8 @@
     return guardBase ? guardBase.call(FG, papel) : null;
   };
 
-  // Vigilância só faz sentido quando há sessão. Na tela de login não há token.
-  if (token()) {
+  // Vigilância só faz sentido quando há sessão. Na tela de login não há cookie.
+  if (temSessao()) {
     marcarAtividade();                          // (re)abrir a página conta como atividade
     ['click', 'keydown', 'mousemove', 'scroll', 'touchstart'].forEach(function (ev) {
       window.addEventListener(ev, marcarAtividade, { passive: true });
@@ -116,20 +184,23 @@
   // fetch autenticado que devolve JSON (REJEITA em erro HTTP, com a msg da API).
   function api(path, opts) {
     opts = opts || {};
-    var headers = opts.headers || {};
+    var headers = cabecalhos(opts.headers || {});
     headers['Content-Type'] = 'application/json';
-    headers['ngrok-skip-browser-warning'] = '1';
-    if (token()) headers['Authorization'] = 'Bearer ' + token();
     return fetch(API_BASE + path, {
       method: opts.method || 'GET',
       headers: headers,
+      // 'include' manda o cookie MESMO em origem cruzada. Em produção front e
+      // API são a mesma origem e o padrão já bastaria, mas no desenvolvimento
+      // (Live Server na :5500 falando com a API na :3000) sem isto o cookie
+      // simplesmente não viaja — e tudo responde 401 só na sua máquina.
+      credentials: 'include',
       body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined
     }).then(function (r) {
       return r.json().catch(function () { return {}; }).then(function (data) {
         if (!r.ok) {
-          // Token vencido/invalidado no servidor: se ainda temos um token
-          // guardado, a sessão morreu — encerra na hora e volta ao login.
-          if (r.status === 401 && token()) encerrarSessao('expirada');
+          // Sessão invalidada no servidor: se o front ainda se julga logado,
+          // ela morreu — encerra na hora e volta ao login.
+          if (r.status === 401 && temSessao()) encerrarSessao('expirada');
           throw new Error(data.erro || ('HTTP ' + r.status));
         }
         return data;
@@ -162,11 +233,10 @@
     if (cacheBlob[url]) return cacheBlob[url];
     var m = String(url || '').match(PROTEGIDO_RE);
     if (!m) return Promise.resolve(url);   // catálogo: continua no estático
-    var headers = { 'ngrok-skip-browser-warning': '1' };
-    if (token()) headers['Authorization'] = 'Bearer ' + token();
-    cacheBlob[url] = fetch(API_BASE + '/arquivos/' + m[1] + '/' + m[2], { headers: headers })
+    cacheBlob[url] = fetch(API_BASE + '/arquivos/' + m[1] + '/' + m[2],
+                           { headers: cabecalhos(), credentials: 'include' })
       .then(function (r) {
-        if (r.status === 401 && token()) encerrarSessao('expirada');
+        if (r.status === 401 && temSessao()) encerrarSessao('expirada');
         if (!r.ok) throw new Error('HTTP ' + r.status);
         return r.blob();
       })
@@ -199,7 +269,7 @@
   // Carrega TODO o cache de uma vez (em paralelo). Assíncrono — devolve uma
   // Promise que resolve quando o cache está cheio. Sem token, resolve vazio.
   function carregarCache() {
-    if (!token()) return Promise.resolve(CACHE);
+    if (!temSessao()) return Promise.resolve(CACHE);
     return Promise.all([
       apiGet('/produtos'),
       apiGet('/categorias'),
@@ -281,9 +351,14 @@
     fd.append('tipo', dados.tipo || 'info');
     if (dados.empresaId) fd.append('empresaId', dados.empresaId);
     if (dados.anexo) fd.append('anexo', dados.anexo);
+    // Sem Content-Type de propósito: quem monta o boundary do multipart é o
+    // browser. Note que cabecalhos() ainda entrega o X-CSRF-Token — upload é
+    // escrita, e escrita por cookie precisa provar a origem como qualquer
+    // outra. Foi o detalhe que mais quebrou upload em migrações assim.
     return fetch(API_BASE + '/notificacoes', {
       method: 'POST',
-      headers: { 'Authorization': 'Bearer ' + token(), 'ngrok-skip-browser-warning': '1' },
+      headers: cabecalhos(),
+      credentials: 'include',
       body: fd
     }).then(function (r) {
       return r.json().catch(function () { return {}; }).then(function (data) {
@@ -375,18 +450,42 @@
     });
   }
 
-  // Login: chama a API e guarda token + sessão. Devolve Promise<{ ok, msg? }>.
+  /* Guarda o PERFIL de exibição (nome, empresa, papel, permissões).
+     -----------------------------------------------------------------------
+     Isto continua no localStorage de propósito, e não é uma inconsistência
+     com o resto da fase: perfil não é credencial. Ele existe para as telas
+     desenharem o cabeçalho e esconderem menus sem esperar a rede. Se alguém
+     adulterar esse objeto, ganha um menu a mais na tela e nada além disso —
+     toda rota da API decide pelo que está no fg_sess assinado, nunca por
+     isto aqui. O que NÃO pode voltar para o localStorage é o token. */
+  function guardarPerfil(u) {
+    try {
+      localStorage.setItem('fullgas_session_v1', JSON.stringify({
+        id: u.id, nome: u.nome, email: u.email,
+        papel: u.papel, empresa: u.empresa, empresaId: u.empresaId,
+        gestor: !!u.gestor,
+        permissoes: u.permissoes || null      // null = acesso total
+      }));
+    } catch (e) {}
+  }
+
+  // Chave pública do widget anti-robô, ou '' quando não há configuração no
+  // servidor. Nunca rejeita: sem captcha, a tela de login continua inteira.
+  FG.captchaConfig = function () {
+    return api('/auth/captcha/config').then(function (d) { return (d && d.siteKey) || ''; },
+                                            function () { return ''; });
+  };
+
+  // Login. Devolve Promise<{ ok, msg? }>. Não guarda token nenhum: a resposta
+  // do /auth/login já veio com os cookies de sessão em Set-Cookie, e o
+  // navegador os aplicou antes desta linha rodar.
+  // `captcha` é o token do widget — vazio quando não há captcha configurado,
+  // e nesse caso o servidor simplesmente não o exige.
   // O cache é (re)carregado na próxima página (redirect recarrega o app).
-  FG.login = function (email, senha) {
-    return api('/auth/login', { method: 'POST', body: { email: email, senha: senha } })
+  FG.login = function (email, senha, captcha) {
+    return api('/auth/login', { method: 'POST', body: { email: email, senha: senha, captcha: captcha || '' } })
       .then(function (data) {
-        localStorage.setItem(TOKEN_KEY, data.token);
-        localStorage.setItem('fullgas_session_v1', JSON.stringify({
-          id: data.usuario.id, nome: data.usuario.nome, email: data.usuario.email,
-          papel: data.usuario.papel, empresa: data.usuario.empresa, empresaId: data.usuario.empresaId,
-          gestor: !!data.usuario.gestor,
-          permissoes: data.usuario.permissoes || null  // null = acesso total
-        }));
+        guardarPerfil(data.usuario);
         return { ok: true };
       }, function (e) {
         return { ok: false, msg: (e && e.message) || 'Falha no login.' };
@@ -426,53 +525,76 @@
   };
 
   /* ---------- alteração de identidade (admin entra na conta do cliente) ----------
-     A sessão do admin é guardada à parte antes da troca, para ele voltar com um
-     clique. Enquanto durar, uma tarja fixa no topo avisa em qual conta ele está
-     — ninguém pode esquecer que está agindo pelo cliente. */
+     O desenho antigo: o front copiava o token do admin para outra chave do
+     localStorage e o restaurava na volta. Isso deixava DOIS tokens válidos
+     largados num lugar que o JavaScript lê — o dobro do estrago num XSS — e
+     confiava num backup do cliente para decidir quem o admin é.
+
+     O desenho novo: o servidor carimba no token da identidade assumida o
+     claim `imp` (o id do admin) e reemite a partir dele na volta, revalidando
+     no banco. O front não guarda credencial nenhuma; guarda só um SINALIZADOR
+     para saber que precisa desenhar a tarja.
+
+     Por que o sinalizador ainda mora no localStorage, se a verdade está no
+     `imp` do token: a tarja é obrigatória e precisa aparecer no primeiro
+     quadro da página. A verdade vem do servidor (GET /auth/sessao), mas
+     assíncrona; se dependêssemos só dela, cada navegação teria uma janela
+     sem tarja em que o admin acha que está na própria conta. O localStorage
+     dá a resposta instantânea e a API corrige logo em seguida — inclusive
+     apagando a tarja se o sinalizador estiver velho. */
+  var IMP_KEY = 'fullgas_imp_v1';
+
+  // Chaves da era do localStorage. Não são mais escritas; só limpas.
   var ADMIN_TOKEN_KEY = 'fullgas_admin_token_v1';
   var ADMIN_SESS_KEY = 'fullgas_admin_sessao_v1';
 
-  // Sessão do admin guardada, ou null quando não há identidade assumida.
+  // Há identidade assumida? Devolve { adminId } ou null.
   FG.identidadeAssumida = function () {
-    try { return JSON.parse(localStorage.getItem(ADMIN_SESS_KEY) || 'null'); }
+    try { return JSON.parse(localStorage.getItem(IMP_KEY) || 'null'); }
     catch (e) { return null; }
   };
 
+  function marcarImpersonacao(adminId) {
+    try {
+      if (adminId) localStorage.setItem(IMP_KEY, JSON.stringify({ adminId: adminId }));
+      else localStorage.removeItem(IMP_KEY);
+    } catch (e) {}
+  }
+
   // Admin assume a identidade de um usuário. Promise<{ ok, msg? }>.
+  // A resposta já troca os cookies de sessão; aqui só acertamos o que a tela
+  // mostra. `imp` vem da própria resposta para a tarja subir já na primeira
+  // renderização, sem esperar o GET /auth/sessao.
   FG.assumirIdentidade = function (id) {
     return api('/usuarios/' + encodeURIComponent(id) + '/identidade', { method: 'POST' })
       .then(function (d) {
-        // Guarda a sessão do admin ANTES de sobrescrever (só a primeira vez —
-        // assumir outra identidade em seguida não pode perder o original).
-        if (!localStorage.getItem(ADMIN_TOKEN_KEY)) {
-          localStorage.setItem(ADMIN_TOKEN_KEY, localStorage.getItem(TOKEN_KEY) || '');
-          localStorage.setItem(ADMIN_SESS_KEY, localStorage.getItem('fullgas_session_v1') || '');
-        }
-        localStorage.setItem(TOKEN_KEY, d.token);
-        localStorage.setItem('fullgas_session_v1', JSON.stringify({
-          id: d.usuario.id, nome: d.usuario.nome, email: d.usuario.email,
-          papel: d.usuario.papel, empresa: d.usuario.empresa, empresaId: d.usuario.empresaId,
-          gestor: !!d.usuario.gestor, permissoes: d.usuario.permissoes || null
-        }));
+        var eu = FG.session() || {};
+        marcarImpersonacao(d.imp || eu.id || true);
+        guardarPerfil(d.usuario);
         return { ok: true, usuario: d.usuario };
       }, function (e) {
         return { ok: false, msg: (e && e.message) || 'Não foi possível assumir a identidade.' };
       });
   };
 
-  // Devolve o admin à própria conta.
+  // Devolve o admin à própria conta. Agora é uma requisição, não uma
+  // restauração local: o servidor reemite a sessão a partir do claim `imp` e
+  // revalida o admin no banco. Um admin rebaixado ou bloqueado no meio-tempo
+  // recebe 403 e cai no login — o desenho antigo restauraria alegremente o
+  // token guardado e o devolveria a um painel que ele já não podia usar.
   FG.voltarIdentidade = function (destino) {
-    var t = localStorage.getItem(ADMIN_TOKEN_KEY);
-    var s = localStorage.getItem(ADMIN_SESS_KEY);
-    localStorage.removeItem(ADMIN_TOKEN_KEY);
-    localStorage.removeItem(ADMIN_SESS_KEY);
-    if (t && s) {
-      localStorage.setItem(TOKEN_KEY, t);
-      localStorage.setItem('fullgas_session_v1', s);
-      location.href = destino || '/admin';
-      return;
-    }
-    FG.logout();   // sem backup não dá para voltar: cai no login
+    return api('/auth/identidade/voltar', { method: 'POST' })
+      .then(function (d) {
+        marcarImpersonacao(null);
+        guardarPerfil(d.usuario);
+        location.href = destino || '/admin';
+      }, function (e) {
+        // Não dá para voltar (sessão vencida, admin desativado): sair é o
+        // único caminho honesto — ficar na conta do cliente seria pior.
+        marcarImpersonacao(null);
+        FG.toast((e && e.message) || 'Não foi possível voltar para sua conta.', 'erro');
+        setTimeout(function () { encerrarSessao('expirada'); }, 1500);
+      });
   };
 
   // Tarja fixa de aviso, injetada em qualquer página enquanto houver identidade
@@ -480,7 +602,8 @@
   // repetir o mesmo bloco em portal/loja/finder.
   function montarTarjaIdentidade() {
     var adm = FG.identidadeAssumida();
-    if (!adm || document.getElementById('fg-imp-bar')) return;
+    if (!adm) { removerTarjaIdentidade(); return; }
+    if (document.getElementById('fg-imp-bar')) return;
     var atual = FG.session() || {};
     var bar = document.createElement('div');
     bar.id = 'fg-imp-bar';
@@ -496,17 +619,23 @@
     document.body.insertBefore(bar, document.body.firstChild);
     document.body.classList.add('com-imp-bar');
   }
+  // Tira a tarja quando o servidor diz que não há mais identidade assumida —
+  // o caso do sinalizador velho: o admin voltou para a própria conta em outra
+  // aba, e esta aqui ainda desenharia a tarja para sempre.
+  function removerTarjaIdentidade() {
+    var bar = document.getElementById('fg-imp-bar');
+    if (bar) bar.remove();
+    document.body.classList.remove('com-imp-bar');
+  }
+
   if (document.readyState === 'loading')
     document.addEventListener('DOMContentLoaded', montarTarjaIdentidade);
   else montarTarjaIdentidade();
 
-  FG.logout = function () {
-    localStorage.removeItem(TOKEN_KEY);
-    localStorage.removeItem('fullgas_session_v1');
-    localStorage.removeItem(ADMIN_TOKEN_KEY);
-    localStorage.removeItem(ADMIN_SESS_KEY);
-    location.href = '/';
-  };
+  // Sair. Passa pelo mesmo encerrarSessao do guardião — o servidor precisa
+  // apagar o fg_sess httpOnly, que este arquivo não alcança. Sem `motivo`,
+  // vai para a home limpa: sair por vontade própria não é um erro a explicar.
+  FG.logout = function () { encerrarSessao(null, '/'); };
 
   // Produtos (admin) — gravações que atualizam o cache no fim. Após gravar,
   // recarrega também o rastreador de pré-venda (repor estoque muda o status
@@ -678,10 +807,8 @@
     if (!files || !files.length) return Promise.resolve({ ok: true, anexos: [] });
     var fd = new FormData();
     for (var i = 0; i < files.length; i++) fd.append('fotos', files[i]);
-    var headers = { 'ngrok-skip-browser-warning': '1' };
-    if (token()) headers['Authorization'] = 'Bearer ' + token();
     return fetch(API_BASE + '/reivindicacoes/' + encodeURIComponent(numero) + '/anexos', {
-      method: 'POST', headers: headers, body: fd
+      method: 'POST', headers: cabecalhos(), credentials: 'include', body: fd
     }).then(function (resp) {
       return resp.json().catch(function () { return {}; }).then(function (data) {
         if (!resp.ok) return { ok: false, msg: data.erro || ('HTTP ' + resp.status) };
@@ -733,9 +860,9 @@
   function uploadImagem(path, file, method) {
     var fd = new FormData();
     fd.append('imagem', file);
-    var headers = { 'ngrok-skip-browser-warning': '1' };
-    if (token()) headers['Authorization'] = 'Bearer ' + token();
-    return fetch(API_BASE + path, { method: method || 'POST', headers: headers, body: fd })
+    return fetch(API_BASE + path, {
+      method: method || 'POST', headers: cabecalhos(), credentials: 'include', body: fd
+    })
       .then(function (resp) {
         return resp.json().catch(function () { return {}; }).then(function (data) {
           if (!resp.ok) return { ok: false, msg: data.erro || ('HTTP ' + resp.status) };
@@ -852,8 +979,41 @@
   FG._api = api;
   FG._cache = CACHE;
 
-  // Dispara o carregamento do cache assim que a página abre (se houver token).
-  // FG.pronto resolve quando o cache está cheio — cada tela espera por ele
-  // antes de montar o HTML, para nunca renderizar com dados vazios.
-  FG.pronto = carregarCache();
+  /* =======================================================================
+     SINCRONIZAÇÃO DA SESSÃO COM O SERVIDOR
+     -----------------------------------------------------------------------
+     Pergunta ao servidor quem somos, em vez de acreditar no perfil guardado.
+     Ganha-se uma coisa que o desenho antigo não tinha: mudança de papel,
+     status ou permissão feita pelo admin passa a valer na próxima página, e
+     não só no próximo login. Antes, um usuário rebaixado continuava vendo a
+     tela de admin até deslogar — as rotas o barravam, mas a interface mentia.
+
+     É também aqui que o `imp` (identidade assumida) chega da fonte da
+     verdade: o claim dentro do token assinado, e não um sinalizador do
+     cliente que pode estar velho.
+
+     Roda em PARALELO com o cache: são duas chamadas independentes, e
+     enfileirá-las só somaria latência à abertura de cada página.
+     ======================================================================= */
+  function sincronizarSessao() {
+    if (!temSessao()) return Promise.resolve(null);
+    return api('/auth/sessao').then(function (d) {
+      guardarPerfil(d.usuario);
+      marcarImpersonacao(d.imp || null);
+      montarTarjaIdentidade();     // sobe ou cai, conforme o servidor disser
+      return d;
+    }, function () {
+      // Falha de rede não derruba a sessão: seguimos com o perfil guardado.
+      // Se tiver sido 401, o api() já encerrou a sessão por conta própria.
+      return null;
+    });
+  }
+  FG.sincronizarSessao = sincronizarSessao;
+
+  // Dispara sessão e cache assim que a página abre (se houver sessão).
+  // FG.pronto resolve quando ambos terminaram — cada tela espera por ele
+  // antes de montar o HTML, para nunca renderizar com dados vazios nem com
+  // um perfil desatualizado.
+  FG.pronto = Promise.all([sincronizarSessao(), carregarCache()])
+    .then(function () { return CACHE; });
 })();

@@ -5,10 +5,11 @@ import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import crypto from 'node:crypto';
 import { query, getPool, sql } from '../db.js';
-import { signToken, parsePermissoes } from '../auth.js';
+import { signToken, parsePermissoes, abrirSessao, fecharSessao, requireAuth } from '../auth.js';
 import { erroEndereco, limparIe } from '../validacao.js';
 import { vincularContatoTiny } from '../tiny-contatos.js';
 import { enviarEmail, emailRecuperacaoSenha, appUrl } from '../mail.js';
+import { verificarCaptcha, captchaSiteKey } from '../captcha.js';
 import { limiteLogin, limiteSenha, limiteCadastro } from '../middlewares/rate-limit.js';
 
 const router = Router();
@@ -19,11 +20,25 @@ const RESET_MINUTOS = 60;
 const RESET_ESPERA_MS = 60 * 1000;
 const ultimoPedidoReset = new Map();   // email -> timestamp
 
-// POST /api/auth/login  { email, senha }
+// GET /api/auth/captcha/config
+// Entrega a site key ao front, para o widget se AUTO-OCULTAR quando não há
+// configuração — em vez de renderizar uma caixa quebrada. A site key é
+// pública: ela aparece no HTML de qualquer site que use o widget.
+router.get('/captcha/config', (_req, res) => {
+  res.json({ siteKey: captchaSiteKey() });
+});
+
+// POST /api/auth/login  { email, senha, captcha? }
 router.post('/login', limiteLogin, async (req, res, next) => {
   try {
-    const { email, senha } = req.body;
+    const { email, senha, captcha } = req.body;
     if (!email || !senha) return res.status(400).json({ erro: 'Informe e-mail e senha.' });
+
+    // ANTES de tocar no banco: é o ponto de a verificação anti-robô valer a
+    // pena, poupando uma consulta e uma comparação de bcrypt (que é cara de
+    // propósito) em cada tentativa automatizada.
+    const cap = await verificarCaptcha(captcha, req.ip);
+    if (!cap.ok) return res.status(400).json({ erro: cap.erro });
 
     const rows = await query(
       `SELECT u.UsuarioId, u.Nome, u.Email, u.SenhaHash, u.Papel, u.Status,
@@ -51,9 +66,11 @@ router.post('/login', limiteLogin, async (req, res, next) => {
     if (u.Status === 'bloqueado')
       return res.status(403).json({ erro: 'Usuário bloqueado. Procure o administrador.' });
 
-    const token = signToken(u);
+    // A sessão sai daqui SÓ pelo Set-Cookie. O token não volta mais no corpo:
+    // devolvê-lo era o que permitia ao front antigo guardá-lo no localStorage,
+    // e um valor que o JavaScript nunca vê é um valor que um XSS não rouba.
+    abrirSessao(res, signToken(u));
     res.json({
-      token,
       usuario: {
         id: u.UsuarioId, nome: u.Nome, email: u.Email,
         papel: u.Papel, empresa: u.Empresa, empresaId: u.EmpresaId,
@@ -326,6 +343,93 @@ router.post('/senha/redefinir', async (req, res, next) => {
     }
 
     res.json({ ok: true, msg: 'Senha alterada! Faça login com a nova senha.' });
+  } catch (e) { next(e); }
+});
+
+// ============================================================
+// Sessão: encerrar, consultar e voltar de identidade assumida
+// ============================================================
+
+// POST /api/auth/logout
+// Sem requireAuth de propósito: sair tem de funcionar mesmo com o token já
+// vencido ou corrompido — senão o usuário fica preso numa sessão quebrada.
+// É POST, não GET: um logout em GET seria disparado por prefetch de link e
+// por qualquer <img> apontando para ele.
+router.post('/logout', (_req, res) => {
+  fecharSessao(res);
+  res.json({ ok: true });
+});
+
+// GET /api/auth/sessao
+// Fonte da verdade sobre a sessão. Relê o perfil DO BANCO em vez de repetir o
+// que está no token — assim uma mudança de papel, status ou permissão feita
+// pelo admin vale na hora. Antes, o cliente carregava o papel gravado no
+// login até deslogar: um usuário rebaixado continuava vendo a tela de admin
+// (as rotas já barravam, mas a interface mentia).
+router.get('/sessao', requireAuth, async (req, res, next) => {
+  try {
+    const rows = await query(
+      `SELECT u.UsuarioId, u.Nome, u.Email, u.Papel, u.Status, u.EmpresaId,
+              u.Gestor, u.Permissoes, e.RazaoSocial AS Empresa
+         FROM dbo.Usuario u
+         JOIN dbo.Empresa e ON e.EmpresaId = u.EmpresaId
+        WHERE u.UsuarioId = @id`,
+      { id: req.user.id }
+    );
+    const u = rows[0];
+    // Conta apagada ou bloqueada depois do login: encerra na hora.
+    if (!u || u.Status !== 'aprovado') {
+      fecharSessao(res);
+      return res.status(401).json({ erro: 'Sessão encerrada. Faça login de novo.' });
+    }
+    res.json({
+      usuario: {
+        id: u.UsuarioId, nome: u.Nome, email: u.Email,
+        papel: u.Papel, empresa: u.Empresa, empresaId: u.EmpresaId,
+        gestor: !!u.Gestor, permissoes: parsePermissoes(u.Permissoes)
+      },
+      exp: req.user.exp,
+      imp: req.user.imp || null   // id do admin que assumiu esta identidade
+    });
+  } catch (e) { next(e); }
+});
+
+// POST /api/auth/identidade/voltar
+// Devolve o admin à própria conta depois de assumir a identidade de um
+// cliente. Antes o front guardava o token do admin no localStorage e o
+// restaurava; agora reemitimos a partir do claim `imp`, o que é mais seguro
+// em dois pontos: o token antigo não fica largado num lugar que o JavaScript
+// lê, e o admin é REVALIDADO no banco — o desenho anterior restauraria
+// alegremente a sessão de um admin rebaixado ou bloqueado no meio-tempo.
+router.post('/identidade/voltar', requireAuth, async (req, res, next) => {
+  try {
+    if (!req.user.imp) {
+      return res.status(400).json({ erro: 'Você não está em outra identidade.' });
+    }
+    const rows = await query(
+      `SELECT u.UsuarioId, u.Nome, u.Email, u.Papel, u.Status, u.EmpresaId,
+              u.Gestor, u.Permissoes, e.RazaoSocial AS Empresa
+         FROM dbo.Usuario u
+         JOIN dbo.Empresa e ON e.EmpresaId = u.EmpresaId
+        WHERE u.UsuarioId = @id`,
+      { id: req.user.imp }
+    );
+    const adm = rows[0];
+    if (!adm || adm.Papel !== 'admin' || adm.Status !== 'aprovado') {
+      fecharSessao(res);
+      return res.status(403).json({
+        erro: 'Sua conta de administrador não está mais ativa. Faça login de novo.'
+      });
+    }
+    abrirSessao(res, signToken(adm));
+    console.log(`↩ Identidade devolvida: admin #${adm.UsuarioId} (${adm.Email})`);
+    res.json({
+      usuario: {
+        id: adm.UsuarioId, nome: adm.Nome, email: adm.Email,
+        papel: adm.Papel, empresa: adm.Empresa, empresaId: adm.EmpresaId,
+        gestor: !!adm.Gestor, permissoes: parsePermissoes(adm.Permissoes)
+      }
+    });
   } catch (e) { next(e); }
 });
 

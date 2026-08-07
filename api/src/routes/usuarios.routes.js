@@ -7,7 +7,7 @@
 // ============================================================
 import { Router } from 'express';
 import { query, getPool, sql } from '../db.js';
-import { requireAuth, requireAdmin, signToken, parsePermissoes } from '../auth.js';
+import { requireAuth, requireAdmin, signToken, parsePermissoes, abrirSessao } from '../auth.js';
 
 const router = Router();
 
@@ -126,6 +126,14 @@ router.post('/usuarios/:id/identidade', requireAuth, requireAdmin, async (req, r
     const id = Number(req.params.id);
     if (!id) return res.status(400).json({ erro: 'ID inválido.' });
     if (id === req.user.id) return res.status(400).json({ erro: 'Você já está na sua própria conta.' });
+    // Encadear identidades embaralharia a trilha de auditoria: o `imp` guarda
+    // um id só, então a volta cairia no admin errado.
+    // Na prática o requireAdmin acima já barra (durante a impersonação o papel
+    // é o do alvo, não 'admin'). Esta checagem fica como rede de proteção: se
+    // um dia a regra "não assumir a identidade de outro admin" for afrouxada,
+    // o encadeamento continua bloqueado.
+    if (req.user.imp)
+      return res.status(400).json({ erro: 'Você já está em outra identidade. Volte para a sua conta primeiro.' });
 
     const alvo = (await query(
       `SELECT u.UsuarioId, u.Nome, u.Email, u.Papel, u.Status, u.EmpresaId, u.Gestor, u.Permissoes,
@@ -140,8 +148,15 @@ router.post('/usuarios/:id/identidade', requireAuth, requireAdmin, async (req, r
     console.log(`↪ Identidade assumida: admin #${req.user.id} (${req.user.email}) → ` +
                 `#${alvo.UsuarioId} (${alvo.Email}) da empresa "${alvo.Empresa}".`);
 
+    // Sobrescreve os cookies de sessão com a identidade assumida. O token do
+    // admin não é guardado em lugar nenhum: a volta reemite a partir do claim
+    // `imp` (POST /api/auth/identidade/voltar).
+    abrirSessao(res, signToken(alvo, { imp: req.user.id, expiresIn: '1h' }));
+
     res.json({
-      token: signToken(alvo, { imp: req.user.id, expiresIn: '1h' }),
+      // Quem assumiu. O front usa para desenhar a tarja de aviso já na
+      // primeira renderização, sem esperar o GET /auth/sessao.
+      imp: req.user.id,
       usuario: {
         id: alvo.UsuarioId, nome: alvo.Nome, email: alvo.Email,
         papel: alvo.Papel, empresa: alvo.Empresa, empresaId: alvo.EmpresaId,
