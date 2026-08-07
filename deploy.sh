@@ -65,6 +65,35 @@ if ! systemctl is-active --quiet "$SERVICO"; then
   exit 1
 fi
 
+# ---------------------------------------------------------------------------
+# Conferencias que falham em SILENCIO se ninguem olhar.
+# Nao interrompem o deploy: o site sobe e funciona nos dois casos. O problema e
+# que funciona ERRADO, sem sintoma nenhum, e so se descobre num incidente.
+# ---------------------------------------------------------------------------
+
+# 1) Sem NODE_ENV=production (ou COOKIE_SECURE=1) os cookies de sessao saem sem
+#    a marca Secure e podem trafegar em texto claro.
+if ! systemctl show "$SERVICO" -p Environment | grep -qE 'NODE_ENV=production|COOKIE_SECURE=1'; then
+  echo ""
+  echo "!! ATENCAO: a unidade $SERVICO nao define NODE_ENV=production nem"
+  echo "!! COOKIE_SECURE=1. Os cookies de sessao estao saindo SEM Secure."
+  echo "!! Corrija com:  sudo systemctl edit $SERVICO"
+  echo "!!   [Service]"
+  echo "!!   Environment=NODE_ENV=production"
+fi
+
+# 2) Nenhuma resposta de /api pode ser cacheavel: elas carregam Set-Cookie, e
+#    uma copia guardada entrega a sessao de um usuario para o proximo.
+CACHE_API=$(curl -sS -o /dev/null -D - https://fullgas.app.br/api/health 2>/dev/null \
+            | grep -i '^cache-control:' || true)
+if ! echo "$CACHE_API" | grep -qi 'no-store'; then
+  echo ""
+  echo "!! ATENCAO: /api/health nao respondeu com Cache-Control: no-store."
+  echo "!! Recebido: ${CACHE_API:-(nenhum header Cache-Control)}"
+  echo "!! Confira o location /api/ do Nginx (deploy/nginx/fullgas.conf) e se"
+  echo "!! ha alguma regra 'Cache Everything' na Cloudflare pegando /api/*."
+fi
+
 echo ""
 echo "==> Deploy concluido. Confira: https://fullgas.app.br"
 echo "    (se algo nao atualizar no navegador, limpe o cache do Cloudflare)"
