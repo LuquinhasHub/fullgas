@@ -299,12 +299,10 @@
       sincronizarCascade(modeloPorCodigo(s.modelo.id));
       var outro = s.lado === 'chassi' ? 'engine' : 'chassi';
 
-      // Cabeçalho (legenda das colunas). Alinha com o grid do .part-row: as
-      // duas primeiras colunas (checkbox e nº) ficam sem rótulo.
-      var cabecalho = '<div class="part-head">' +
-        '<span></span><span>Nº</span>' +
-        '<span>SKU</span><span>Descrição</span>' +
-        '<span>Status</span><span>Quantidade</span><span></span></div>';
+      // Não há mais cabeçalho de colunas: cada peça virou um card, e dentro
+      // dele cada dado já se identifica sozinho (nome em destaque, código
+      // abaixo, preço à direita, status com bolinha colorida). Uma legenda
+      // de colunas só faz sentido quando os dados estão alinhados em grade.
 
       // Status de compra da peça — mesmo princípio de cores da loja:
       // verde = em estoque, amarelo = pré-venda (com previsão), vermelho =
@@ -330,15 +328,36 @@
         var vIni = indisp ? 0 : (max ? Math.min(p.quantidadePadrao, max) : p.quantidadePadrao);
         // Ver a peça na loja abre em NOVA aba: o cliente não perde o finder.
         var link = '/loja#/produto/' + encodeURIComponent(p.sku);
-        return '<div class="part-row' + (marcada ? ' sel' : '') + '" data-row="' + i + '" data-num="' + esc(p.numeroImagem) + '">' +
-          '<input type="checkbox" class="pr-chk" data-row="' + i + '"' + (marcada ? ' checked' : '') + '>' +
-          '<span class="pr-num">' + esc(num) + '</span>' +
-          '<a href="' + link + '" target="_blank" rel="noopener">' + esc(p.sku) + '</a>' +
-          '<b><a href="' + link + '" target="_blank" rel="noopener">' + esc(p.nome) + '</a></b>' +
-          statusPeca(p) +
-          '<input class="qn" type="number" min="0"' + (max ? ' max="' + max + '"' : '') + ' value="' + vIni + '"' +
-          ' data-art="' + esc(p.sku) + '"' + (indisp ? ' disabled title="Peça indisponível para compra"' : '') + '>' +
-          '<span>(' + p.quantidade + ')</span>' +
+        // Texto que a busca varre: nº na imagem + código + nome, tudo junto e
+        // em minúsculas. Fica pronto aqui, uma vez, em vez de ser remontado a
+        // cada tecla digitada no filtro.
+        var busca = esc((num + ' ' + p.sku + ' ' + p.nome).toLowerCase());
+        return '<div class="part-row' + (marcada ? ' sel' : '') + '" data-row="' + i + '"' +
+          ' data-busca="' + busca + '" data-num="' + esc(p.numeroImagem) + '">' +
+          '<div class="pr-top">' +
+            '<span class="pr-num">' + esc(num) + '</span>' +
+            '<span class="pr-id">' +
+              '<span class="pr-nome"><a href="' + link + '" target="_blank" rel="noopener">' + esc(p.nome) + '</a></span>' +
+              '<a class="pr-sku" href="' + link + '" target="_blank" rel="noopener">' + esc(p.sku) + '</a>' +
+            '</span>' +
+            '<span class="pr-preco">' + FG.fmtMoney(p.preco) + '</span>' +
+          '</div>' +
+          '<div class="pr-bot">' +
+            '<span class="pr-info">' +
+              // Quantidade que o diagrama pede desta peça no conjunto — é
+              // referência de montagem, não o que vai à cesta (esse é o campo
+              // editável ao lado).
+              '<span class="pr-ref">Uds. <b>' + p.quantidade + '</b></span>' +
+              statusPeca(p) +
+            '</span>' +
+            '<span class="pr-acao">' +
+              '<label class="pr-sel"><input type="checkbox" class="pr-chk" data-row="' + i + '"' +
+                (marcada ? ' checked' : '') + '> Selecionar</label>' +
+              '<input class="qn" type="number" min="0"' + (max ? ' max="' + max + '"' : '') + ' value="' + vIni + '"' +
+              ' aria-label="Quantidade" data-art="' + esc(p.sku) + '"' +
+              (indisp ? ' disabled title="Peça indisponível para compra"' : '') + '>' +
+            '</span>' +
+          '</div>' +
           '</div>';
       }).join('');
 
@@ -351,22 +370,31 @@
         '<a class="btn" href="#/modelo/' + esc(s.modelo.id) + '/' + outro + '">SWITCH TO ' + (outro === 'engine' ? 'ENGINE' : 'FRAME') + '</a>' +
         '</div>' +
         '<div class="part-layout">' +
-        '<div>' +
+        '<div class="part-col">' +
         '<div class="part-toolbar"><span class="muted">' + esc(s.numero) + ' — ' + esc(s.nome) + '</span>' +
         '<button class="btn" id="fa-cart">🛒 ADD ITEM(S) TO BASKET</button></div>' +
-        (linhas ? cabecalho + linhas : '<p class="muted">Nenhuma peça cadastrada nesta seção ainda.</p>') +
+        (linhas
+          ? '<div class="pt-busca"><span class="lupa">🔍</span>' +
+            '<input type="search" id="pt-busca" autocomplete="off"' +
+            ' placeholder="Buscar peça por nº, código ou nome" aria-label="Buscar peça nesta seção">' +
+            '<button class="limpa hidden" id="pt-limpa" type="button" title="Limpar busca" aria-label="Limpar busca">✕</button></div>' +
+            '<div class="part-list">' + linhas + '</div>' +
+            '<p class="muted hidden" id="pt-vazio">Nenhuma peça desta seção corresponde à busca.</p>'
+          : '<p class="muted">Nenhuma peça cadastrada nesta seção ainda.</p>') +
         '</div>' +
         '<div class="diagram-box">' +
         (s.imagem
-          ? '<div class="diag-tools">' +
-            '<button class="dg-btn" id="dg-reset" title="Ajustar à tela">⟳</button>' +
-            '<span class="grow"></span>' +
+          ? '<div class="diag-fab nav">' +
             '<button class="dg-btn" id="dg-prev"' + (s.vizinhos.anterior ? '' : ' disabled') + ' title="Seção anterior">◀</button>' +
-            '<input type="range" id="dg-zoom" min="0.1" max="1.6" step="0.05" value="0.6">' +
-            '<span class="dg-marks">0.1&nbsp;&nbsp;0.6&nbsp;&nbsp;1.1&nbsp;&nbsp;1.6</span>' +
             '<button class="dg-btn" id="dg-next"' + (s.vizinhos.proxima ? '' : ' disabled') + ' title="Próxima seção">▶</button>' +
             '</div>' +
-            '<div class="diag-viewport" id="dg-view"><div class="diag-canvas" id="dg-canvas">' +
+            '<div class="diag-fab zoom">' +
+            '<button class="dg-btn" id="dg-in" title="Aproximar">+</button>' +
+            '<button class="dg-btn" id="dg-reset" title="Ajustar à tela">⟳</button>' +
+            '<button class="dg-btn" id="dg-out" title="Afastar">−</button>' +
+            '</div>' +
+            '<div class="diag-viewport" id="dg-view" title="Use a roda do mouse para aproximar; arraste para mover">' +
+            '<div class="diag-canvas" id="dg-canvas">' +
             '<img id="dg-img" src="' + esc(s.imagem) + '" alt="' + esc(s.nome) + '" draggable="false">' +
             '</div></div>'
           : '<div class="diag-vazio">' + FG.bikeSVG(s.destaque, 360) +
@@ -436,27 +464,138 @@
         refreshCart();
       });
 
+      /* ---------- busca dentro da lista de peças ----------
+         Filtra só a EXIBIÇÃO. As peças marcadas continuam marcadas mesmo
+         escondidas, e o botão de enviar à cesta continua levando todas elas:
+         a busca é uma lente para achar a peça, não uma seleção. Se ela
+         apagasse o que está fora do filtro, o cliente perderia sem aviso o
+         que já tinha escolhido em outra busca.
+
+         Fica ANTES do bloco do diagrama de propósito: aquele trecho começa
+         com um `return` para as seções sem imagem, e a lista de peças (com a
+         busca) existe nessas seções também. */
+      var campoBusca = document.getElementById('pt-busca');
+      var botaoLimpa = document.getElementById('pt-limpa');
+      var avisoVazio = document.getElementById('pt-vazio');
+
+      function filtrarPecas() {
+        if (!campoBusca) return;
+        var termo = campoBusca.value.trim().toLowerCase();
+        var visiveis = 0;
+        Array.prototype.forEach.call(fdView.querySelectorAll('.part-row'), function (row) {
+          var casa = !termo || (row.getAttribute('data-busca') || '').indexOf(termo) >= 0;
+          row.classList.toggle('oculta', !casa);
+          if (casa) visiveis++;
+        });
+        botaoLimpa.classList.toggle('hidden', !termo);
+        avisoVazio.classList.toggle('hidden', visiveis > 0);
+      }
+      if (campoBusca) {
+        campoBusca.addEventListener('input', filtrarPecas);
+        botaoLimpa.addEventListener('click', function () {
+          campoBusca.value = ''; filtrarPecas(); campoBusca.focus();
+        });
+      }
+
       /* ---------- diagrama: zoom + hotspots ---------- */
       if (!s.imagem) return;
       var img = document.getElementById('dg-img');
       var canvas = document.getElementById('dg-canvas');
       var viewport = document.getElementById('dg-view');
-      var slider = document.getElementById('dg-zoom');
       var natW = 0, natH = 0;
+      var zoom = 1;             // fator atual sobre o tamanho natural da imagem
+      var posX = 0, posY = 0;   // canto superior esquerdo do desenho, no quadro
+      // Teto de 1 = 100% do tamanho original. Passar disso não revela nenhum
+      // detalhe novo: só amplia os pixels que o admin enviou, e o desenho
+      // aparece borrado como se a foto fosse de má qualidade.
+      var Z_MAX = 1;
+      // Piso = o zoom em que a imagem cabe inteira no quadro (calculado quando
+      // ela carrega). Afastar além disso só produziria um desenho pequeno
+      // boiando num quadro vazio — não há nada a mais para ver.
+      var zMin = 0.1;
 
-      function aplicarZoom(z) {
-        if (!natW) return;
-        slider.value = z;
-        canvas.style.width = Math.round(natW * z) + 'px';
+      /* POR QUE A IMAGEM NÃO USA MAIS ROLAGEM (overflow: auto)
+         ------------------------------------------------------------------
+         O quadro rolava, e a posição do desenho era o scroll. Isso tem um
+         defeito que aparece justo no uso mais comum: enquanto a imagem CABE
+         no quadro — que é o estado inicial, o "ajustar à tela" —, não há o
+         que rolar, o scroll fica preso em zero e o desenho não sai do lugar.
+         Resultado: arrastar não funcionava, e o zoom com a roda não tinha
+         como manter o ponto sob o cursor, porque o único jeito de deslocar a
+         imagem estava travado.
+
+         Agora o desenho é posicionado à mão (posX/posY, em pixels dentro do
+         quadro). Some o travamento: ele se move sempre, ampliado ou não, e a
+         âncora do zoom vira uma conta direta de subtração. */
+      function aplicarPos() {
+        canvas.style.left = Math.round(posX) + 'px';
+        canvas.style.top  = Math.round(posY) + 'px';
       }
-      // Ajuste automático: a imagem INTEIRA cabe no quadro (largura E altura),
+
+      // O desenho nunca sai do quadro. Em cada eixo, só há dois casos:
+      //   • cabe no quadro  → fica CENTRADO e não se move (o zoom mínimo é
+      //     exatamente esse ponto, então é o estado de repouso da tela);
+      //   • maior que o quadro → desliza, mas as bordas param nas bordas do
+      //     quadro. Nunca aparece faixa branca ao lado do desenho.
+      // Sem isto o cliente arrasta a imagem para fora e fica olhando um quadro
+      // vazio, sem entender que o diagrama continua ali, só que deslocado.
+      function limitarPos() {
+        var w = natW * zoom, h = natH * zoom;
+        var vw = viewport.clientWidth, vh = viewport.clientHeight;
+        posX = (w <= vw) ? (vw - w) / 2 : Math.min(0, Math.max(vw - w, posX));
+        posY = (h <= vh) ? (vh - h) / 2 : Math.min(0, Math.max(vh - h, posY));
+        // A mãozinha só aparece quando há mesmo para onde arrastar.
+        viewport.classList.toggle('movel', w > vw || h > vh);
+      }
+
+      // Zoom mantendo FIXO o ponto do desenho que está sob (ancoraX, ancoraY),
+      // coordenadas relativas ao canto do quadro. Sem âncora, usa o centro do
+      // quadro — é o que os botões + e − fazem.
+      function aplicarZoom(z, ancoraX, ancoraY) {
+        if (!natW) return;
+        z = Math.max(zMin, Math.min(Z_MAX, z));
+        if (z === zoom) return;
+        var ax = (ancoraX === undefined) ? viewport.clientWidth / 2 : ancoraX;
+        var ay = (ancoraY === undefined) ? viewport.clientHeight / 2 : ancoraY;
+
+        // Onde a âncora cai DENTRO do desenho, em fração de 0 a 1.
+        var fx = (ax - posX) / (natW * zoom);
+        var fy = (ay - posY) / (natH * zoom);
+
+        zoom = z;
+        canvas.style.width = Math.max(1, natW * zoom) + 'px';
+        // Reposiciona para essa mesma fração voltar a cair sob a âncora.
+        posX = ax - fx * natW * zoom;
+        posY = ay - fy * natH * zoom;
+        limitarPos();
+        aplicarPos();
+      }
+
+      // Zoom em que a imagem INTEIRA cabe no quadro (largura E altura),
       // qualquer que seja o tamanho enviado pelo admin — o padrão dos diagramas
       // é 750×1080 (retrato), que sem o limite de altura estouraria o quadro.
+      // É também o PISO do zoom, e o teto de 100% vale aqui: um diagrama menor
+      // que o quadro aparece no tamanho real, e não esticado.
       function zoomAjuste() {
-        if (!natW) return 0.6;
-        var fit = Math.min((viewport.clientWidth - 2) / natW,
-                           (viewport.clientHeight - 2) / natH);
-        return Math.max(0.1, Math.min(1.6, Math.floor(fit * 20) / 20));
+        if (!natW) return 1;
+        var fit = Math.min((viewport.clientWidth - 16) / natW,
+                           (viewport.clientHeight - 16) / natH);
+        return Math.min(Z_MAX, Math.max(0.02, fit));
+      }
+      // Encaixa e centraliza — estado inicial e o que o botão ⟳ devolve.
+      //
+      // A tela abre no encaixe exato, sem passo extra de aproximação. O passo
+      // extra existia porque o quadro era deitado: o desenho é retrato, então
+      // ele encaixava pela altura e ficava pequeno no meio de duas faixas
+      // brancas. Com o quadro em pé, na proporção do próprio desenho, o
+      // encaixe JÁ preenche o quadro — aproximar além disso agora só cortaria
+      // parte do diagrama logo na abertura.
+      function ajustarNaTela() {
+        zMin = zoomAjuste();
+        zoom = zMin;
+        canvas.style.width = Math.max(1, natW * zoom) + 'px';
+        limitarPos();   // no piso a imagem cabe inteira, então isto a centraliza
+        aplicarPos();
       }
 
       function montarHotspots() {
@@ -490,7 +629,13 @@
                 if (!alvo) alvo = row;
               }
             });
-            if (alvo) alvo.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            if (alvo) {
+              // A peça pode estar escondida por uma busca em aberto. Sem
+              // limpar o filtro, o clique no diagrama marcaria a peça e não
+              // rolaria para lugar nenhum — parece que nada aconteceu.
+              if (alvo.classList.contains('oculta')) { campoBusca.value = ''; filtrarPecas(); }
+              alvo.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
             else FG.toast('Nenhuma peça com o nº ' + num + ' nesta lista.');
             sincronizarHotspots();
           });
@@ -501,7 +646,7 @@
 
       function prontoImg() {
         natW = img.naturalWidth || 1; natH = img.naturalHeight || 1;
-        aplicarZoom(zoomAjuste());
+        ajustarNaTela();
         montarHotspots();
       }
       if (img.complete && img.naturalWidth) prontoImg();
@@ -509,8 +654,50 @@
         viewport.innerHTML = '<p class="muted" style="padding:20px;">Não foi possível carregar o diagrama.</p>';
       }); }
 
-      slider.addEventListener('input', function () { aplicarZoom(Number(slider.value)); });
-      document.getElementById('dg-reset').addEventListener('click', function () { aplicarZoom(zoomAjuste()); });
+      /* ---- roda do mouse: aproxima/afasta no ponto sob o cursor ----
+         preventDefault exige passive:false — sem isso o navegador ignora o
+         pedido e a PÁGINA rola junto com o zoom. E a normalização do deltaY é
+         obrigatória: o mesmo giro de roda chega como ~100 (pixels), ~3
+         (linhas, Firefox) ou ~1 (páginas), então usar o valor cru daria um
+         salto absurdo num navegador e quase nada em outro. */
+      viewport.addEventListener('wheel', function (e) {
+        e.preventDefault();
+        var d = e.deltaY;
+        if (e.deltaMode === 1) d *= 16;        // linhas → px
+        else if (e.deltaMode === 2) d *= 100;  // páginas → px
+        var r = viewport.getBoundingClientRect();
+        aplicarZoom(zoom * Math.pow(1.0016, -d), e.clientX - r.left, e.clientY - r.top);
+      }, { passive: false });
+
+      /* ---- arrastar o desenho livremente, ampliado ou não ----
+         Vale para mouse e para o toque: o quadro não rola mais, então sem isto
+         não haveria como mover a imagem no celular.
+         Nada é iniciado quando o clique começa em cima de um hotspot — senão o
+         arrasto engoliria o clique que seleciona a peça. */
+      var arrastando = false, xIni = 0, yIni = 0, pxIni = 0, pyIni = 0;
+      viewport.addEventListener('pointerdown', function (e) {
+        if (e.button !== 0) return;
+        if (e.target.closest && e.target.closest('.hotspot')) return;
+        arrastando = true;
+        xIni = e.clientX; yIni = e.clientY;
+        pxIni = posX; pyIni = posY;
+        viewport.classList.add('arrastando');
+        viewport.setPointerCapture(e.pointerId);
+      });
+      viewport.addEventListener('pointermove', function (e) {
+        if (!arrastando) return;
+        posX = pxIni + (e.clientX - xIni);
+        posY = pyIni + (e.clientY - yIni);
+        limitarPos();
+        aplicarPos();
+      });
+      function fimArrasto() { arrastando = false; viewport.classList.remove('arrastando'); }
+      viewport.addEventListener('pointerup', fimArrasto);
+      viewport.addEventListener('pointercancel', fimArrasto);
+
+      document.getElementById('dg-in').addEventListener('click', function () { aplicarZoom(zoom * 1.3); });
+      document.getElementById('dg-out').addEventListener('click', function () { aplicarZoom(zoom / 1.3); });
+      document.getElementById('dg-reset').addEventListener('click', ajustarNaTela);
       document.getElementById('dg-prev').addEventListener('click', function () {
         if (s.vizinhos.anterior) location.hash = '#/secao/' + s.vizinhos.anterior;
       });
