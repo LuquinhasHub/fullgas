@@ -695,29 +695,125 @@ main.finder { padding: 8px 28px 70px; }
 .thumb .tn { position: absolute; top: 6px; right: 10px; color: var(--red); font-weight: 800; font-size: 13px; }
 .thumb .thumb-bg { background: #e9e9e9; padding: 6px 14px; }
 
-.part-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 36px; align-items: start; }
-@media (max-width: 1020px) { .part-layout { grid-template-columns: 1fr; } }
-/* grid compartilhado pela legenda (.part-head) e pelas linhas (.part-row):
-   checkbox | nº | SKU | descrição | quantidade | (qtd de referência) */
-.part-head, .part-row { display: grid; grid-template-columns: 26px 40px 150px 1fr 130px 70px 44px; gap: 8px; align-items: center; }
+/* Metade da largura para as peças, metade para o diagrama — e o quadro do
+   diagrama EM PÉ, na proporção dos desenhos que o admin envia (750×1080).
+   Deitado, o encaixe da imagem era limitado pela altura e sobrava faixa
+   branca dos dois lados, deixando o desenho pequeno no meio do quadro.
+   A rolagem fica só dentro da lista (.part-list); pôr overflow também aqui
+   criaria uma segunda barra colada na primeira. */
+.part-layout {
+  display: grid; gap: 36px; align-items: start; width: 100%;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+/* A altura das duas colunas NASCE da largura delas, e não de um valor fixo.
+   É o que mantém o quadro em pé: com altura fixa, metade de uma tela larga
+   passa a ser mais comprida que alta, e o quadro voltava a deitar.
+   Como as duas colunas têm a MESMA largura (1fr e 1fr), a mesma proporção lhes
+   dá a mesma altura — é assim que a lista de peças termina exatamente na linha
+   em que o diagrama termina, sem precisar sincronizar dois números à mão.
+   O teto em vh impede que um monitor muito largo gere um quadro mais alto que
+   a janela, obrigando a rolar a página para ver o pé do desenho. */
+.part-layout > * {
+  aspect-ratio: 0.72;                    /* proporção dos diagramas (750×1080) */
+  max-height: calc(100vh - 150px);
+  min-height: 480px;
+}
+@media (max-width: 1020px) {
+  .part-layout { grid-template-columns: 1fr; }
+  /* Em coluna única a proporção é abandonada: empilhadas, as duas metades
+     ficariam altas demais e a página viraria uma rolagem sem fim. */
+  .part-layout > * { aspect-ratio: auto; height: calc(100vh - 200px); }
+}
+/* A coluna das peças é uma pilha: barra, busca e a lista, que fica com toda a
+   altura que sobrar e rola dentro de si mesma. */
+.part-col { display: flex; flex-direction: column; min-height: 0; }
+
+/* ---- lista de peças: um CARD por peça ----------------------------------
+   Cada peça é um bloco fechado, e não uma linha de tabela. Numa tabela o
+   olho precisa cruzar a linha inteira para juntar nome, código, status e
+   quantidade; no card esses quatro dados ficam agrupados dentro da mesma
+   moldura, na ordem em que o cliente decide (o que é › quanto custa ›
+   posso comprar › quantos levo).
+
+   As classes .part-row, .pr-chk, .qn e o data-num continuam com os mesmos
+   nomes de antes de propósito: o diagrama sincroniza os hotspots por esses
+   seletores (ver finder.js). Renomear qualquer um deles quebra o realce ao
+   clicar num número da imagem, sem erro nenhum no console. */
+/* A lista rola dentro de si mesma, com a mesma altura do quadro do diagrama
+   (.diag-viewport, 560px). Assim a imagem não sai da tela quando a seção tem
+   muitas peças: o cliente clica num número do diagrama e a lista rola até a
+   peça sem que o diagrama suma do campo de visão.
+   O padding à direita evita que a barra de rolagem encoste na borda dos cards. */
+/* flex:1 + min-height:0 é o par obrigatório para a lista rolar dentro da
+   coluna: sem o min-height:0, um item flex se recusa a encolher abaixo do
+   próprio conteúdo e a lista estoura a altura da coluna em vez de rolar. */
+.part-list {
+  display: flex; flex-direction: column; gap: 12px;
+  flex: 1 1 0; min-height: 0; overflow-y: auto; padding: 2px 10px 2px 2px;
+}
+/* barra de rolagem discreta (Chrome/Edge/Safari) */
+.part-list::-webkit-scrollbar { width: 10px; }
+.part-list::-webkit-scrollbar-track { background: #f2f2f2; border-radius: 5px; }
+.part-list::-webkit-scrollbar-thumb { background: #c4c4c4; border-radius: 5px; }
+.part-list::-webkit-scrollbar-thumb:hover { background: var(--red); }
+/* Firefox */
+.part-list { scrollbar-width: thin; scrollbar-color: #c4c4c4 #f2f2f2; }
+/* Na impressão a lista sai inteira — nada de cortar no que coube na tela. */
+@media print { .part-list { max-height: none; overflow: visible; } }
+.part-row {
+  border: 1px solid #e0e0e0; border-radius: 8px; background: #fff;
+  padding: 14px 16px; font-size: 14.5px;
+  display: flex; flex-direction: column; gap: 12px;
+  transition: border-color .15s, box-shadow .15s;
+}
+.part-row:hover { border-color: #bdbdbd; box-shadow: 0 2px 8px rgba(0,0,0,.07); }
+/* Selecionada: moldura na cor da marca + leve tom de fundo. NÃO preenche o
+   card inteiro de amarelo — com blocos grandes isso vira uma mancha que
+   apaga o contraste do texto e do status. */
+.part-row.sel { border-color: var(--red); border-width: 2px; padding: 13px 15px; background: #fffdf2; }
+
+/* linha de cima: nº · nome/SKU · preço */
+.part-row .pr-top { display: flex; align-items: flex-start; gap: 14px; }
 /* nº definido pelo admin (o mesmo da área clicável do diagrama) */
-.part-row .pr-num { font-weight: 700; text-align: center; overflow: hidden; text-overflow: ellipsis; }
-.part-head { padding: 6px 8px; border-bottom: 2px solid #ccc; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: #666; }
-.part-row { border-bottom: 1px solid #e3e3e3; padding: 9px 8px; font-size: 12px; }
-.part-row:nth-child(even) { background: #f6f6f6; }
-.part-row.sel { background: var(--red); color: var(--ink); }
-.part-row.sel a { color: #fff; }
-.part-row b a { color: var(--ink); }
-.part-row b a:hover { color: var(--red); }
-.part-row input.qn { width: 100%; border: 1px solid #ddd; padding: 5px 4px; text-align: center; }
+.part-row .pr-num {
+  flex: 0 0 auto; min-width: 34px; height: 34px; padding: 0 6px;
+  display: flex; align-items: center; justify-content: center;
+  background: #f0f0f0; border-radius: 5px;
+  font-weight: 700; font-size: 14px; color: #444;
+}
+.part-row.sel .pr-num { background: var(--red); color: var(--ink); }
+.part-row .pr-id { flex: 1; min-width: 0; }
+.part-row .pr-nome { display: block; font-weight: 700; font-size: 15px; text-transform: uppercase; line-height: 1.3; }
+.part-row .pr-nome a { color: var(--ink); }
+.part-row .pr-nome a:hover { color: var(--red); }
+.part-row .pr-sku { display: inline-block; margin-top: 3px; font-size: 12.5px; color: #7a7a7a; }
+.part-row .pr-sku:hover { color: var(--red); }
+.part-row .pr-preco { flex: 0 0 auto; font-weight: 800; font-size: 16px; white-space: nowrap; }
+
+/* linha de baixo: qtd de referência + status | seleção + quantidade */
+.part-row .pr-bot {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 14px; flex-wrap: wrap;
+  border-top: 1px solid #f0f0f0; padding-top: 11px;
+}
+.part-row .pr-info { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; font-size: 13px; }
+.part-row .pr-ref { color: #777; }
+.part-row .pr-ref b { color: var(--ink); font-weight: 700; }
+.part-row .pr-acao { display: flex; align-items: center; gap: 12px; margin-left: auto; }
+.part-row .pr-sel { display: flex; align-items: center; gap: 6px; font-size: 13px; color: #666; cursor: pointer; user-select: none; }
+.part-row .pr-sel input { cursor: pointer; width: 16px; height: 16px; accent-color: var(--red); }
+.part-row.sel .pr-sel { color: var(--ink); font-weight: 600; }
+.part-row input.qn { width: 78px; border: 1px solid #ddd; border-radius: 5px; padding: 8px 6px; text-align: center; font-size: 14px; }
 .part-row input.qn:disabled { background: #f3f3f3; color: #aaa; cursor: not-allowed; }
 /* status de compra da peça (verde / amarelo / vermelho) */
-.pt-status { font-size: 11px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pt-status { font-size: 13px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pt-status.ok { color: var(--green); }
 .pt-status.pre { color: #b45309; }
 .pt-status.out { color: #b91c1c; } /* indisponível: vermelho semântico */
-.part-row.sel .pt-status { color: #fff; }
-.diagram-box { border: 1px solid #ccc; min-height: 460px; display: flex; flex-direction: column; gap: 0; padding: 0; }
+/* O card selecionado mantém fundo claro, então o status conserva a própria
+   cor — era branco quando a seleção pintava a linha inteira de amarelo. */
+/* position:relative é a âncora dos botões de zoom, que flutuam sobre a imagem */
+.diagram-box { position: relative; border: 1px solid #ccc; min-height: 460px; display: flex; flex-direction: column; gap: 0; padding: 0; }
 .diagram-box .cap { font-size: 11px; color: var(--gray); }
 .fnd-actions { display: flex; gap: 12px; margin: 14px 0 22px; }
 
@@ -734,20 +830,60 @@ main.finder { padding: 8px 28px 70px; }
 /* miniaturas das seções: usa o diagrama enviado pelo admin quando existir */
 .thumb img { max-width: 100%; max-height: 96px; object-fit: contain; }
 
-/* ---- diagrama com zoom + hotspots (tela da seção) ---- */
-.diag-tools { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 1px solid #e3e3e3; }
-.diag-tools .grow { flex: 1; }
-.diag-tools .dg-btn { background: #fff; border: 1px solid #ccc; width: 28px; height: 24px; cursor: pointer; font-size: 12px; line-height: 1; }
-.diag-tools .dg-btn:hover:not(:disabled) { border-color: var(--red); color: var(--red); }
-.diag-tools .dg-btn:disabled { opacity: .4; cursor: default; }
-.diag-tools input[type="range"] { width: 130px; accent-color: var(--red); }
-.diag-tools .dg-marks { font-size: 10px; color: #555; letter-spacing: .02em; }
-/* altura FIXA: é a referência do ajuste automático do zoom (finder.js encaixa
-   a imagem inteira — largura e altura — dentro deste quadro) */
-.diag-viewport { overflow: auto; height: 560px; background: #fff; flex: 1; }
-.diag-canvas { position: relative; width: 100%; }
-.diag-canvas img { display: block; width: 100%; height: auto; user-select: none; }
+/* ---- diagrama com zoom + hotspots (tela da seção) ----
+   Não há mais barra de zoom: o zoom é dado com a roda do mouse sobre a
+   própria imagem, ancorado no ponto sob o cursor (ver finder.js). Os botões
+   flutuam SOBRE o desenho, em vez de ocupar uma faixa acima dele — numa tela
+   em que o conteúdo é uma imagem grande, cada pixel de altura gasto com
+   controles sai do desenho. */
+.diag-fab {
+  position: absolute; z-index: 3; display: flex; flex-direction: column;
+  background: #fff; border: 1px solid #d5d5d5; border-radius: 6px;
+  overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,.12);
+}
+.diag-fab.zoom { top: 12px; right: 12px; }
+.diag-fab.nav  { top: 12px; left: 12px; flex-direction: row; }
+.diag-fab .dg-btn {
+  background: #fff; border: none; width: 34px; height: 34px;
+  cursor: pointer; font-size: 15px; line-height: 1; color: #444;
+  display: flex; align-items: center; justify-content: center;
+}
+.diag-fab.zoom .dg-btn + .dg-btn { border-top: 1px solid #ececec; }
+.diag-fab.nav  .dg-btn + .dg-btn { border-left: 1px solid #ececec; }
+.diag-fab .dg-btn:hover:not(:disabled) { background: #fdf6dc; color: var(--red); }
+.diag-fab .dg-btn:disabled { opacity: .35; cursor: default; }
+
+/* O quadro NÃO rola: é uma área livre onde o desenho é posicionado à mão pelo
+   finder.js (left/top). Com rolagem, a imagem ficava presa enquanto coubesse
+   no quadro — não havia o que rolar —, e era justamente aí que arrastar e o
+   zoom no cursor precisavam funcionar.
+   touch-action:none entrega os gestos ao nosso arrasto; sem isso o navegador
+   os interpreta como rolagem da página e o desenho não se mexe no celular. */
+.diag-viewport {
+  position: relative; overflow: hidden;
+  background: #fff; flex: 1 1 0; min-height: 0; touch-action: none;
+}
+/* A mãozinha só aparece quando o desenho está ampliado além do quadro — que é
+   a única situação em que arrastar move alguma coisa. No zoom mínimo a imagem
+   cabe inteira e fica fixa no centro; oferecer o cursor de arrasto ali seria
+   prometer um gesto que não faz nada. */
+.diag-viewport.movel { cursor: grab; }
+.diag-viewport.movel.arrastando { cursor: grabbing; }
+.diag-canvas { position: absolute; top: 0; left: 0; }
+.diag-canvas img { display: block; width: 100%; height: auto; user-select: none; -webkit-user-drag: none; }
 .diag-vazio { display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 10px; padding: 20px; min-height: 420px; }
+
+/* ---- busca dentro da lista de peças (nº, código ou nome) ---- */
+.pt-busca { position: relative; margin-bottom: 10px; }
+.pt-busca input {
+  width: 100%; padding: 11px 34px 11px 36px; font-size: 14px;
+  border: 1px solid #ddd; border-radius: 8px; background: #fff;
+}
+.pt-busca input:focus { outline: none; border-color: var(--red); box-shadow: 0 0 0 3px rgba(229,177,0,.18); }
+.pt-busca .lupa { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: #9a9a9a; font-size: 14px; pointer-events: none; }
+.pt-busca .limpa { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: none; border: none; color: #999; font-size: 16px; cursor: pointer; line-height: 1; padding: 4px; }
+.pt-busca .limpa:hover { color: var(--red); }
+.part-row.oculta { display: none; }
 
 /* hotspot: área clicável SEMPRE visível (quadrado amarelo, como no editor do
    admin); "acende" em PRETO no hover/seleção (o fundo já é amarelo — a
@@ -770,8 +906,22 @@ main.finder { padding: 8px 28px 70px; }
   .cart-fab { display: none !important; }
   /* finder: imprime a tela da seção (lista de peças + diagrama) */
   main.finder, main.finder * { visibility: visible; }
-  main.finder .search-panel, main.finder .fnd-actions, main.finder .diag-tools { display: none; }
+  main.finder .search-panel, main.finder .fnd-actions,
+  main.finder .diag-fab, main.finder .pt-busca { display: none; }
+  /* Na tela o desenho é posicionado à mão dentro de um quadro de altura fixa;
+     no papel isso viraria uma imagem cortada, presa no zoom e na posição em
+     que o cliente por acaso deixou. Aqui ele volta ao fluxo normal, inteiro e
+     na largura da página. */
   main.finder .diag-viewport { height: auto; overflow: visible; }
+  /* No papel some a proporção fixa das colunas: cada uma ocupa o que o seu
+     conteúdo pedir, e a lista sai inteira em vez de cortada na altura da tela. */
+  main.finder .part-layout > * { aspect-ratio: auto; max-height: none; min-height: 0; }
+  main.finder .diag-canvas {
+    position: relative !important;
+    left: auto !important; top: auto !important; width: 100% !important;
+  }
+  /* card de peça não pode ser cortado ao meio pela quebra de página */
+  main.finder .part-row { break-inside: avoid; page-break-inside: avoid; }
 }
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; transition: none !important; }
