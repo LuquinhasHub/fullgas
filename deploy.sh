@@ -99,6 +99,75 @@ if ! echo "$CACHE_API" | grep -qi 'no-store'; then
   echo "!! ha alguma regra 'Cache Everything' na Cloudflare pegando /api/*."
 fi
 
+# 3) Toda origem de foto de produto precisa estar liberada no img-src do CSP.
+#    O Tiny NAO hospeda tudo no mesmo lugar: hoje distribui entre
+#    anexos.tiny.com.br e um bucket S3, e pode passar a usar um terceiro
+#    endereco sem aviso. Quando isso acontece o navegador bloqueia a imagem e
+#    a loja fica sem foto — SEM erro no servidor, sem nada no log do Nginx. O
+#    unico sintoma e o console do navegador, que ninguem abre. Em 13/08/2026
+#    metade dos produtos ficou sem foto assim, por horas.
+IMG_SRC=$(curl -sS --max-time 15 -D - -o /dev/null https://fullgas.app.br/loja 2>/dev/null \
+          | grep -i '^content-security-policy:' | tr ';' '\n' | grep -i 'img-src' || true)
+if [ -z "$IMG_SRC" ]; then
+  echo ""
+  echo "!! ATENCAO: nao foi possivel ler o img-src do CSP em /loja."
+  echo "!! Verifique o location / do Nginx (deploy/nginx/fullgas.conf)."
+else
+  DOMINIOS=$(docker exec "$DB_CONTAINER" "$SQLCMD" \
+    -S localhost -U sa -P "$SA_PASSWORD" -C -d "$DB_NAME" -h -1 -W -Q \
+    "SET NOCOUNT ON; SELECT DISTINCT LEFT(ImagemUrl, CHARINDEX('/', ImagemUrl, 9) - 1) \
+     FROM dbo.Produto WHERE ImagemUrl LIKE 'http%';" 2>/dev/null \
+    | tr -d '\r' | grep -E '^https?://' || true)
+  for d in $DOMINIOS; do
+    if ! echo "$IMG_SRC" | grep -qF "$d"; then
+      echo ""
+      echo "!! ATENCAO: ha foto de produto vinda de $d,"
+      echo "!! mas esse endereco NAO esta liberado no img-src do CSP."
+      echo "!! O navegador vai BLOQUEAR essas imagens — a loja fica sem foto."
+      echo "!! Acrescente em deploy/nginx/fullgas.conf, no location /, e prefira"
+      echo "!! incluir o CAMINHO e nao so o host quando o dominio for"
+      echo "!! compartilhado (ex.: https://s3.amazonaws.com/tiny-anexos-us/ —"
+      echo "!! so o host autorizaria qualquer bucket de qualquer pessoa)."
+    fi
+  done
+fi
+
+# 4) A config do Nginx no ar tem de ser a versionada. Em 13/08/2026 o
+#    sites-enabled tinha virado uma COPIA solta, editada a mao: quem corrigia o
+#    arquivo do repo nao via efeito nenhum, e o proximo deploy desfaria as
+#    correcoes feitas direto no servidor.
+if [ ! -L /etc/nginx/sites-enabled/fullgas ]; then
+  echo ""
+  echo "!! ATENCAO: /etc/nginx/sites-enabled/fullgas NAO e um link simbolico."
+  echo "!! Vire uma copia independente — o que estiver no repo nao esta no ar."
+  echo "!! Corrija (como root):"
+  echo "!!   ln -sfn /etc/nginx/sites-available/fullgas /etc/nginx/sites-enabled/fullgas"
+elif ! diff -q deploy/nginx/fullgas.conf /etc/nginx/sites-available/fullgas >/dev/null 2>&1; then
+  echo ""
+  echo "!! ATENCAO: deploy/nginx/fullgas.conf difere do que esta instalado."
+  echo "!! Alguem editou o Nginx direto no servidor, ou o repo mudou e ninguem"
+  echo "!! instalou. Veja a diferenca com:"
+  echo "!!   diff deploy/nginx/fullgas.conf /etc/nginx/sites-available/fullgas"
+  echo "!! Instale (como root) e recarregue:"
+  echo "!!   cp deploy/nginx/fullgas.conf /etc/nginx/sites-available/fullgas"
+  echo "!!   nginx -t && systemctl reload nginx"
+fi
+
+# 5) Quem atende na 3000 tem de ser o processo deste servico. Ate 13/08/2026
+#    havia um pm2 segurando a porta enquanto o systemd tentava subir e morria
+#    com EADDRINUSE (1308 tentativas numa hora). Como o deploy so reinicia o
+#    systemd, o codigo em execucao continuava sendo o antigo e o deploy dizia
+#    "concluido" do mesmo jeito.
+PID_SERVICO=$(systemctl show "$SERVICO" -p MainPID --value 2>/dev/null || echo "")
+PID_PORTA=$(ss -ltnp 2>/dev/null | grep ':3000 ' | grep -oP 'pid=\K[0-9]+' | head -1 || true)
+if [ -n "$PID_PORTA" ] && [ -n "$PID_SERVICO" ] && [ "$PID_PORTA" != "$PID_SERVICO" ]; then
+  echo ""
+  echo "!! ATENCAO: quem atende na porta 3000 (pid $PID_PORTA) NAO e o processo"
+  echo "!! do $SERVICO (pid $PID_SERVICO). Ha outro gerenciador segurando a"
+  echo "!! porta — provavelmente pm2. Este deploy NAO trocou o codigo no ar."
+  echo "!! Veja quem e:  sudo ss -ltnp | grep :3000"
+fi
+
 # ---------------------------------------------------------------------------
 # [5/5] Purga do cache da Cloudflare.
 #
