@@ -6,6 +6,11 @@
 #  Ou deixe a senha num arquivo fora do git (ex.: ~/.fullgas-deploy.env) e:
 #      source ~/.fullgas-deploy.env && ./deploy.sh
 #
+#  Variáveis desse arquivo (~/.fullgas-deploy.env, chmod 600, NUNCA no git):
+#      SA_PASSWORD          senha do sa, para aplicar as migrations
+#      CLOUDFLARE_API_TOKEN token da Cloudflare — OPCIONAL, ver passo 5
+#      CLOUDFLARE_ZONE_ID   id da zona fullgas.app.br — idem
+#
 #  Pré-requisitos (configurados UMA vez — ver README de deploy):
 #    - Nginx servindo direto de /var/www/fullgas-app/frontend
 #    - usuário fullgas no grupo docker  (sudo usermod -aG docker fullgas)
@@ -94,6 +99,51 @@ if ! echo "$CACHE_API" | grep -qi 'no-store'; then
   echo "!! ha alguma regra 'Cache Everything' na Cloudflare pegando /api/*."
 fi
 
+# ---------------------------------------------------------------------------
+# [5/5] Purga do cache da Cloudflare.
+#
+# POR QUE ISTO EXISTE: a Cloudflare fica NA FRENTE do Nginx e guarda copia das
+# respostas. Sem purgar, o visitante continua recebendo a versao velha mesmo
+# com o deploy concluido — e o pior caso ja aconteceu em 13/08/2026: um bug de
+# `location` fez as imagens responderem 404, a Cloudflare guardou esse 404 com
+# max-age de 30 DIAS, e consertar o Nginx nao adiantou nada para quem acessava
+# o site. So a purga resolveu.
+#
+# E OPCIONAL de proposito: sem as variaveis o deploy segue normalmente, so
+# avisando. Assim quem clonar o projeto nao fica travado por falta de token.
+#
+# O token vem do painel: My Profile -> API Tokens -> Create Token, com a
+# permissao MINIMA `Zone -> Cache Purge -> Purge`, restrito a zona do site.
+# NAO use a Global API Key: ela da acesso total a conta, e este script roda
+# num servidor exposto a internet.
+# ---------------------------------------------------------------------------
+if [ -n "${CLOUDFLARE_API_TOKEN:-}" ] && [ -n "${CLOUDFLARE_ZONE_ID:-}" ]; then
+  echo ""
+  echo "==> [5/5] Limpando o cache da Cloudflare ..."
+  CF_RESP=$(curl -sS --max-time 20 -X POST \
+    "https://api.cloudflare.com/client/v4/zones/${CLOUDFLARE_ZONE_ID}/purge_cache" \
+    -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+    -H "Content-Type: application/json" \
+    --data '{"purge_everything":true}' 2>&1) || CF_RESP="falha de rede ao chamar a API da Cloudflare"
+
+  if echo "$CF_RESP" | grep -q '"success":true'; then
+    echo "        cache limpo."
+  else
+    # Nao aborta: o deploy em si deu certo. Mas precisa gritar, porque o
+    # sintoma (site "sem atualizar") nao parece um erro de deploy.
+    echo ""
+    echo "!! ATENCAO: a purga do cache FALHOU."
+    echo "!! O codigo novo esta no ar, mas os visitantes podem continuar vendo"
+    echo "!! a versao antiga ate o cache expirar sozinho."
+    echo "!! Resposta da Cloudflare: $CF_RESP"
+    echo "!! Limpe a mao: painel -> Caching -> Configuration -> Purge Everything"
+  fi
+else
+  echo ""
+  echo "!! Purga da Cloudflare PULADA (CLOUDFLARE_API_TOKEN e/ou"
+  echo "!! CLOUDFLARE_ZONE_ID nao definidos em ~/.fullgas-deploy.env)."
+  echo "!! Se algo nao atualizar no navegador, limpe o cache no painel."
+fi
+
 echo ""
 echo "==> Deploy concluido. Confira: https://fullgas.app.br"
-echo "    (se algo nao atualizar no navegador, limpe o cache do Cloudflare)"
