@@ -49,6 +49,13 @@
     return m ? decodeURIComponent(m[1]) : '';
   }
 
+  // Apaga um cookie legível pelo JS. O `path` precisa ser o MESMO usado na
+  // gravação, senão o navegador entende que é outro cookie e ignora o pedido —
+  // é o mesmo detalhe que o fecharSessao do servidor comenta.
+  function apagarCookie(nome) {
+    document.cookie = nome + '=; path=/; max-age=0';
+  }
+
   // Há sessão? É um palpite do lado do cliente, e é o suficiente: serve para
   // decidir o que RENDERIZAR. Quem decide de verdade é a API, que valida a
   // assinatura do fg_sess — este cookie aqui é só o aviso legível.
@@ -92,7 +99,7 @@
        3. Resposta 401 da API: qualquer chamada autenticada que volte 401
           encerra a sessão na hora (ver função api(), logo abaixo).
      ======================================================================= */
-  var INATIVIDADE_MS = 30 * 60 * 1000;          // 30 min sem interação
+  var INATIVIDADE_MS = 4 * 60 * 60 * 1000;      // 4 h sem interação
   var ATIVIDADE_KEY  = 'fullgas_ultima_atividade';
   var CHECAGEM_MS    = 30 * 1000;               // varredura periódica
   var encerrando     = false;                   // trava anti-loop de redirect
@@ -150,6 +157,14 @@
     if (encerrando) return;                     // trava anti-loop de redirect
     encerrando = true;
     limparLocal();
+    // Os dois cookies legíveis saem JÁ, sem esperar a resposta do servidor.
+    // Quem apaga de verdade é o /auth/logout abaixo — e só ele alcança o
+    // fg_sess, que é httpOnly. Mas o redirecionamento acontece dando ou não
+    // certo, e o fg_exp agora sobrevive ao token: se a chamada falhasse por
+    // rede, ele ficaria no navegador com data vencida, a tela de login o leria
+    // como "sessão expirada" e mandaria de volta para cá, em círculo.
+    apagarCookie('fg_exp');
+    apagarCookie('fg_csrf');
     var url = destino || ('/?sessao=' + (motivo || 'expirada'));
     var ir = function () { location.href = url; };
     fetch(API_BASE + '/auth/logout', {

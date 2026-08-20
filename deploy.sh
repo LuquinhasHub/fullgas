@@ -6,6 +6,11 @@
 #  Ou deixe a senha num arquivo fora do git (ex.: ~/.fullgas-deploy.env) e:
 #      source ~/.fullgas-deploy.env && ./deploy.sh
 #
+#  Variáveis desse arquivo (~/.fullgas-deploy.env, chmod 600, NUNCA no git):
+#      SA_PASSWORD          senha do sa, para aplicar as migrations
+#      CLOUDFLARE_API_TOKEN token da Cloudflare — OPCIONAL, ver passo 5
+#      CLOUDFLARE_ZONE_ID   id da zona fullgas.app.br — idem
+#
 #  Pré-requisitos (configurados UMA vez — ver README de deploy):
 #    - Nginx servindo direto de /var/www/fullgas-app/frontend
 #    - usuário fullgas no grupo docker  (sudo usermod -aG docker fullgas)
@@ -94,6 +99,120 @@ if ! echo "$CACHE_API" | grep -qi 'no-store'; then
   echo "!! ha alguma regra 'Cache Everything' na Cloudflare pegando /api/*."
 fi
 
+# 3) Toda origem de foto de produto precisa estar liberada no img-src do CSP.
+#    O Tiny NAO hospeda tudo no mesmo lugar: hoje distribui entre
+#    anexos.tiny.com.br e um bucket S3, e pode passar a usar um terceiro
+#    endereco sem aviso. Quando isso acontece o navegador bloqueia a imagem e
+#    a loja fica sem foto — SEM erro no servidor, sem nada no log do Nginx. O
+#    unico sintoma e o console do navegador, que ninguem abre. Em 13/08/2026
+#    metade dos produtos ficou sem foto assim, por horas.
+IMG_SRC=$(curl -sS --max-time 15 -D - -o /dev/null https://fullgas.app.br/loja 2>/dev/null \
+          | grep -i '^content-security-policy:' | tr ';' '\n' | grep -i 'img-src' || true)
+if [ -z "$IMG_SRC" ]; then
+  echo ""
+  echo "!! ATENCAO: nao foi possivel ler o img-src do CSP em /loja."
+  echo "!! Verifique o location / do Nginx (deploy/nginx/fullgas.conf)."
+else
+  DOMINIOS=$(docker exec "$DB_CONTAINER" "$SQLCMD" \
+    -S localhost -U sa -P "$SA_PASSWORD" -C -d "$DB_NAME" -h -1 -W -Q \
+    "SET NOCOUNT ON; SELECT DISTINCT LEFT(ImagemUrl, CHARINDEX('/', ImagemUrl, 9) - 1) \
+     FROM dbo.Produto WHERE ImagemUrl LIKE 'http%';" 2>/dev/null \
+    | tr -d '\r' | grep -E '^https?://' || true)
+  for d in $DOMINIOS; do
+    if ! echo "$IMG_SRC" | grep -qF "$d"; then
+      echo ""
+      echo "!! ATENCAO: ha foto de produto vinda de $d,"
+      echo "!! mas esse endereco NAO esta liberado no img-src do CSP."
+      echo "!! O navegador vai BLOQUEAR essas imagens — a loja fica sem foto."
+      echo "!! Acrescente em deploy/nginx/fullgas.conf, no location /, e prefira"
+      echo "!! incluir o CAMINHO e nao so o host quando o dominio for"
+      echo "!! compartilhado (ex.: https://s3.amazonaws.com/tiny-anexos-us/ —"
+      echo "!! so o host autorizaria qualquer bucket de qualquer pessoa)."
+    fi
+  done
+fi
+
+# 4) A config do Nginx no ar tem de ser a versionada. Em 13/08/2026 o
+#    sites-enabled tinha virado uma COPIA solta, editada a mao: quem corrigia o
+#    arquivo do repo nao via efeito nenhum, e o proximo deploy desfaria as
+#    correcoes feitas direto no servidor.
+if [ ! -L /etc/nginx/sites-enabled/fullgas ]; then
+  echo ""
+  echo "!! ATENCAO: /etc/nginx/sites-enabled/fullgas NAO e um link simbolico."
+  echo "!! Vire uma copia independente — o que estiver no repo nao esta no ar."
+  echo "!! Corrija (como root):"
+  echo "!!   ln -sfn /etc/nginx/sites-available/fullgas /etc/nginx/sites-enabled/fullgas"
+elif ! diff -q deploy/nginx/fullgas.conf /etc/nginx/sites-available/fullgas >/dev/null 2>&1; then
+  echo ""
+  echo "!! ATENCAO: deploy/nginx/fullgas.conf difere do que esta instalado."
+  echo "!! Alguem editou o Nginx direto no servidor, ou o repo mudou e ninguem"
+  echo "!! instalou. Veja a diferenca com:"
+  echo "!!   diff deploy/nginx/fullgas.conf /etc/nginx/sites-available/fullgas"
+  echo "!! Instale (como root) e recarregue:"
+  echo "!!   cp deploy/nginx/fullgas.conf /etc/nginx/sites-available/fullgas"
+  echo "!!   nginx -t && systemctl reload nginx"
+fi
+
+# 5) Quem atende na 3000 tem de ser o processo deste servico. Ate 13/08/2026
+#    havia um pm2 segurando a porta enquanto o systemd tentava subir e morria
+#    com EADDRINUSE (1308 tentativas numa hora). Como o deploy so reinicia o
+#    systemd, o codigo em execucao continuava sendo o antigo e o deploy dizia
+#    "concluido" do mesmo jeito.
+PID_SERVICO=$(systemctl show "$SERVICO" -p MainPID --value 2>/dev/null || echo "")
+PID_PORTA=$(ss -ltnp 2>/dev/null | grep ':3000 ' | grep -oP 'pid=\K[0-9]+' | head -1 || true)
+if [ -n "$PID_PORTA" ] && [ -n "$PID_SERVICO" ] && [ "$PID_PORTA" != "$PID_SERVICO" ]; then
+  echo ""
+  echo "!! ATENCAO: quem atende na porta 3000 (pid $PID_PORTA) NAO e o processo"
+  echo "!! do $SERVICO (pid $PID_SERVICO). Ha outro gerenciador segurando a"
+  echo "!! porta — provavelmente pm2. Este deploy NAO trocou o codigo no ar."
+  echo "!! Veja quem e:  sudo ss -ltnp | grep :3000"
+fi
+
+# ---------------------------------------------------------------------------
+# [5/5] Purga do cache da Cloudflare.
+#
+# POR QUE ISTO EXISTE: a Cloudflare fica NA FRENTE do Nginx e guarda copia das
+# respostas. Sem purgar, o visitante continua recebendo a versao velha mesmo
+# com o deploy concluido — e o pior caso ja aconteceu em 13/08/2026: um bug de
+# `location` fez as imagens responderem 404, a Cloudflare guardou esse 404 com
+# max-age de 30 DIAS, e consertar o Nginx nao adiantou nada para quem acessava
+# o site. So a purga resolveu.
+#
+# E OPCIONAL de proposito: sem as variaveis o deploy segue normalmente, so
+# avisando. Assim quem clonar o projeto nao fica travado por falta de token.
+#
+# O token vem do painel: My Profile -> API Tokens -> Create Token, com a
+# permissao MINIMA `Zone -> Cache Purge -> Purge`, restrito a zona do site.
+# NAO use a Global API Key: ela da acesso total a conta, e este script roda
+# num servidor exposto a internet.
+# ---------------------------------------------------------------------------
+if [ -n "${CLOUDFLARE_API_TOKEN:-}" ] && [ -n "${CLOUDFLARE_ZONE_ID:-}" ]; then
+  echo ""
+  echo "==> [5/5] Limpando o cache da Cloudflare ..."
+  CF_RESP=$(curl -sS --max-time 20 -X POST \
+    "https://api.cloudflare.com/client/v4/zones/${CLOUDFLARE_ZONE_ID}/purge_cache" \
+    -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+    -H "Content-Type: application/json" \
+    --data '{"purge_everything":true}' 2>&1) || CF_RESP="falha de rede ao chamar a API da Cloudflare"
+
+  if echo "$CF_RESP" | grep -q '"success":true'; then
+    echo "        cache limpo."
+  else
+    # Nao aborta: o deploy em si deu certo. Mas precisa gritar, porque o
+    # sintoma (site "sem atualizar") nao parece um erro de deploy.
+    echo ""
+    echo "!! ATENCAO: a purga do cache FALHOU."
+    echo "!! O codigo novo esta no ar, mas os visitantes podem continuar vendo"
+    echo "!! a versao antiga ate o cache expirar sozinho."
+    echo "!! Resposta da Cloudflare: $CF_RESP"
+    echo "!! Limpe a mao: painel -> Caching -> Configuration -> Purge Everything"
+  fi
+else
+  echo ""
+  echo "!! Purga da Cloudflare PULADA (CLOUDFLARE_API_TOKEN e/ou"
+  echo "!! CLOUDFLARE_ZONE_ID nao definidos em ~/.fullgas-deploy.env)."
+  echo "!! Se algo nao atualizar no navegador, limpe o cache no painel."
+fi
+
 echo ""
 echo "==> Deploy concluido. Confira: https://fullgas.app.br"
-echo "    (se algo nao atualizar no navegador, limpe o cache do Cloudflare)"
