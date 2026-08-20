@@ -91,14 +91,29 @@ function baseCookie(maxAgeMs) {
   return { sameSite: 'lax', secure: COOKIE_SECURE, path: '/', maxAge: maxAgeMs };
 }
 
+// Quanto tempo o fg_exp continua no navegador DEPOIS de o JWT vencer.
+const SOBREVIDA_EXP_MS = 7 * 24 * 60 * 60 * 1000;    // 7 dias
+
 // Grava os três cookies a partir de um token já assinado.
+//
+// O fg_exp vive de propósito mais que os outros dois. Ele é o único sinal pelo
+// qual o front sabe que existe uma sessão (temSessao(), no api-adapter), e
+// antes ele morria no mesmo instante que o JWT — os três nasciam com a mesma
+// validade. No segundo em que a sessão vencia o cookie sumia junto, o guardião
+// concluía "não há sessão a encerrar" e PARAVA de agir: a pessoa ficava presa
+// numa tela logada onde toda chamada respondia 401, que é exatamente a sessão
+// morta que o guardião existe para impedir. Sobrevivendo ao token, o fg_exp
+// segue legível com uma data no passado, o guardião lê 'expirada' e devolve a
+// pessoa ao login. Não há segredo nenhum nele — é um carimbo de data; quem
+// autentica é o fg_sess, que continua vencendo na hora certa.
 export function abrirSessao(res, token) {
   const p = jwt.decode(token) || {};
   const restanteMs = Math.max(0, (p.exp - Math.floor(Date.now() / 1000)) * 1000);
   const base = baseCookie(restanteMs);
   res.cookie(COOKIE_SESS, token, { ...base, httpOnly: true });
   res.cookie(COOKIE_CSRF, p.csrf || '', { ...base, httpOnly: false });
-  res.cookie(COOKIE_EXP, String(p.exp || ''), { ...base, httpOnly: false });
+  res.cookie(COOKIE_EXP, String(p.exp || ''),
+    { ...baseCookie(restanteMs + SOBREVIDA_EXP_MS), httpOnly: false });
 }
 
 // Apaga os três. Os atributos precisam ser IGUAIS aos do res.cookie, senão o

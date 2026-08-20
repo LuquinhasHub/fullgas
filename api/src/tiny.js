@@ -66,6 +66,34 @@ class TinyError extends Error {
   }
 }
 
+// Reúne as mensagens de erro de uma resposta do Tiny.
+//
+// Elas chegam em DOIS lugares, e é preciso olhar os dois. Nas CONSULTAS o
+// motivo vem no topo (retorno.erros). Nas GRAVAÇÕES (contato.incluir,
+// pedido.incluir, contato.alterar...) o topo traz só status "Erro", sem lista
+// nenhuma — o motivo real fica um nível abaixo, em registros[].registro.erros.
+// Enquanto isto lia apenas o topo, TODA falha de gravação virava o inútil
+// "Erro não especificado do Tiny": foi essa mensagem que escondeu por semanas
+// um simples "O número de sequência deve ser informado".
+//
+// O codigo_erro segue a mesma regra — vale o do topo e, na falta dele, o do
+// registro. É o que faz o tratamento por código (20 = "não retornou
+// registros", 30 = "CNPJ já cadastrado") continuar valendo nas gravações.
+function extrairErros(ret) {
+  const lista = v => (Array.isArray(v) ? v : v ? [v] : []);
+  const msgs = lista(ret.erros).map(e => e?.erro).filter(Boolean);
+  let codigo = ret.codigo_erro ?? null;
+
+  for (const item of lista(ret.registros)) {
+    const reg = item?.registro ?? item;
+    if (!reg) continue;
+    if (codigo == null && reg.codigo_erro != null) codigo = reg.codigo_erro;
+    msgs.push(...lista(reg.erros).map(e => e?.erro).filter(Boolean));
+  }
+  // Sem repetições: o mesmo erro nos dois níveis não ajuda quem lê o log.
+  return { msg: [...new Set(msgs)].join('; '), codigo };
+}
+
 // POST na API v2 (o Tiny só aceita POST form-encoded). Lança TinyError
 // quando o retorno vem com status "Erro".
 async function tinyPost(endpoint, params = {}, { prioritario = false } = {}) {
@@ -104,10 +132,8 @@ async function tinyPost(endpoint, params = {}, { prioritario = false } = {}) {
   const ret = data?.retorno;
   if (!ret) throw new TinyError('Resposta do Tiny em formato inesperado.');
   if (String(ret.status).toLowerCase() === 'erro') {
-    const erros = ret.erros || [];
-    const msg = erros.map(e => e?.erro).filter(Boolean).join('; ')
-      || 'Erro não especificado do Tiny.';
-    throw new TinyError(`Tiny: ${msg}`, ret.codigo_erro);
+    const { msg, codigo } = extrairErros(ret);
+    throw new TinyError(`Tiny: ${msg || 'Erro não especificado do Tiny.'}`, codigo);
   }
   return ret;
 }

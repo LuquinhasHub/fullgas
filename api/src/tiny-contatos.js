@@ -73,8 +73,7 @@ async function carregarEmpresa(empresaId) {
 
 // Monta o payload de contato para o Tiny.
 //   - incluir (comId=false): só os dados.
-//   - alterar (comId=true):  mais `id` + `sequencia` (exigidos pelo
-//     contato.alterar.php).
+//   - alterar (comId=true):  mais o `id` do contato no Tiny.
 //
 // ATENÇÃO — o contato.alterar.php SUBSTITUI o registro: todo campo NÃO enviado
 // é apagado no Tiny. Por isso o CNPJ vai SEMPRE, inclusive na alteração. Omiti-
@@ -86,16 +85,19 @@ async function carregarEmpresa(empresaId) {
 function montarContato(emp, comId = false) {
   const dig = String(emp.Cnpj || '').replace(/\D/g, '');
   const c = {
+    // `sequencia` numera o registro dentro do lote enviado. Mandamos um contato
+    // por chamada, então é sempre '1' — mas ele é obrigatório TAMBÉM na
+    // inclusão, não só na alteração. Enquanto só ia no alterar, todo
+    // contato.incluir.php voltava "O número de sequência deve ser informado" e
+    // nenhuma empresa nova conseguia ser vinculada ao Tiny.
+    sequencia: '1',
     nome: emp.RazaoSocial,
     tipo_pessoa: dig.length === 11 ? 'F' : 'J',
     situacao: 'A',
     obs: 'Sincronizado pelo portal Fullgas B2B.'
   };
   if (dig) c.cpf_cnpj = dig;
-  if (comId && emp.TinyContatoId) {
-    c.id = String(emp.TinyContatoId);
-    c.sequencia = '1';
-  }
+  if (comId && emp.TinyContatoId) c.id = String(emp.TinyContatoId);
   if (emp.NomeFantasia) c.fantasia = emp.NomeFantasia;
   if (emp.InscricaoEstadual) c.ie = emp.InscricaoEstadual;
   if (emp.Email) c.email = emp.Email;
