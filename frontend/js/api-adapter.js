@@ -432,6 +432,23 @@
     });
   };
 
+  // Cria um administrador pelo painel (admin). `dados` = { nome, email, senha }.
+  // A API devolve o usuário pronto; guardamos no cache para a lista já mostrar
+  // a conta nova sem recarregar tudo. Devolve Promise<{ ok, msg? }>.
+  FG.criarAdmin = function (dados) {
+    return req('POST', '/usuarios', {
+      nome: dados.nome, email: dados.email, senha: dados.senha
+    }).then(function (r) {
+      if (!r.ok) return r;
+      if (r.id) {
+        var novo = {};
+        Object.keys(r).forEach(function (k) { if (k !== 'ok') novo[k] = r[k]; });
+        CACHE.users.unshift(novo);
+      }
+      return r;
+    });
+  };
+
   // Exclui um cliente indesejado/bloqueado (admin). Master e usuários com
   // histórico são recusados pela API. Devolve Promise<{ ok, msg? }>.
   FG.delUser = function (id) {
@@ -796,6 +813,36 @@
       if (!r.ok) return r;
       return recarregarVeiculos().then(function () { return r; });
     });
+  };
+
+  /* ---------- histórico do veículo (linha do tempo do chassi) ---------- */
+  // Busca sob demanda, sem entrar no cache geral: é uma lista por chassi, que
+  // só interessa quando alguém abre aquele veículo. Resolve [] em erro para a
+  // tela não quebrar por causa do histórico.
+  FG.veiculoHistorico = function (niv) {
+    return apiGet('/veiculos/' + encodeURIComponent(niv) + '/historico')
+      .then(function (l) { return l || []; });
+  };
+
+  // As duas escritas devolvem o histórico JÁ ATUALIZADO (um array). Como o
+  // req() carimba `ok` no que recebe, normalizamos para { ok, lista } — assim
+  // a tela não precisa lidar com um array que também tem propriedade `ok`.
+  function comLista(r) {
+    if (!r.ok) return r;
+    return { ok: true, lista: Array.prototype.slice.call(r) };
+  }
+
+  // Lança um registro manual no histórico (SÓ ADMIN). `dados` = { tipo:
+  // 'recall'|'revisao'|'nota', titulo, detalhe?, referencia?, data? }.
+  FG.registrarHistorico = function (niv, dados) {
+    return req('POST', '/veiculos/' + encodeURIComponent(niv) + '/historico', dados).then(comLista);
+  };
+
+  // Apaga um registro MANUAL do histórico (SÓ ADMIN). Evento automático é
+  // recusado pela API.
+  FG.excluirHistorico = function (niv, id) {
+    return req('DELETE', '/veiculos/' + encodeURIComponent(niv) + '/historico/' + encodeURIComponent(id))
+      .then(comLista);
   };
 
   /* ---------- reivindicações ---------- */

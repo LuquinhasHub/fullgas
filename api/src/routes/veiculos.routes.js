@@ -4,6 +4,9 @@
 import { Router } from 'express';
 import { query } from '../db.js';
 import { requireAuth, requireAdmin } from '../auth.js';
+import {
+  registrarEvento, historicoDoVeiculo, TIPOS_MANUAIS
+} from '../historico-veiculo.js';
 
 const router = Router();
 
@@ -112,7 +115,25 @@ router.post('/veiculos', requireAuth, requireAdmin, async (req, res, next) => {
     );
 
     const rows = await query(SELECT_VEIC + ' WHERE v.Niv = @niv', { niv });
-    res.status(201).json(toVeiculo(rows[0]));
+    const veic = rows[0];
+
+    await registrarEvento({
+      veiculoId: veic.VeiculoId, tipo: 'cadastro', titulo: 'Chassi cadastrado',
+      detalhe: [veic.ModeloCodigo, cor && 'cor ' + cor, numeroMotor && 'motor ' + numeroMotor]
+        .filter(Boolean).join(' · '),
+      user: req.user, empresaId: veic.EmpresaId, empresaNome: veic.EmpresaNome
+    });
+    // Nascer atribuído é um segundo fato: separá-lo do cadastro deixa claro,
+    // meses depois, desde quando aquela concessionária responde pelo chassi.
+    if (veic.EmpresaId) {
+      await registrarEvento({
+        veiculoId: veic.VeiculoId, tipo: 'atribuicao',
+        titulo: 'Atribuído a ' + (veic.EmpresaNome || 'concessionária'),
+        user: req.user, empresaId: veic.EmpresaId, empresaNome: veic.EmpresaNome
+      });
+    }
+
+    res.status(201).json(toVeiculo(veic));
   } catch (e) { next(e); }
 });
 
@@ -194,7 +215,25 @@ router.post('/veiculos/:niv/venda', requireAuth, async (req, res, next) => {
     );
 
     const rows = await query(SELECT_VEIC + ' WHERE v.VeiculoId = @id', { id: veic.VeiculoId });
-    res.json(toVeiculo(rows[0]));
+    const atualizado = rows[0];
+
+    await registrarEvento({
+      veiculoId: veic.VeiculoId, tipo: 'venda', titulo: 'Venda registrada',
+      detalhe: 'Cliente: ' + nome + (cpf ? ' · CPF ' + String(cpf).trim() : ''),
+      user: req.user, empresaId: atualizado.EmpresaId, empresaNome: atualizado.EmpresaNome
+    });
+    // A venda ativa a garantia quando ela ainda não estava ativa (COALESCE no
+    // UPDATE acima). Só registramos o evento nesse caso — senão o histórico
+    // mostraria a garantia "ativando" de novo a cada venda.
+    if (!veic.GarantiaAtivaEm && atualizado.GarantiaAtivaEm) {
+      await registrarEvento({
+        veiculoId: veic.VeiculoId, tipo: 'garantia',
+        titulo: 'Garantia ativada', detalhe: 'Ativada automaticamente pelo registro da venda.',
+        user: req.user, empresaId: atualizado.EmpresaId, empresaNome: atualizado.EmpresaNome
+      });
+    }
+
+    res.json(toVeiculo(atualizado));
   } catch (e) { next(e); }
 });
 
@@ -238,6 +277,19 @@ router.put('/veiculos/:niv/transferir', requireAuth, requireAdmin, async (req, r
       { eid: emp[0].EmpresaId, id: veic.VeiculoId }
     );
 
+    // Um chassi que ainda não tinha dono está sendo ATRIBUÍDO; um que já tinha
+    // está sendo TRANSFERIDO. A distinção importa na leitura do histórico.
+    const primeiraVez = !veic.EmpresaId;
+    await registrarEvento({
+      veiculoId: veic.VeiculoId,
+      tipo: primeiraVez ? 'atribuicao' : 'transferencia',
+      titulo: primeiraVez
+        ? 'Atribuído a ' + emp[0].RazaoSocial
+        : 'Transferido para ' + emp[0].RazaoSocial,
+      detalhe: primeiraVez ? null : 'Concessionária anterior: ' + (veic.EmpresaNome || '—'),
+      user: req.user, empresaId: emp[0].EmpresaId, empresaNome: emp[0].RazaoSocial
+    });
+
     const rows = await query(SELECT_VEIC + ' WHERE v.VeiculoId = @id', { id: veic.VeiculoId });
     res.json({ ...toVeiculo(rows[0]), empresa: emp[0].RazaoSocial });
   } catch (e) { next(e); }
@@ -258,8 +310,96 @@ router.post('/veiculos/:niv/garantia', requireAuth, async (req, res, next) => {
       { id: veic.VeiculoId }
     );
 
+    await registrarEvento({
+      veiculoId: veic.VeiculoId, tipo: 'garantia', titulo: 'Garantia ativada',
+      user: req.user, empresaId: veic.EmpresaId, empresaNome: veic.EmpresaNome
+    });
+
     const rows = await query(SELECT_VEIC + ' WHERE v.VeiculoId = @id', { id: veic.VeiculoId });
     res.json(toVeiculo(rows[0]));
+  } catch (e) { next(e); }
+});
+
+/* ============================================================
+   HISTÓRICO DO VEÍCULO
+   ------------------------------------------------------------
+   A linha do tempo do chassi. A maior parte das entradas nasce sozinha, dos
+   pontos acima e das reivindicações; o POST existe para o que o sistema não
+   tem como saber por conta própria — recall, revisão feita na oficina, uma
+   observação sobre aquele chassi.
+   ============================================================ */
+
+// GET /api/veiculos/:niv/historico — respeita o mesmo escopo do veículo:
+// o cliente só lê o histórico de um chassi que é dele.
+router.get('/veiculos/:niv/historico', requireAuth, async (req, res, next) => {
+  try {
+    const veic = await acharVeiculo(req.params.niv, req.user);
+    if (!veic) return res.status(404).json({ erro: 'Veículo não encontrado.' });
+    res.json(await historicoDoVeiculo(veic.VeiculoId));
+  } catch (e) { next(e); }
+});
+
+// POST /api/veiculos/:niv/historico (SÓ ADMIN) — lança um evento à mão.
+//   { tipo: 'recall' | 'revisao' | 'nota', titulo, detalhe?, referencia?, data? }
+//
+// Só administrador: o histórico é a memória oficial do chassi e vale como
+// prova em garantia. Deixar cada concessionária escrever nele abriria espaço
+// para versões conflitantes do que aconteceu com a moto.
+router.post('/veiculos/:niv/historico', requireAuth, requireAdmin, async (req, res, next) => {
+  try {
+    const tipo = String(req.body?.tipo || '').trim();
+    const titulo = String(req.body?.titulo || '').trim();
+    const detalhe = String(req.body?.detalhe || '').trim();
+    const referencia = String(req.body?.referencia || '').trim();
+
+    if (!TIPOS_MANUAIS.includes(tipo))
+      return res.status(400).json({ erro: 'Tipo inválido — use ' + TIPOS_MANUAIS.join(', ') + '.' });
+    if (!titulo) return res.status(400).json({ erro: 'Informe o título do registro.' });
+
+    // Data opcional (um recall pode ser lançado hoje para uma campanha de
+    // semana passada). Recusamos data futura: histórico é do que já aconteceu.
+    let dataEvento = null;
+    if (req.body?.data) {
+      dataEvento = new Date(req.body.data);
+      if (Number.isNaN(dataEvento.getTime()))
+        return res.status(400).json({ erro: 'Data inválida.' });
+      if (dataEvento.getTime() > Date.now() + 60 * 1000)
+        return res.status(400).json({ erro: 'A data do evento não pode estar no futuro.' });
+    }
+
+    const veic = await acharVeiculo(req.params.niv, req.user);
+    if (!veic) return res.status(404).json({ erro: 'Veículo não encontrado.' });
+
+    const ok = await registrarEvento({
+      veiculoId: veic.VeiculoId, tipo, titulo, detalhe: detalhe || null,
+      referencia: referencia || null, manual: true, dataEvento,
+      user: req.user, empresaId: veic.EmpresaId, empresaNome: veic.EmpresaNome
+    });
+    if (!ok) return res.status(500).json({ erro: 'Não foi possível gravar o registro.' });
+
+    res.status(201).json(await historicoDoVeiculo(veic.VeiculoId));
+  } catch (e) { next(e); }
+});
+
+// DELETE /api/veiculos/:niv/historico/:id (SÓ ADMIN) — apaga um lançamento
+// MANUAL (corrigir um recall digitado errado). Evento automático não sai: ele
+// é o registro do que de fato aconteceu, e poder apagá-lo esvaziaria o
+// histórico de sentido.
+router.delete('/veiculos/:niv/historico/:id', requireAuth, requireAdmin, async (req, res, next) => {
+  try {
+    const veic = await acharVeiculo(req.params.niv, req.user);
+    if (!veic) return res.status(404).json({ erro: 'Veículo não encontrado.' });
+
+    const id = Number(req.params.id);
+    const alvo = (await query(
+      'SELECT Manual FROM dbo.VeiculoHistorico WHERE HistoricoId = @id AND VeiculoId = @vid',
+      { id, vid: veic.VeiculoId }))[0];
+    if (!alvo) return res.status(404).json({ erro: 'Registro não encontrado neste chassi.' });
+    if (!alvo.Manual)
+      return res.status(409).json({ erro: 'Este registro foi gerado pelo sistema e não pode ser apagado.' });
+
+    await query('DELETE FROM dbo.VeiculoHistorico WHERE HistoricoId = @id', { id });
+    res.json(await historicoDoVeiculo(veic.VeiculoId));
   } catch (e) { next(e); }
 });
 

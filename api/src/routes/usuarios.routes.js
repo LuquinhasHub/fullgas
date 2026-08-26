@@ -1,11 +1,17 @@
 // ============================================================
-// Rotas de usuários (gestão de clientes no painel admin)
+// Rotas de usuários (gestão de clientes e administradores no painel admin)
 //   - GET    /usuarios       lista todos (com empresa, CNPJ e endereço)
+//   - POST   /usuarios       cria um ADMINISTRADOR (equipe Fullgas)
 //   - PATCH  /usuarios/:id   aprova / bloqueia / muda papel
 //   - DELETE /usuarios/:id   remove cliente indesejado/bloqueado
 // Só administradores.
+//
+// O painel separa as duas populações que convivem nesta tabela: quem compra
+// (Papel = 'cliente', pertence a uma concessionária) e quem opera o sistema
+// (Papel = 'admin', equipe Fullgas). A lista é a mesma; a divisão é por papel.
 // ============================================================
 import { Router } from 'express';
+import bcrypt from 'bcryptjs';
 import { query, getPool, sql } from '../db.js';
 import { requireAuth, requireAdmin, signToken, parsePermissoes, abrirSessao } from '../auth.js';
 
@@ -35,25 +41,83 @@ function toUsuario(r) {
   };
 }
 
+const SELECT_USUARIO =
+  `SELECT u.UsuarioId, u.Nome, u.Email, u.Papel, u.Status, u.Gestor, u.CriadoEm, u.EmpresaId,
+          e.RazaoSocial AS Empresa, e.Cnpj, e.InscricaoEstadual, e.Telefone, e.TinyContatoId,
+          en.Logradouro, en.Numero, en.Complemento, en.Bairro, en.Cidade, en.Uf, en.Cep
+     FROM dbo.Usuario u
+     JOIN dbo.Empresa e ON e.EmpresaId = u.EmpresaId
+     OUTER APPLY (
+       SELECT TOP 1 d.Logradouro, d.Numero, d.Complemento, d.Bairro, d.Cidade, d.Uf, d.Cep
+         FROM dbo.Endereco d
+        WHERE d.EmpresaId = e.EmpresaId
+        ORDER BY d.Principal DESC, d.EnderecoId ASC
+     ) en`;
+
 // GET /api/usuarios — lista com empresa e endereço principal (pendentes primeiro).
 router.get('/usuarios', requireAuth, requireAdmin, async (_req, res, next) => {
   try {
     const rows = await query(
-      `SELECT u.UsuarioId, u.Nome, u.Email, u.Papel, u.Status, u.Gestor, u.CriadoEm, u.EmpresaId,
-              e.RazaoSocial AS Empresa, e.Cnpj, e.InscricaoEstadual, e.Telefone, e.TinyContatoId,
-              en.Logradouro, en.Numero, en.Complemento, en.Bairro, en.Cidade, en.Uf, en.Cep
-         FROM dbo.Usuario u
-         JOIN dbo.Empresa e ON e.EmpresaId = u.EmpresaId
-         OUTER APPLY (
-           SELECT TOP 1 d.Logradouro, d.Numero, d.Complemento, d.Bairro, d.Cidade, d.Uf, d.Cep
-             FROM dbo.Endereco d
-            WHERE d.EmpresaId = e.EmpresaId
-            ORDER BY d.Principal DESC, d.EnderecoId ASC
-         ) en
-        ORDER BY CASE WHEN u.Status = 'pendente' THEN 0 ELSE 1 END, u.CriadoEm DESC`
+      SELECT_USUARIO +
+      ' ORDER BY CASE WHEN u.Status = \'pendente\' THEN 0 ELSE 1 END, u.CriadoEm DESC'
     );
     res.json(rows.map(toUsuario));
   } catch (e) { next(e); }
+});
+
+// POST /api/usuarios — cria um ADMINISTRADOR pelo próprio painel.
+//   { nome, email, senha }
+//
+// Três decisões que valem o comentário:
+//
+// • A conta nasce 'aprovado'. A fila de aprovação existe para quem se cadastra
+//   sozinho pela tela pública; aqui quem cria já é administrador, então pedir
+//   que outro admin aprove seria uma cerimônia sem ganho.
+// • EmpresaId é o do admin que está criando — a casa (Fullgas). Usuario.EmpresaId
+//   é NOT NULL e todo admin precisa de uma empresa; herdar a de quem cria mantém
+//   a equipe interna sob o mesmo CNPJ, sem inventar empresa nova a cada convite.
+// • Senha mínima de 8, contra os 6 do cadastro de cliente. É a conta que enxerga
+//   pedidos, faturas e cadastros de todas as concessionárias — o piso mais alto
+//   é proporcional ao estrago de perdê-la.
+const SENHA_MINIMA_ADMIN = 8;
+router.post('/usuarios', requireAuth, requireAdmin, async (req, res, next) => {
+  try {
+    const nome = String(req.body?.nome || '').trim();
+    const email = String(req.body?.email || '').trim().toLowerCase();
+    const senha = String(req.body?.senha || '');
+
+    if (!nome || !email || !senha)
+      return res.status(400).json({ erro: 'Informe nome, e-mail e senha.' });
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email))
+      return res.status(400).json({ erro: 'E-mail inválido.' });
+    if (senha.length < SENHA_MINIMA_ADMIN)
+      return res.status(400).json({ erro: `A senha do administrador precisa de ao menos ${SENHA_MINIMA_ADMIN} caracteres.` });
+
+    const existe = await query('SELECT 1 FROM dbo.Usuario WHERE Email = @email', { email });
+    if (existe.length) return res.status(409).json({ erro: 'Já existe um usuário com este e-mail.' });
+
+    // Hash gravado como BYTES da string do bcrypt — a coluna é VARBINARY e é
+    // assim que login e recuperação de senha esperam encontrar (auth.routes.js).
+    const hash = await bcrypt.hash(senha, 10);
+    const ins = await (await getPool()).request()
+      .input('eid', sql.Int, req.user.empresaId)
+      .input('nome', sql.NVarChar(120), nome.toUpperCase())
+      .input('email', sql.NVarChar(160), email)
+      .input('hash', sql.VarBinary(256), Buffer.from(hash, 'utf8'))
+      .query(`INSERT INTO dbo.Usuario (EmpresaId, Nome, Email, SenhaHash, Papel, Status, Gestor, Permissoes)
+              OUTPUT INSERTED.UsuarioId
+              VALUES (@eid, @nome, @email, @hash, 'admin', 'aprovado', 1, NULL)`);
+
+    const id = ins.recordset[0].UsuarioId;
+    console.log(`+ Administrador criado: #${id} (${email}) por admin #${req.user.id} (${req.user.email}).`);
+
+    const rows = await query(SELECT_USUARIO + ' WHERE u.UsuarioId = @id', { id });
+    res.status(201).json(toUsuario(rows[0]));
+  } catch (e) {
+    if (/UQ_Usuario_Email/i.test(e.message))
+      return res.status(409).json({ erro: 'Já existe um usuário com este e-mail.' });
+    next(e);
+  }
 });
 
 // PATCH /api/usuarios/:id — altera status e/ou papel.

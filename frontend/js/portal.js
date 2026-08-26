@@ -230,10 +230,22 @@
     salvarRascunhos(lerRascunhos().filter(function (x) { return x.localId !== localId; }));
   }
 
+  // Rótulo curto da origem, usado na lista e no detalhe.
+  function rotuloOrigem(c) {
+    if (c.origem === 'varejo') return 'Varejo';
+    if (c.origem === 'preentrega') return 'Pré-entrega';
+    return c.tipo;
+  }
+
   function claimsDoFiltro() {
     // Só as da sub-aba ativa (origem). Reivindicações antigas, sem origem, são
-    // tratadas como 'veiculo'.
-    var all = FG.all('claims').filter(function (c) { return (c.origem || 'veiculo') === claimAba; });
+    // tratadas como 'veiculo'. A pré-entrega é garantia DE CHASSI — mora na
+    // mesma sub-aba do veículo; fosse comparada direto com claimAba, ela
+    // sumiria das duas listas.
+    var all = FG.all('claims').filter(function (c) {
+      var o = c.origem || 'veiculo';
+      return claimAba === 'veiculo' ? (o === 'veiculo' || o === 'preentrega') : o === claimAba;
+    });
     if (claimFiltro === 'Arquivo') return all.filter(function (c) { return c.status === 'Aprovada' || c.status === 'Recusada'; });
     return all.filter(function (c) { return c.status === claimFiltro; });
   }
@@ -364,7 +376,7 @@
           devolvida +
           (c.sentBack ? '<div style="margin-top:6px;"><button class="btn red cl-editar" data-id="' + esc(c.id) + '">Editar e reenviar</button></div>' : '') +
           '</div>' +
-          '<div><span class="cell-label">Tipo</span><span class="cell-value">' + esc(c.origem === 'varejo' ? 'Varejo' : c.tipo) + '</span></div>' +
+          '<div><span class="cell-label">Tipo</span><span class="cell-value">' + esc(rotuloOrigem(c)) + '</span></div>' +
           '<div>' + statusBadge(c.status) + '<br>' +
           (c.origem === 'varejo'
             ? '<span class="cell-label">Pedido</span><a href="#pedido/' + esc(c.numeroPedido) + '">' + esc(c.numeroPedido) + '</a>'
@@ -428,13 +440,25 @@
     back.innerHTML =
       '<div class="modal"><header><h3>' + esc(titulo) + '</h3><button class="x">×</button></header>' +
       '<div class="modal-body">' +
-      '<div class="field"><label>Tipo</label><select id="nc-tipo">' +
+      '<div class="field" id="nc-tipo-campo"><label>Tipo</label><select id="nc-tipo">' +
       ['Manufacturer', 'Implícito'].map(function (t) {
         return '<option' + (t === tipoPadrao ? ' selected' : '') + '>' + t + '</option>';
       }).join('') + '</select></div>' +
       '<div class="field"><label>NIV do veículo *</label><select id="nc-niv">' +
-      vehs.map(function (v) { return '<option value="' + v.niv + '">' + v.niv + ' — ' + esc(modelName(v.modeloId)) + '</option>'; }).join('') +
+      vehs.map(function (v) {
+        return '<option value="' + v.niv + '">' + v.niv + ' — ' + esc(modelName(v.modeloId)) +
+          (v.venda ? '' : ' (em estoque)') + '</option>';
+      }).join('') +
       '</select></div>' +
+      // Aviso do modo pré-entrega. Nasce escondido e só aparece quando o chassi
+      // escolhido ainda não tem venda registrada — o cliente não escolhe este
+      // modo, ele decorre do estado da moto.
+      '<div class="pre-entrega-aviso hidden" id="nc-pe-aviso">' +
+      '<b class="pe-titulo">🛠 Garantia de pré-entrega</b>' +
+      '<span>Este chassi ainda não tem venda registrada, então a reivindicação será aberta como ' +
+      '<b>pré-entrega</b>: o defeito foi constatado na inspeção, com a moto ainda no seu estoque. ' +
+      'O prazo de garantia do comprador não começa a contar por causa disso — ele só passa a correr ' +
+      'quando você registrar a venda.</span></div>' +
       '<div class="field"><label>Peça(s) defeituosa(s) *</label>' +
       '<div class="peca-add">' +
       // Autocomplete PRÓPRIO (dropdown estilizado) — o datalist nativo herdava
@@ -447,9 +471,9 @@
       '<div id="nc-peca-info" class="muted" style="font-size:11px;margin-top:4px;"></div>' +
       '<div id="nc-pecas-list" class="pecas-list"></div></div>' +
       '<div class="form-grid">' +
-      '<div class="field"><label>Data do ocorrido *</label><input id="nc-data" type="date"></div>' +
-      '<div class="field"><label>Horas de operação</label><input id="nc-horas" type="number" min="0" step="1" placeholder="ex.: 120"></div>' +
-      '<div class="field"><label>Quilometragem (km)</label><input id="nc-km" type="number" min="0" step="1" placeholder="ex.: 3500"></div>' +
+      '<div class="field"><label id="nc-data-lbl">Data do ocorrido *</label><input id="nc-data" type="date"></div>' +
+      '<div class="field" id="nc-horas-campo"><label>Horas de operação</label><input id="nc-horas" type="number" min="0" step="1" placeholder="ex.: 120"></div>' +
+      '<div class="field" id="nc-km-campo"><label>Quilometragem (km)</label><input id="nc-km" type="number" min="0" step="1" placeholder="ex.: 3500"></div>' +
       '</div>' +
       '<div class="field"><label>Descrição do problema *</label><textarea id="nc-desc" rows="4" placeholder="Descreva o defeito constatado..."></textarea></div>' +
       '<div class="field"><label>Fotos e vídeos da peça defeituosa</label>' +
@@ -464,6 +488,36 @@
     // Só o X fecha o formulário — clicar no fundo escuro NÃO fecha, para o
     // cliente não perder o que preencheu por um clique fora sem querer.
     back.querySelector('.x').addEventListener('click', fechar);
+
+    /* ---------------------------------------------------------
+       MODO PRÉ-ENTREGA
+       ---------------------------------------------------------
+       Não é uma opção na tela: é o estado da moto que decide. Chassi sem venda
+       registrada = a inspeção que antecede a entrega, então o formulário se
+       ajusta sozinho — tira o Tipo (defeito de moto zero é de fábrica, não há
+       o que classificar), tira horas e quilometragem (não rodou) e troca o
+       rótulo da data. Registrada a venda, o mesmo formulário volta ao normal.
+       --------------------------------------------------------- */
+    var selNiv = document.getElementById('nc-niv');
+    var avisoPE = document.getElementById('nc-pe-aviso');
+    var campoTipo = document.getElementById('nc-tipo-campo');
+    var campoHoras = document.getElementById('nc-horas-campo');
+    var campoKm = document.getElementById('nc-km-campo');
+    var lblData = document.getElementById('nc-data-lbl');
+
+    function ehPreEntrega() {
+      var v = vehs.find(function (x) { return x.niv === selNiv.value; });
+      return !!v && !v.venda;
+    }
+    function aplicarModo() {
+      var pe = ehPreEntrega();
+      avisoPE.classList.toggle('hidden', !pe);
+      campoTipo.classList.toggle('hidden', pe);
+      campoHoras.classList.toggle('hidden', pe);
+      campoKm.classList.toggle('hidden', pe);
+      lblData.textContent = pe ? 'Data da inspeção *' : 'Data do ocorrido *';
+    }
+    selNiv.addEventListener('change', aplicarModo);
 
     // Consultor de peças: resolve o que foi digitado para um SKU do catálogo.
     // Retorna '' (vazio), o SKU (válido) ou null (digitado mas não encontrado).
@@ -585,6 +639,9 @@
         return { sku: p.sku, nome: p.nome || (prod ? prod.nome : ''), quantidade: p.quantidade };
       });
     }
+    // Depois do prefill: o modo é recalculado a partir do chassi selecionado,
+    // valendo tanto para o formulário em branco quanto para rascunho e reenvio.
+    aplicarModo();
     renderPecas();
     document.getElementById('nc-peca-add').addEventListener('click', function () {
       var sku = resolverPeca();
@@ -619,15 +676,19 @@
       });
     });
 
-    // Coleta os campos do formulário no formato da API.
+    // Coleta os campos do formulário no formato da API. No modo pré-entrega,
+    // horas e quilometragem vão vazias (a moto não rodou) e a origem acompanha
+    // — quem confere a regra "sem venda registrada" é a API, não esta tela.
     function coletar() {
+      var pe = ehPreEntrega();
       return {
+        origem: pe ? 'preentrega' : undefined,
         tipo: document.getElementById('nc-tipo').value,
-        niv: document.getElementById('nc-niv').value,
+        niv: selNiv.value,
         descricao: document.getElementById('nc-desc').value.trim(),
         dataDefeito: document.getElementById('nc-data').value || null,
-        horimetro: document.getElementById('nc-horas').value || null,
-        quilometragem: document.getElementById('nc-km').value || null,
+        horimetro: pe ? null : (document.getElementById('nc-horas').value || null),
+        quilometragem: pe ? null : (document.getElementById('nc-km').value || null),
         pecas: pecas.map(function (p) { return { sku: p.sku, quantidade: p.quantidade }; })
       };
     }
@@ -635,7 +696,10 @@
     function validarEnvio(d) {
       if (!d.niv) { FG.toast('Selecione o NIV do veículo.', 'erro'); return false; }
       if (!pecas.length) { FG.toast('Adicione ao menos uma peça defeituosa.', 'erro'); return false; }
-      if (!d.dataDefeito) { FG.toast('Informe a data do ocorrido.', 'erro'); return false; }
+      if (!d.dataDefeito) {
+        FG.toast(ehPreEntrega() ? 'Informe a data da inspeção.' : 'Informe a data do ocorrido.', 'erro');
+        return false;
+      }
       if (!d.descricao) { FG.toast('Descreva o problema.', 'erro'); return false; }
       return true;
     }
@@ -951,12 +1015,20 @@
           linha('Pedido', '<a href="#pedido/' + esc(c.numeroPedido) + '">' + esc(c.numeroPedido) + '</a>') +
           linha('Criador', esc(c.criador || '—')) +
           linha('Data da reivindicação', FG.fmtDateTime(c.data))
-        : linha('Tipo', esc(c.tipo)) +
-          linha('NIV', esc(c.niv || '—')) +
-          linha('Criador', esc(c.criador || '—')) +
-          linha('Data da reivindicação', FG.fmtDateTime(c.data)) +
-          linha('Data do ocorrido', c.dataDefeito ? FG.fmtDate(c.dataDefeito) : '—') +
-          linha('Uso', uso.length ? uso.join(' / ') : '—')) +
+        : c.origem === 'preentrega'
+          // Pré-entrega: a moto não rodou, então "Uso" (horas/km) não diz nada
+          // e sai da ficha; a data é a da inspeção, não a de um defeito em uso.
+          ? linha('Origem', 'Pré-entrega (moto ainda no estoque)') +
+            linha('NIV', esc(c.niv || '—')) +
+            linha('Criador', esc(c.criador || '—')) +
+            linha('Data da reivindicação', FG.fmtDateTime(c.data)) +
+            linha('Data da inspeção', c.dataDefeito ? FG.fmtDate(c.dataDefeito) : '—')
+          : linha('Tipo', esc(c.tipo)) +
+            linha('NIV', esc(c.niv || '—')) +
+            linha('Criador', esc(c.criador || '—')) +
+            linha('Data da reivindicação', FG.fmtDateTime(c.data)) +
+            linha('Data do ocorrido', c.dataDefeito ? FG.fmtDate(c.dataDefeito) : '—') +
+            linha('Uso', uso.length ? uso.join(' / ') : '—')) +
       '</div>' +
       '<div class="field"><label>Peça(s) defeituosa(s)</label><div class="pecas-list">' + pecas + '</div></div>' +
       '<div class="field"><label>Descrição</label><div class="cell-value">' + esc(c.descricao || '—') + '</div></div>' +
@@ -1243,6 +1315,133 @@
     });
   }
 
+  /* =========================================================
+     HISTÓRICO DO VEÍCULO
+     ---------------------------------------------------------
+     A linha do tempo do chassi dentro de "Ações do veículo": cadastro,
+     atribuição e transferências, venda, garantia, reivindicações e o que o
+     administrador lançar à mão (recall, revisão, anotação).
+
+     Quase tudo aqui chega pronto da API — a tela só desenha. O que ela decide
+     é a aparência de cada tipo de evento e quem pode apagar o quê: registro
+     automático não tem botão de excluir, porque ele é o que de fato aconteceu.
+     ========================================================= */
+  var HIST_ICONE = {
+    cadastro: '🏷', atribuicao: '🏢', transferencia: '🔁', venda: '🤝',
+    garantia: '🛡', reivindicacao: '🔧', recall: '⚠', revisao: '🛠', nota: '📝'
+  };
+  var HIST_ROTULO = {
+    cadastro: 'Cadastro', atribuicao: 'Atribuição', transferencia: 'Transferência',
+    venda: 'Venda', garantia: 'Garantia', reivindicacao: 'Reivindicação',
+    recall: 'Recall', revisao: 'Revisão', nota: 'Anotação'
+  };
+  // Tipos que o administrador lança à mão (espelham TIPOS_MANUAIS na API).
+  var HIST_MANUAIS = [
+    ['recall', 'Recall / campanha técnica'],
+    ['revisao', 'Revisão / manutenção'],
+    ['nota', 'Anotação']
+  ];
+
+  function desenharHistorico(niv, lista) {
+    var box = document.getElementById('av-hist');
+    if (!box) return;   // a tela mudou enquanto a busca voltava
+
+    if (!lista.length) {
+      box.innerHTML = '<p class="muted">Nenhum registro ainda. As ações feitas neste chassi ' +
+        'aparecem aqui automaticamente.</p>';
+      return;
+    }
+
+    var admin = sess.papel === 'admin';
+    box.innerHTML = lista.map(function (h) {
+      var rodape = [h.empresa, h.usuario].filter(Boolean).map(esc).join(' · ');
+      return '<div class="hist-item hist-' + esc(h.tipo) + '">' +
+        '<div class="hist-ico" title="' + esc(HIST_ROTULO[h.tipo] || h.tipo) + '">' +
+        (HIST_ICONE[h.tipo] || '•') + '</div>' +
+        '<div class="hist-corpo">' +
+        '<div class="hist-linha1"><b>' + esc(h.titulo) + '</b>' +
+        (h.referencia ? ' <span class="hist-ref">' + esc(h.referencia) + '</span>' : '') +
+        '<span class="hist-data">' + FG.fmtDateTime(h.data) + '</span></div>' +
+        (h.detalhe ? '<div class="hist-detalhe">' + esc(h.detalhe) + '</div>' : '') +
+        (rodape ? '<div class="hist-rodape">' + rodape + '</div>' : '') +
+        '</div>' +
+        (admin && h.manual
+          ? '<button class="hist-x" data-hx="' + h.id + '" title="Apagar este registro">×</button>'
+          : '') +
+        '</div>';
+    }).join('');
+
+    Array.prototype.forEach.call(box.querySelectorAll('[data-hx]'), function (b) {
+      b.addEventListener('click', async function () {
+        if (!confirm('Apagar este registro do histórico?')) return;
+        b.disabled = true;
+        var r = await FG.excluirHistorico(niv, b.getAttribute('data-hx'));
+        if (!r.ok) { FG.toast(r.msg || 'Não foi possível apagar.', 'erro'); b.disabled = false; return; }
+        FG.toast('Registro apagado.');
+        desenharHistorico(niv, r.lista);
+      });
+    });
+  }
+
+  // Modal (SÓ ADMIN) para lançar recall, revisão ou anotação no chassi.
+  function modalHistorico(niv, onDone) {
+    var hoje = new Date().toISOString().slice(0, 10);
+    var back = document.createElement('div');
+    back.className = 'modal-back';
+    back.innerHTML =
+      '<div class="modal"><header><h3>Registrar no histórico — ' + esc(niv) + '</h3>' +
+      '<button class="x">×</button></header>' +
+      '<div class="modal-body">' +
+      '<p class="muted" style="margin-top:0;">Para o que o sistema não registra sozinho: uma campanha ' +
+      'de recall, uma revisão feita na oficina, uma observação sobre este chassi.</p>' +
+      '<div class="field"><label for="hi-tipo">Tipo *</label><select id="hi-tipo">' +
+      HIST_MANUAIS.map(function (t) {
+        return '<option value="' + t[0] + '">' + esc(t[1]) + '</option>';
+      }).join('') + '</select></div>' +
+      '<div class="field"><label for="hi-titulo">Título *</label>' +
+      '<input id="hi-titulo" type="text" maxlength="160" placeholder="Ex.: Recall do parafuso da mesa superior"></div>' +
+      '<div class="field"><label for="hi-detalhe">Detalhe</label>' +
+      '<textarea id="hi-detalhe" rows="3" maxlength="1000" placeholder="O que foi feito, o que falta, quem executou..."></textarea></div>' +
+      '<div class="field"><label for="hi-ref">Referência</label>' +
+      '<input id="hi-ref" type="text" maxlength="40" placeholder="Nº da campanha, da OS, da nota (opcional)"></div>' +
+      '<div class="field"><label for="hi-data">Data do evento</label>' +
+      '<input id="hi-data" type="date" max="' + hoje + '" value="' + hoje + '"></div>' +
+      '</div>' +
+      '<div class="modal-foot"><button class="btn-line" id="hi-canc">Cancelar</button>' +
+      '<button class="btn red" id="hi-ok">Registrar</button></div></div>';
+    document.body.appendChild(back);
+
+    function fechar() { back.remove(); }
+    back.querySelector('.x').addEventListener('click', fechar);
+    back.querySelector('#hi-canc').addEventListener('click', fechar);
+    document.getElementById('hi-titulo').focus();
+
+    var btn = document.getElementById('hi-ok');
+    btn.addEventListener('click', async function () {
+      var titulo = document.getElementById('hi-titulo').value.trim();
+      if (!titulo) { FG.toast('Informe o título do registro.'); return; }
+      var dataTxt = document.getElementById('hi-data').value;
+      btn.disabled = true; btn.textContent = 'Registrando…';
+      var r = await FG.registrarHistorico(niv, {
+        tipo: document.getElementById('hi-tipo').value,
+        titulo: titulo,
+        detalhe: document.getElementById('hi-detalhe').value.trim(),
+        referencia: document.getElementById('hi-ref').value.trim(),
+        // Data sem hora vira meia-noite UTC; mandamos o meio-dia para o evento
+        // não "voltar um dia" ao ser exibido no fuso do Brasil.
+        data: dataTxt ? dataTxt + 'T12:00:00' : undefined
+      });
+      if (!r.ok) {
+        FG.toast(r.msg || 'Não foi possível registrar.', 'erro');
+        btn.disabled = false; btn.textContent = 'Registrar';
+        return;
+      }
+      fechar();
+      FG.toast('Registrado no histórico do veículo.');
+      if (onDone) onDone(r.lista);
+    });
+  }
+
   function renderAcoes(nivBusca) {
     setCrumb(['Ações do veículo']); setTabOn('acoes');
     view.innerHTML =
@@ -1281,6 +1480,14 @@
         (sess.papel === 'admin' ? '<button class="btn" id="av-transf">Transferir revendedor</button>' : '') +
         '<a class="btn" href="#reivindicacoes">Criar reivindicação</a>' +
         '<a class="btn" href="/finder">Abrir no Parts Finder</a>' +
+        '</div>' +
+        /* ---- histórico do chassi ---- */
+        '<div class="hist-bloco">' +
+        '<div class="hist-head"><h4>Histórico do veículo</h4>' +
+        (sess.papel === 'admin'
+          ? '<button class="btn small" id="av-hist-novo">+ Registrar no histórico</button>' : '') +
+        '</div>' +
+        '<div id="av-hist" class="hist-lista"><p class="muted">Carregando…</p></div>' +
         '</div></div>';
 
       var bv = document.getElementById('av-venda');
@@ -1294,6 +1501,13 @@
         FG.toast('Garantia ativada.');
         buscar();
       });
+
+      var bh = document.getElementById('av-hist-novo');
+      if (bh) bh.addEventListener('click', function () {
+        modalHistorico(v.niv, function (lista) { desenharHistorico(v.niv, lista); });
+      });
+
+      FG.veiculoHistorico(v.niv).then(function (lista) { desenharHistorico(v.niv, lista); });
     }
 
     document.getElementById('av-go').addEventListener('click', buscar);

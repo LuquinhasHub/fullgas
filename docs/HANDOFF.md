@@ -1,8 +1,86 @@
 # Handoff — estado do trabalho (Fullgas B2B)
 
 > Documento de passagem de contexto entre sessões/máquinas. Atualizado em
-> **2026-07-03**. Leia junto com `docs/04-roadmap.md` (plano oficial) e
+> **2026-08-26**. Leia junto com `docs/04-roadmap.md` (plano oficial) e
 > `docs/03-arquitetura-e-expansao.md`.
+
+### Garantia de pré-entrega (2026-08-26, `Separar_clientes_dos_admin`)
+
+Furo fechado: a garantia por chassi exigia venda registrada (é a venda que
+ativa a garantia), mas o defeito costuma aparecer ANTES — na inspeção de
+pré-entrega, com a moto ainda no estoque. Não havia como reclamar.
+
+- **Migração 034** — `CK_Reiv_Origem` passa a aceitar `preentrega` ao lado de
+  `veiculo` e `varejo`. Origem (e não um Tipo novo) porque o que muda é o
+  conjunto de REGRAS, que é o papel que Origem já cumpre.
+- **Regras** (`resolverVeicPreEntrega`): chassi existe, **é da empresa que
+  abre** (admin isento) e **não tem venda registrada**. Dispensa garantia
+  ativa e não há prazo a verificar. Abrir a reivindicação **NÃO ativa** a
+  garantia — o relógio dos 90 dias só começa na entrega ao consumidor.
+- **Não é uma escolha na tela.** O formulário detecta o estado da moto pelo
+  NIV: sem venda registrada, ele entra em modo pré-entrega sozinho (aviso
+  explicativo, sem seletor de Tipo, sem horas/km, data vira "da inspeção").
+  Registrada a venda, o mesmo formulário volta ao normal. No reenvio a origem
+  vem do banco, nunca do corpo — senão daria para converter uma garantia
+  comum em pré-entrega e contornar a regra.
+- Pré-entrega aparece na sub-aba **Garantia de Veículo** (se comparasse a
+  origem direto com a aba, sumiria das duas listas) e é rotulada como
+  "Pré-entrega" no portal e no painel.
+- Aprovada, gera pedido de garantia como qualquer outra (peça reposta sem
+  cobrança).
+- Testes: curl (aberta em moto de estoque; recusada em moto vendida; recusada
+  para chassi de outra concessionária; garantia comum em moto não vendida
+  continua recusada; garantia não ativada; aprovação gerando pedido) e o
+  formulário em jsdom nos dois estados (25 verificações).
+
+### Histórico do veículo (2026-08-26, `Separar_clientes_dos_admin`)
+
+A tela **Ações do veículo** (portal, `#acoes/<NIV>`) ganhou o bloco
+**Histórico do veículo**: a linha do tempo do chassi, dentro do mesmo cartão.
+
+- **Migração 033** — `dbo.VeiculoHistorico`. FK (cascata) só para `Veiculo`;
+  `UsuarioId`/`EmpresaId` entram SEM FK, com snapshot do nome: com FK, o
+  `DELETE /api/usuarios/:id` passaria a falhar por causa de linhas de
+  histórico. A coluna `Manual` separa o que o sistema gravou do que uma pessoa
+  lançou. O backfill reconstruiu 50 eventos do que o banco já sabia (entrada
+  em estoque, venda, garantia, reivindicações) — transferências antigas não
+  dava para reconstruir, nunca foram gravadas.
+- **Gravação automática** (`api/src/historico-veiculo.js`, `registrarEvento`):
+  cadastro, atribuição, transferência, venda, garantia e o ciclo das
+  reivindicações (aberta / aprovada / recusada / devolvida). A regra do módulo
+  é não derrubar a ação que registra: falha ao gravar vira log, não erro 500.
+- **Lançamento manual** (só admin): `POST /api/veiculos/:niv/historico` com
+  `tipo` ∈ `recall | revisao | nota`, título, detalhe, referência e data (não
+  aceita futuro). `DELETE .../historico/:id` só apaga lançamento manual —
+  evento automático é o que de fato aconteceu e não sai.
+- **Leitura**: `GET /api/veiculos/:niv/historico`, no mesmo escopo do veículo
+  (o cliente só lê o histórico de um chassi que é dele).
+- Testes: ciclo completo por curl (cada tipo de evento gerando entrada, mais
+  403/404/409/400 das regras) e a tela em jsdom (27 verificações).
+
+### Clientes × Administradores no painel (2026-08-26, `Separar_clientes_dos_admin`)
+
+A aba única "Clientes" (`#usuarios`) listava as duas populações da tabela
+`Usuario` misturadas. Agora são duas:
+
+- **`#clientes`** — contas de concessionária (`Papel = 'cliente'`): conta
+  principal (gestora, nasce no cadastro do site) e contas internas
+  (sub-dealers). Mantém empresa, CNPJ, endereço expansível e o filtro por
+  tipo de conta.
+- **`#administradores`** — equipe Fullgas (`Papel = 'admin'`), com o botão
+  **Adicionar administrador**.
+
+`#usuarios` continua funcionando e cai em Clientes (favoritos antigos).
+
+- **API**: `POST /api/usuarios` (admin) cria administrador — nasce
+  `aprovado`, `Gestor = 1`, `Permissoes = NULL` e na **mesma empresa de quem
+  cria** (a casa). Senha mínima de **8** caracteres, contra os 6 do cadastro
+  de cliente: é a conta que enxerga todas as concessionárias.
+- **Painel**: "Alterar identidade" some no modal de um administrador (a API
+  já recusava assumir a identidade de outro admin); trocar o papel avisa que
+  a conta muda de aba.
+- Testes: rotas conferidas com curl (201/409/400/403/401 + login real da
+  conta criada) e as duas telas renderizadas em jsdom (40 verificações).
 
 ## Onde estamos
 

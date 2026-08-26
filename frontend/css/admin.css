@@ -88,6 +88,23 @@ body.admin { background: var(--adm-bg); color: var(--adm-ink); display: flex; mi
 .usr-ficha-emp { font-size: 12px; }
 .pill-status.ps-interna { background: #e5e7eb; color: #374151; }
 .pill-status.ps-gestor { background: #dbeafe; color: #1d4ed8; }
+.pill-status.ps-voce { background: #fff3cd; color: #8a6d00; }
+.pill-status.ps-preentrega { background: #dbeafe; color: #1d4ed8; }
+
+/* Linha de contexto no topo das abas Clientes/Administradores: diz o que
+   aquela lista contém e leva à outra aba. */
+.adm-hint {
+  font-size: 12.5px; color: #666; line-height: 1.55;
+  margin: 0 0 12px; padding-bottom: 10px; border-bottom: 1px dashed var(--adm-line);
+}
+.adm-hint a { color: var(--adm-blue); }
+
+/* Erro do formulário de novo administrador (não usa toast: o aviso precisa
+   ficar visível ao lado dos campos enquanto a pessoa corrige). */
+.na-erro {
+  margin: 4px 0 0; padding: 9px 12px; font-size: 12.5px;
+  background: #fee2e2; border-left: 3px solid #b91c1c; color: #7f1d1d;
+}
 
 .usr-acoes { display: flex; flex-direction: column; gap: 9px; margin-top: 14px; }
 .usr-acao {

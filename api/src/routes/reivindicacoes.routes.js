@@ -17,6 +17,7 @@ import { EXT_IMAGEM, EXT_VIDEO, nomeArquivo, filtroMidia } from '../middlewares/
 import {
   exportacaoLigada, atualizarEstoqueCesta, inserirExportacao, processarExportacoes
 } from '../tiny-pedidos.js';
+import { registrarEvento } from '../historico-veiculo.js';
 
 const router = Router();
 
@@ -129,6 +130,59 @@ function parseReiv(body, opts) {
   return { dados };
 }
 
+// Valida cada peça no catálogo (dentro de uma tx) e devolve com o nome.
+async function resolverPecas(tx, pecas) {
+  const pecasResolvidas = [];
+  for (const p of pecas) {
+    const prod = await new sql.Request(tx).input('sku', sql.VarChar(40), p.sku)
+      .query('SELECT Nome FROM dbo.Produto WHERE Sku = @sku');
+    if (!prod.recordset.length) return { erro: 'Peça não encontrada no catálogo: ' + p.sku };
+    pecasResolvidas.push({ sku: p.sku, nome: prod.recordset[0].Nome, quantidade: p.quantidade });
+  }
+  return { pecasResolvidas };
+}
+
+/* ------------------------------------------------------------------
+   GARANTIA DE PRÉ-ENTREGA
+   ------------------------------------------------------------------
+   O defeito achado na inspeção que antecede a entrega, com a moto ainda no
+   estoque. As regras são o espelho da garantia comum:
+
+     comum      → exige venda registrada (é ela que ativa a garantia)
+     pré-entrega→ exige que a venda NÃO tenha sido registrada
+
+   Duas condições a mais, que a garantia comum não tem:
+
+   • O chassi precisa ser DA EMPRESA que abre. "Pré-entrega" quer dizer "está
+     no meu estoque, eu inspecionei" — reclamar da moto que está no pátio de
+     outro revendedor não faria sentido. (O administrador é exceção: ele abre
+     em nome de qualquer concessionária, como faz no resto do painel.)
+
+   • Não há prazo a verificar. O relógio dos 90 dias começa na entrega ao
+     consumidor; enquanto a moto está no estoque ele nem partiu. E abrir esta
+     reivindicação NÃO ativa a garantia: se ativasse, o prazo do comprador
+     começaria a correr antes de ele receber a moto.
+   ------------------------------------------------------------------ */
+async function resolverVeicPreEntrega(tx, niv, pecas, user) {
+  const veic = await new sql.Request(tx).input('niv', sql.VarChar(30), niv)
+    .query(`SELECT VeiculoId, VendaData, Status, EmpresaId
+              FROM dbo.Veiculo WHERE Niv = @niv`);
+  if (!veic.recordset.length) return { erro: 'Veículo não encontrado: ' + niv };
+  const v = veic.recordset[0];
+
+  if (user.papel !== 'admin' && v.EmpresaId !== user.empresaId)
+    return { erro: 'Este chassi não está no estoque da sua concessionária.' };
+
+  if (v.VendaData || v.Status === 'Vendido')
+    return {
+      erro: 'Este chassi já tem venda registrada — use a garantia normal, não a de pré-entrega.'
+    };
+
+  const { pecasResolvidas, erro } = await resolverPecas(tx, pecas);
+  if (erro) return { erro };
+  return { veiculoId: v.VeiculoId, pecasResolvidas };
+}
+
 // Resolve o veículo (NIV) e valida cada peça no catálogo (dentro de uma tx).
 // Aplica o prazo de garantia: 90 dias a partir de GarantiaAtivaEm. Sem garantia
 // ativada, ou com o prazo vencido, a abertura é barrada.
@@ -142,13 +196,8 @@ async function resolverVeicPecas(tx, niv, pecas) {
   const limite = new Date(GarantiaAtivaEm).getTime() + GARANTIA_DIAS * 24 * 60 * 60 * 1000;
   if (Date.now() > limite)
     return { erro: `Garantia expirada (${GARANTIA_DIAS} dias). Este chassi não aceita novas reivindicações de garantia.` };
-  const pecasResolvidas = [];
-  for (const p of pecas) {
-    const prod = await new sql.Request(tx).input('sku', sql.VarChar(40), p.sku)
-      .query('SELECT Nome FROM dbo.Produto WHERE Sku = @sku');
-    if (!prod.recordset.length) return { erro: 'Peça não encontrada no catálogo: ' + p.sku };
-    pecasResolvidas.push({ sku: p.sku, nome: prod.recordset[0].Nome, quantidade: p.quantidade });
-  }
+  const { pecasResolvidas, erro } = await resolverPecas(tx, pecas);
+  if (erro) return { erro };
   return { veiculoId: VeiculoId, pecasResolvidas };
 }
 
@@ -324,8 +373,16 @@ router.get('/reivindicacoes/:numero', requireAuth, async (req, res, next) => {
 // origem='varejo' abre garantia de peça de um PEDIDO (sem NIV/prazo); o padrão
 // 'veiculo' mantém o fluxo por NIV, agora com o prazo de 90 dias.
 router.post('/reivindicacoes', requireAuth, async (req, res, next) => {
-  const varejo = String(req.body?.origem || '').trim() === 'varejo';
-  const { dados, erro } = varejo ? parseReivVarejo(req.body) : parseReiv(req.body);
+  const origem = String(req.body?.origem || '').trim();
+  const varejo = origem === 'varejo';
+  const preEntrega = origem === 'preentrega';
+  // Pré-entrega não tem Tipo a escolher: o defeito visto na inspeção de uma
+  // moto zero é, por definição, de fábrica ou de transporte. Forçamos
+  // 'Manufacturer' para satisfazer a coluna NOT NULL sem pedir ao cliente uma
+  // classificação que ele não teria como fazer.
+  const { dados, erro } = varejo
+    ? parseReivVarejo(req.body)
+    : parseReiv(preEntrega ? { ...req.body, tipo: 'Manufacturer' } : req.body);
   if (erro) return res.status(400).json({ erro });
 
   const pool = await getPool();
@@ -336,7 +393,9 @@ router.post('/reivindicacoes', requireAuth, async (req, res, next) => {
     // Resolve alvo (veículo por NIV, ou pedido por número) e valida as peças.
     const rv = varejo
       ? await resolverPedidoPecas(tx, dados.numeroPedido, req.user, dados.pecas)
-      : await resolverVeicPecas(tx, dados.niv, dados.pecas);
+      : preEntrega
+        ? await resolverVeicPreEntrega(tx, dados.niv, dados.pecas, req.user)
+        : await resolverVeicPecas(tx, dados.niv, dados.pecas);
     if (rv.erro) { await tx.rollback(); return res.status(400).json({ erro: rv.erro }); }
 
     // Numero único de 8 dígitos.
@@ -355,8 +414,8 @@ router.post('/reivindicacoes', requireAuth, async (req, res, next) => {
       .input('uid', sql.Int, req.user.id)
       .input('vid', sql.Int, varejo ? null : rv.veiculoId)
       .input('pid', sql.Int, varejo ? rv.pedidoId : null)
-      .input('origem', sql.VarChar(10), varejo ? 'varejo' : 'veiculo')
-      // Varejo não tem "Tipo" de garantia (Manufacturer/Implícito): grava o
+      .input('origem', sql.VarChar(10), varejo ? 'varejo' : preEntrega ? 'preentrega' : 'veiculo')
+      // Varejo e pré-entrega não têm "Tipo" de garantia a escolher: gravam o
       // padrão aceito pelo CHECK só para satisfazer a coluna NOT NULL.
       .input('tipo', sql.VarChar(16), varejo ? 'Manufacturer' : dados.tipo)
       .input('desc', sql.NVarChar(1000), dados.descricao)
@@ -374,6 +433,19 @@ router.post('/reivindicacoes', requireAuth, async (req, res, next) => {
     await inserirPecas(tx, reivId, rv.pecasResolvidas);
 
     await tx.commit();
+
+    // Reivindicação de VEÍCULO entra no histórico do chassi. A de varejo é
+    // sobre uma peça de pedido, sem chassi a que se ligar. Fica FORA da
+    // transação de propósito: o histórico não pode desfazer uma abertura.
+    if (!varejo && rv.veiculoId) {
+      await registrarEvento({
+        veiculoId: rv.veiculoId, tipo: 'reivindicacao',
+        titulo: preEntrega ? 'Reivindicação de pré-entrega aberta' : 'Reivindicação aberta',
+        detalhe: dados.descricao,
+        referencia: numero, user: req.user, empresaId: req.user.empresaId
+      });
+    }
+
     const rows = await query(SELECT_REIV + ' WHERE r.ReivindicacaoId = @id', { id: reivId });
     res.status(201).json((await montarLista(rows, req))[0]);
   } catch (e) {
@@ -404,7 +476,11 @@ router.put('/reivindicacoes/:numero', requireAuth, async (req, res, next) => {
     const reivId = cur.recordset[0].ReivindicacaoId;
     // Reenvio em resposta a uma devolução → sinaliza ao admin que foi atualizada.
     const reenviada = cur.recordset[0].Devolvido ? 1 : 0;
+    // A ORIGEM não vem do corpo: é a que está gravada. Aceitá-la do cliente
+    // deixaria uma garantia comum virar pré-entrega no reenvio, contornando a
+    // regra de "sem venda registrada" que vale na abertura.
     const varejo = cur.recordset[0].Origem === 'varejo';
+    const preEntrega = cur.recordset[0].Origem === 'preentrega';
 
     // Tipo é imutável após o 1º envio — não é validado nem alterado aqui.
     const parsed = varejo ? parseReivVarejo(req.body) : parseReiv(req.body, { comTipo: false });
@@ -413,7 +489,9 @@ router.put('/reivindicacoes/:numero', requireAuth, async (req, res, next) => {
 
     const rv = varejo
       ? await resolverPedidoPecas(tx, dados.numeroPedido, req.user, dados.pecas)
-      : await resolverVeicPecas(tx, dados.niv, dados.pecas);
+      : preEntrega
+        ? await resolverVeicPreEntrega(tx, dados.niv, dados.pecas, req.user)
+        : await resolverVeicPecas(tx, dados.niv, dados.pecas);
     if (rv.erro) { await tx.rollback(); return res.status(400).json({ erro: rv.erro }); }
 
     await new sql.Request(tx)
@@ -564,7 +642,7 @@ router.put('/reivindicacoes/:numero/status', requireAuth, requireAdmin, async (r
   try {
     await tx.begin();
     const cur = await new sql.Request(tx).input('num', sql.VarChar(20), req.params.numero)
-      .query('SELECT ReivindicacaoId, Numero, EmpresaId, UsuarioId, Status, Origem, PedidoId FROM dbo.Reivindicacao WHERE Numero = @num');
+      .query('SELECT ReivindicacaoId, Numero, EmpresaId, UsuarioId, Status, Origem, PedidoId, VeiculoId FROM dbo.Reivindicacao WHERE Numero = @num');
     if (!cur.recordset.length) { await tx.rollback(); return res.status(404).json({ erro: 'Reivindicação não encontrada.' }); }
     const reiv = cur.recordset[0];
     if (STATUS_TERMINAIS.includes(reiv.Status)) {
@@ -613,6 +691,19 @@ router.put('/reivindicacoes/:numero/status', requireAuth, requireAdmin, async (r
     await tx.commit();
     if (pedidoGarantia) processarExportacoes(); // fire-and-forget: cria/aprova no Tiny
 
+    // O desfecho da garantia é o que mais importa no histórico do chassi:
+    // é ele que conta se aquele defeito foi coberto ou não.
+    if (reiv.VeiculoId) {
+      await registrarEvento({
+        veiculoId: reiv.VeiculoId, tipo: 'reivindicacao',
+        titulo: 'Reivindicação ' + status.toLowerCase(),
+        detalhe: status === 'Aprovada' && pedidoGarantia
+          ? 'Pedido de garantia gerado: ' + pedidoGarantia
+          : null,
+        referencia: reiv.Numero, user: req.user, empresaId: reiv.EmpresaId
+      });
+    }
+
     const rows = await query(SELECT_REIV + ' WHERE r.Numero = @num', { num: req.params.numero });
     const corpo = (await montarLista(rows, req))[0];
     corpo.pedidoGarantia = pedidoGarantia;
@@ -629,7 +720,9 @@ router.put('/reivindicacoes/:numero/devolver', requireAuth, requireAdmin, async 
   const falta = String(req.body?.faltaInformacao || '').trim();
   if (!falta) return res.status(400).json({ erro: 'Descreva o que falta antes de devolver.' });
   try {
-    const cur = await query('SELECT Status FROM dbo.Reivindicacao WHERE Numero = @num', { num: req.params.numero });
+    const cur = await query(
+      'SELECT Status, VeiculoId, EmpresaId FROM dbo.Reivindicacao WHERE Numero = @num',
+      { num: req.params.numero });
     if (!cur.length) return res.status(404).json({ erro: 'Reivindicação não encontrada.' });
     if (STATUS_TERMINAIS.includes(cur[0].Status))
       return res.status(409).json({ erro: 'Reivindicação ' + cur[0].Status.toLowerCase() + ' — não pode ser devolvida.' });
@@ -640,6 +733,16 @@ router.put('/reivindicacoes/:numero/devolver', requireAuth, requireAdmin, async 
         WHERE Numero = @num`,
       { falta, num: req.params.numero }
     );
+
+    if (cur[0].VeiculoId) {
+      await registrarEvento({
+        veiculoId: cur[0].VeiculoId, tipo: 'reivindicacao',
+        titulo: 'Reivindicação devolvida ao revendedor',
+        detalhe: 'Falta: ' + falta,
+        referencia: req.params.numero, user: req.user, empresaId: cur[0].EmpresaId
+      });
+    }
+
     const rows = await query(SELECT_REIV + ' WHERE r.Numero = @num', { num: req.params.numero });
     res.json((await montarLista(rows, req))[0]);
   } catch (e) { next(e); }

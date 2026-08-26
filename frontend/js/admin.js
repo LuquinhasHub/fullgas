@@ -33,7 +33,9 @@
     back.querySelector('.x').addEventListener('click', function () { back.remove(); });
     // Clicar fora NÃO fecha — pop-ups só fecham no X (padrão do painel).
   });
-  document.getElementById('adm-bell').addEventListener('click', function () { location.hash = '#usuarios'; });
+  // O sino conta cadastros esperando aprovação — que são sempre de clientes
+  // (administrador criado pelo painel já nasce liberado), então leva à aba deles.
+  document.getElementById('adm-bell').addEventListener('click', function () { location.hash = '#clientes'; });
 
   function refreshBell() {
     var n = FG.all('users').filter(function (u) { return u.status === 'pendente'; }).length;
@@ -67,7 +69,10 @@
     prevenda: { status: '', busca: '' },
     produtos: { cat: '', estoque: '', busca: '' },
     chassis:  { status: '', modelo: '', atrib: '', busca: '' },
-    usuarios: { status: '', papel: '', busca: '' }
+    // Duas populações, dois filtros: quem compra (clientes das concessionárias)
+    // e quem opera o sistema (administradores da Fullgas).
+    clientes: { status: '', tipo: '', busca: '' },
+    admins:   { status: '', busca: '' }
   };
 
   function filtroAtivo(aba) {
@@ -232,31 +237,57 @@
   }
 
   /* =========================================================
-     USUÁRIOS
+     CLIENTES  ×  ADMINISTRADORES
+     ---------------------------------------------------------
+     A tabela Usuario do banco guarda duas populações muito diferentes: quem
+     COMPRA (concessionárias — conta gestora e contas internas) e quem OPERA o
+     sistema (equipe Fullgas, com acesso a este painel). Numa lista só, as duas
+     se escondiam: para achar um cadastro pendente era preciso varrer
+     administradores no meio, e para conferir quem tem acesso ao painel era
+     preciso lembrar de filtrar por papel. Agora são duas abas, cada uma com as
+     colunas e as ações que fazem sentido para aquela população.
      ========================================================= */
-  function renderUsuarios() {
-    h1.textContent = 'Administração de usuários'; setOn('usuarios');
-    var todos = FG.all('users');
-    var f = filtros.usuarios;
+
+  // Botão "Gerenciar" (ou "(você)" na própria linha do admin logado).
+  function acoesUsuario(u) {
+    if (String(u.id) === String(sess.id)) return '<span class="muted">(você)</span>';
+    return '<button class="btn-orange btn-mini usr-ger" data-ger="' + u.id + '">⚙ Gerenciar</button>' +
+      (u.status === 'pendente' ? ' <span class="usr-alerta" title="Cadastro aguardando aprovação">!</span>' : '');
+  }
+
+  // Liga os botões "Gerenciar" da tabela ao painel de ações. `voltar` é o
+  // render da aba de onde o clique saiu — é para lá que o modal devolve.
+  function bindGerenciar(voltar) {
+    Array.prototype.forEach.call(view.querySelectorAll('[data-ger]'), function (b) {
+      b.addEventListener('click', function () {
+        var u = FG.all('users').find(function (x) { return String(x.id) === String(b.getAttribute('data-ger')); });
+        if (u) modalUsuario(u, voltar);
+      });
+    });
+  }
+
+  /* ---------------------------------------------------------
+     ABA CLIENTES — concessionárias (papel 'cliente')
+     --------------------------------------------------------- */
+  function renderClientes() {
+    h1.textContent = 'Clientes'; setOn('clientes');
+    var todos = FG.all('users').filter(function (u) { return u.papel === 'cliente'; });
+    var f = filtros.clientes;
     var users = todos.filter(function (u) {
       if (f.status && u.status !== f.status) return false;
-      if (f.papel === 'interna' ? u.gestor !== false : (f.papel && u.papel !== f.papel)) return false;
-      return casaBusca('usuarios', [u.nome, u.email, u.empresa, u.cnpj]);
+      if (f.tipo === 'interna' && u.gestor !== false) return false;
+      if (f.tipo === 'gestor' && u.gestor === false) return false;
+      return casaBusca('clientes', [u.nome, u.email, u.empresa, u.cnpj]);
     });
     view.innerHTML =
-      '<div class="adm-card"><div class="c-head">Usuários cadastrados (' + contagem('usuarios', users.length, todos.length) + ')</div><div class="c-body">' +
-      barraFiltro('usuarios', [
+      '<div class="adm-card"><div class="c-head">Clientes cadastrados (' + contagem('clientes', users.length, todos.length) + ')</div><div class="c-body">' +
+      '<p class="adm-hint">Contas das concessionárias: a <b>conta principal</b> nasce no cadastro do site e as <b>contas internas</b> são criadas pelo próprio cliente em "Minha conta". Administradores da Fullgas ficam na aba <a href="#administradores">Administradores</a>.</p>' +
+      barraFiltro('clientes', [
         { k: 'status', rotulo: 'Status', opcoes: [['pendente', 'Pendente'], ['aprovado', 'Aprovado'], ['bloqueado', 'Bloqueado']] },
-        { k: 'papel', rotulo: 'Tipo', opcoes: [['admin', 'Administrador'], ['cliente', 'Cliente'], ['interna', 'Conta interna']] }
+        { k: 'tipo', rotulo: 'Tipo', opcoes: [['gestor', 'Conta principal'], ['interna', 'Conta interna']] }
       ], 'Buscar por nome, e-mail, empresa ou CNPJ') +
-      '<table class="tbl"><thead><tr><th>Nome</th><th>E-mail</th><th>Empresa</th><th>CNPJ</th><th>Endereço</th><th>Papel</th><th>Status</th><th>Ações</th></tr></thead><tbody>' +
+      '<table class="tbl"><thead><tr><th>Nome</th><th>E-mail</th><th>Empresa</th><th>CNPJ</th><th>Endereço</th><th>Tipo</th><th>Status</th><th>Ações</th></tr></thead><tbody>' +
       (users.length ? users.map(function (u) {
-        // Uma porta só: "Gerenciar" abre o painel com TODAS as ações daquele
-        // usuário, em vez da fileira de botões espremidos que havia aqui.
-        var acoes = String(u.id) === String(sess.id)
-          ? '<span class="muted">(você)</span>'
-          : '<button class="btn-orange btn-mini usr-ger" data-ger="' + u.id + '">⚙ Gerenciar</button>' +
-            (u.status === 'pendente' ? ' <span class="usr-alerta" title="Cadastro aguardando aprovação">!</span>' : '');
         var e = u.endereco;
         // Resumo compacto na tabela; os dados completos ficam na linha
         // expansível abaixo (botão "Expandir ▾"), bem divididos campo a campo.
@@ -279,17 +310,18 @@
             dd('Complemento', e.complemento) + dd('Bairro', e.bairro) +
             dd('Cidade', e.cidade) + dd('UF', e.uf) +
             '</div>' : '<p class="muted" style="margin:4px 0 0;">Sem endereço cadastrado.</p>');
-        return '<tr><td>' + esc(u.nome) +
-          (u.gestor === false ? ' <span class="muted" style="font-size:11px;">(interna)</span>' : '') +
-          '</td><td>' + esc(u.email) + '</td><td>' + esc(u.empresa) + '</td>' +
+        return '<tr><td>' + esc(u.nome) + '</td><td>' + esc(u.email) + '</td><td>' + esc(u.empresa) + '</td>' +
           '<td>' + (u.cnpj ? esc(u.cnpj) : '<span class="muted">—</span>') + '</td>' +
           '<td style="font-size:12px;">' + endTxt +
           ' <button class="btn-line btn-mini usr-exp" data-exp="' + u.id + '">Expandir ▾</button></td>' +
-          '<td>' + pill(u.papel) + '</td><td>' + pill(u.status) + '</td><td>' + acoes + '</td></tr>' +
+          '<td>' + (u.gestor === false
+            ? '<span class="pill-status ps-interna">Conta interna</span>'
+            : '<span class="pill-status ps-gestor">Conta principal</span>') + '</td>' +
+          '<td>' + pill(u.status) + '</td><td>' + acoesUsuario(u) + '</td></tr>' +
           '<tr class="usr-det hidden" data-det="' + u.id + '"><td colspan="8">' + det + '</td></tr>';
-      }).join('') : vazioFiltro(8, 'Nenhum usuário com esse filtro.')) + '</tbody></table></div></div>';
+      }).join('') : vazioFiltro(8, 'Nenhum cliente com esse filtro.')) + '</tbody></table></div></div>';
 
-    bindFiltro(renderUsuarios);
+    bindFiltro(renderClientes);
 
     // Expandir/recolher os dados completos do cadastro.
     Array.prototype.forEach.call(view.querySelectorAll('[data-exp]'), function (b) {
@@ -302,11 +334,121 @@
       });
     });
 
-    Array.prototype.forEach.call(view.querySelectorAll('[data-ger]'), function (b) {
-      b.addEventListener('click', function () {
-        var u = FG.all('users').find(function (x) { return String(x.id) === String(b.getAttribute('data-ger')); });
-        if (u) modalUsuario(u);
-      });
+    bindGerenciar(renderClientes);
+  }
+
+  /* ---------------------------------------------------------
+     ABA ADMINISTRADORES — equipe Fullgas (papel 'admin')
+     --------------------------------------------------------- */
+  function renderAdmins() {
+    h1.textContent = 'Administradores'; setOn('administradores');
+    var todos = FG.all('users').filter(function (u) { return u.papel === 'admin'; });
+    var f = filtros.admins;
+    var admins = todos.filter(function (u) {
+      if (f.status && u.status !== f.status) return false;
+      return casaBusca('admins', [u.nome, u.email, u.empresa]);
+    });
+    var ativos = todos.filter(function (u) { return u.status === 'aprovado'; }).length;
+
+    view.innerHTML =
+      '<div class="adm-bar"><span class="grow"></span>' +
+      '<button class="btn-orange" id="adm-novo">+ Adicionar administrador</button></div>' +
+
+      '<div class="adm-card"><div class="c-head">Administradores (' + contagem('admins', admins.length, todos.length) + ')</div><div class="c-body">' +
+      '<p class="adm-hint">Quem tem acesso a <b>este painel</b>: pedidos, catálogo, chassis, cadastros de clientes, Tiny e notificações. ' +
+      'São ' + ativos + ' com acesso ativo. Contas de concessionária ficam na aba <a href="#clientes">Clientes</a>.</p>' +
+      barraFiltro('admins', [
+        { k: 'status', rotulo: 'Status', opcoes: [['aprovado', 'Ativo'], ['bloqueado', 'Bloqueado'], ['pendente', 'Pendente']] }
+      ], 'Buscar por nome ou e-mail') +
+      '<table class="tbl"><thead><tr><th>Nome</th><th>E-mail</th><th>Empresa</th><th>Status</th>' +
+      '<th>Criado em</th><th>Ações</th></tr></thead><tbody>' +
+      (admins.length ? admins.map(function (u) {
+        return '<tr><td>' + esc(u.nome) +
+          (String(u.id) === String(sess.id) ? ' <span class="pill-status ps-voce">você</span>' : '') +
+          '</td><td>' + esc(u.email) + '</td>' +
+          '<td>' + (u.empresa ? esc(u.empresa) : '<span class="muted">—</span>') + '</td>' +
+          '<td>' + pill(u.status) + '</td>' +
+          '<td class="nowrap">' + (u.criadoEm ? FG.fmtDate(u.criadoEm) : '<span class="muted">—</span>') + '</td>' +
+          '<td>' + acoesUsuario(u) + '</td></tr>';
+      }).join('') : vazioFiltro(6, 'Nenhum administrador com esse filtro.')) +
+      '</tbody></table></div></div>';
+
+    bindFiltro(renderAdmins);
+    bindGerenciar(renderAdmins);
+    document.getElementById('adm-novo').addEventListener('click', modalNovoAdmin);
+  }
+
+  /* ---------------------------------------------------------
+     NOVO ADMINISTRADOR
+     ---------------------------------------------------------
+     A conta nasce já aprovada e na mesma empresa de quem cria (a casa) — quem
+     está aqui já é administrador, então mandar o convite para uma fila de
+     aprovação seria cerimônia sem ganho. A senha mínima é maior que a do
+     cadastro de cliente: é a conta que enxerga tudo.
+     --------------------------------------------------------- */
+  var SENHA_MINIMA_ADMIN = 8;
+
+  function modalNovoAdmin() {
+    var back = document.createElement('div');
+    back.className = 'modal-back';
+    back.innerHTML =
+      '<div class="modal"><header><h3>Adicionar administrador</h3><button class="x">×</button></header>' +
+      '<div class="modal-body">' +
+      '<p class="adm-hint" style="margin-top:0;">A conta é criada já liberada e com acesso total ao painel. ' +
+      'Passe a senha para a pessoa e peça que ela troque no primeiro acesso, em "Esqueci minha senha".</p>' +
+      '<div class="field"><label for="na-nome">Nome *</label>' +
+      '<input id="na-nome" type="text" maxlength="120" placeholder="Nome de quem vai administrar" autocomplete="off"></div>' +
+      '<div class="field"><label for="na-email">E-mail *</label>' +
+      '<input id="na-email" type="email" maxlength="160" placeholder="pessoa@fullgas.com.br" autocomplete="off"></div>' +
+      '<div class="field"><label for="na-senha">Senha * <span class="muted">(mínimo de ' + SENHA_MINIMA_ADMIN + ' caracteres)</span></label>' +
+      '<input id="na-senha" type="password" autocomplete="new-password"></div>' +
+      '<div class="field"><label for="na-senha2">Repetir a senha *</label>' +
+      '<input id="na-senha2" type="password" autocomplete="new-password"></div>' +
+      '<p class="na-erro hidden" id="na-erro"></p>' +
+      '</div>' +
+      '<div class="modal-foot"><button class="btn-line" id="na-canc">Cancelar</button>' +
+      '<button class="btn-orange" id="na-ok">Criar administrador</button></div></div>';
+    document.body.appendChild(back);
+
+    function fechar() { back.remove(); }
+    back.querySelector('.x').addEventListener('click', fechar);
+    document.getElementById('na-canc').addEventListener('click', fechar);
+    document.getElementById('na-nome').focus();
+
+    var erroEl = document.getElementById('na-erro');
+    function erro(msg) {
+      erroEl.textContent = msg;
+      erroEl.classList.remove('hidden');
+    }
+
+    var btn = document.getElementById('na-ok');
+    btn.addEventListener('click', async function () {
+      var nome = document.getElementById('na-nome').value.trim();
+      var email = document.getElementById('na-email').value.trim().toLowerCase();
+      var senha = document.getElementById('na-senha').value;
+      var senha2 = document.getElementById('na-senha2').value;
+
+      if (!nome || !email || !senha) return erro('Preencha nome, e-mail e senha.');
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return erro('E-mail inválido.');
+      if (senha.length < SENHA_MINIMA_ADMIN) return erro('A senha precisa de ao menos ' + SENHA_MINIMA_ADMIN + ' caracteres.');
+      if (senha !== senha2) return erro('As duas senhas não são iguais.');
+
+      erroEl.classList.add('hidden');
+      btn.disabled = true; btn.textContent = 'Criando…';
+      var r = await FG.criarAdmin({ nome: nome, email: email, senha: senha });
+      if (!r.ok) {
+        erro(r.msg || 'Não foi possível criar o administrador.');
+        btn.disabled = false; btn.textContent = 'Criar administrador';
+        return;
+      }
+      fechar();
+      FG.toast('Administrador criado — ' + email + ' já pode entrar no painel.');
+      renderAdmins();
+    });
+
+    // Enter em qualquer campo envia o formulário.
+    Array.prototype.forEach.call(back.querySelectorAll('input'), function (inp) {
+      inp.addEventListener('keydown', function (e) { if (e.key === 'Enter') btn.click(); });
     });
   }
 
@@ -316,30 +458,35 @@
      Cada ação é um cartão com título, explicação do que acontece e um botão —
      em vez de quatro botões soltos numa célula de tabela sem contexto.
      --------------------------------------------------------- */
-  function modalUsuario(u) {
+  function modalUsuario(u, voltar) {
     var interna = u.gestor === false;
+    var ehAdmin = u.papel === 'admin';
+    voltar = voltar || (ehAdmin ? renderAdmins : renderClientes);
     var back = document.createElement('div');
     back.className = 'modal-back';
 
     // Cada cartão: [chave, ícone, título, descrição, rótulo do botão, tom]
     var cards = [];
 
-    cards.push(['identidade', '👤', 'Alterar identidade',
-      'Entra no portal como ' + esc(u.nome) + ' e vê exatamente o que ' + (interna ? 'esta conta interna' : 'o cliente') +
-      ' vê. Uma tarja fica no topo e você volta para a sua conta quando quiser.',
-      'Entrar na conta', 'destaque']);
+    // Assumir a identidade de outro administrador não existe: a API recusa
+    // (não há ganho de suporte e embaralharia a trilha de auditoria).
+    if (!ehAdmin)
+      cards.push(['identidade', '👤', 'Alterar identidade',
+        'Entra no portal como ' + esc(u.nome) + ' e vê exatamente o que ' + (interna ? 'esta conta interna' : 'o cliente') +
+        ' vê. Uma tarja fica no topo e você volta para a sua conta quando quiser.',
+        'Entrar na conta', 'destaque']);
 
     if (u.status === 'pendente')
       cards.push(['aprovar', '✅', 'Aprovar cadastro',
         'Libera o primeiro acesso. Enquanto está pendente, esta pessoa não consegue entrar no portal.',
         'Aprovar agora', 'ok']);
 
-    cards.push(['papel', u.papel === 'admin' ? '⬇' : '⬆',
-      u.papel === 'admin' ? 'Rebaixar para cliente' : 'Promover a administrador',
-      u.papel === 'admin'
-        ? 'Tira o acesso ao painel administrativo. Passa a usar só o portal da concessionária.'
-        : 'Dá acesso total ao painel administrativo: pedidos, catálogo, chassis, clientes e Tiny.',
-      u.papel === 'admin' ? 'Tornar cliente' : 'Tornar admin', '']);
+    cards.push(['papel', ehAdmin ? '⬇' : '⬆',
+      ehAdmin ? 'Rebaixar para cliente' : 'Promover a administrador',
+      ehAdmin
+        ? 'Tira o acesso a este painel. A conta passa a usar só o portal e migra para a aba Clientes.'
+        : 'Dá acesso total a este painel: pedidos, catálogo, chassis, clientes e Tiny. A conta migra para a aba Administradores.',
+      ehAdmin ? 'Tornar cliente' : 'Tornar admin', '']);
 
     cards.push(['bloq', u.status === 'bloqueado' ? '🔓' : '🚫',
       u.status === 'bloqueado' ? 'Desbloquear acesso' : 'Bloquear acesso',
@@ -361,7 +508,9 @@
       '<div class="usr-ficha-txt"><div class="usr-ficha-nome">' + esc(u.nome) + '</div>' +
       '<div class="usr-ficha-mail">' + esc(u.email) + '</div>' +
       '<div class="usr-ficha-tags">' + pill(u.papel) + pill(u.status) +
-      (interna ? '<span class="pill-status ps-interna">Conta interna</span>' : '<span class="pill-status ps-gestor">Gestor</span>') +
+      (ehAdmin ? '' : (interna
+        ? '<span class="pill-status ps-interna">Conta interna</span>'
+        : '<span class="pill-status ps-gestor">Conta principal</span>')) +
       '</div>' +
       '<div class="usr-ficha-emp">' + esc(u.empresa || '—') +
       (u.cnpj ? ' <span class="muted">· ' + esc(u.cnpj) + '</span>' : '') + '</div>' +
@@ -397,26 +546,30 @@
           b.disabled = true;
           var rd = await FG.delUser(u.id);
           if (rd && rd.ok === false) { FG.toast(rd.msg || 'Não foi possível excluir o usuário.', 'erro'); b.disabled = false; return; }
-          FG.toast('Usuário excluído.');
-          fechar(); refreshBell(); renderUsuarios();
+          FG.toast(ehAdmin ? 'Administrador excluído.' : 'Cliente excluído.');
+          fechar(); refreshBell(); voltar();
           return;
         }
 
         var patch = null, msg = '';
-        if (ac === 'aprovar') { patch = { status: 'aprovado' }; msg = 'Usuário aprovado.'; }
+        if (ac === 'aprovar') { patch = { status: 'aprovado' }; msg = 'Cadastro aprovado.'; }
         else if (ac === 'papel') {
-          var novo = u.papel === 'admin' ? 'cliente' : 'admin';
-          patch = { papel: novo }; msg = 'Papel alterado para ' + novo + '.';
+          // Trocar o papel move a conta de aba — o aviso evita a impressão de
+          // que o usuário "sumiu" da lista onde ele estava.
+          patch = { papel: ehAdmin ? 'cliente' : 'admin' };
+          msg = ehAdmin
+            ? 'Acesso ao painel removido — a conta agora está na aba Clientes.'
+            : 'Agora é administrador — a conta está na aba Administradores.';
         } else if (ac === 'bloq') {
           var st = u.status === 'bloqueado' ? 'aprovado' : 'bloqueado';
-          patch = { status: st }; msg = st === 'bloqueado' ? 'Usuário bloqueado.' : 'Usuário desbloqueado.';
+          patch = { status: st }; msg = st === 'bloqueado' ? 'Acesso bloqueado.' : 'Acesso desbloqueado.';
         }
         if (!patch) return;
         b.disabled = true;
         var r2 = await FG.setUser(u.id, patch);
         if (r2 && r2.ok === false) { FG.toast(r2.msg || 'Não foi possível atualizar o usuário.', 'erro'); b.disabled = false; return; }
         FG.toast(msg);
-        fechar(); refreshBell(); renderUsuarios();
+        fechar(); refreshBell(); voltar();
       });
     });
   }
@@ -1231,7 +1384,9 @@
           '<td>' + esc(c.criador) + '</td>' +
           '<td>' + (c.origem === 'varejo'
             ? '<span class="pill-status Tiny">Varejo</span> <span class="muted">' + esc(c.numeroPedido || '') + '</span>'
-            : esc(c.tipo)) + '</td>' +
+            : c.origem === 'preentrega'
+              ? '<span class="pill-status ps-preentrega">Pré-entrega</span>'
+              : esc(c.tipo)) + '</td>' +
           '<td>' + pill(c.status) +
           (c.reenviada ? ' <span class="pill-status Reenviada">↩ Devolvida pelo revendedor</span>' : '') +
           (c.sentBack ? ' <span class="pill-status Devolvida">↩ Devolvida</span>' : '') +
@@ -1308,13 +1463,23 @@
           linha('Criador', esc(c.criador || '—')) +
           linha('Data da reivindicação', FG.fmtDateTime(c.data)) +
           (c.dataAprovacao ? linha('Data de aprovação', FG.fmtDateTime(c.dataAprovacao)) : '')
-        : linha('Tipo', esc(c.tipo)) +
-          linha('NIV', esc(c.niv || '—')) +
-          linha('Criador', esc(c.criador || '—')) +
-          linha('Data da reivindicação', FG.fmtDateTime(c.data)) +
-          (c.dataAprovacao ? linha('Data de aprovação', FG.fmtDateTime(c.dataAprovacao)) : '') +
-          linha('Data do ocorrido', c.dataDefeito ? FG.fmtDate(c.dataDefeito) : '—') +
-          linha('Uso', uso.length ? uso.join(' / ') : '—')) +
+        : c.origem === 'preentrega'
+          // Defeito achado na inspeção, com a moto ainda no estoque: não há
+          // uso (horas/km) e a data é a da inspeção. A garantia do comprador
+          // segue sem começar — ela só conta a partir da venda.
+          ? linha('Origem', 'Pré-entrega (moto ainda no estoque)') +
+            linha('NIV', esc(c.niv || '—')) +
+            linha('Criador', esc(c.criador || '—')) +
+            linha('Data da reivindicação', FG.fmtDateTime(c.data)) +
+            (c.dataAprovacao ? linha('Data de aprovação', FG.fmtDateTime(c.dataAprovacao)) : '') +
+            linha('Data da inspeção', c.dataDefeito ? FG.fmtDate(c.dataDefeito) : '—')
+          : linha('Tipo', esc(c.tipo)) +
+            linha('NIV', esc(c.niv || '—')) +
+            linha('Criador', esc(c.criador || '—')) +
+            linha('Data da reivindicação', FG.fmtDateTime(c.data)) +
+            (c.dataAprovacao ? linha('Data de aprovação', FG.fmtDateTime(c.dataAprovacao)) : '') +
+            linha('Data do ocorrido', c.dataDefeito ? FG.fmtDate(c.dataDefeito) : '—') +
+            linha('Uso', uso.length ? uso.join(' / ') : '—')) +
       '</div>' +
       '<div class="field"><label>Peça(s) defeituosa(s)</label><div class="pecas-list">' + pecas + '</div></div>' +
       '<div class="field"><label>Descrição</label><div class="cell-value">' + esc(c.descricao || '—') + '</div></div>' +
@@ -2338,7 +2503,11 @@
     var seg = h.split('/');
     switch (seg[0]) {
       case 'dashboard': renderDash(); break;
-      case 'usuarios': renderUsuarios(); break;
+      case 'clientes': renderClientes(); break;
+      case 'administradores': renderAdmins(); break;
+      // #usuarios era a aba única antes da separação. Continua atendendo
+      // links antigos (favoritos, menu do portal) caindo em Clientes.
+      case 'usuarios': renderClientes(); break;
       case 'chassis': renderChassis(); break;
       case 'notificacoes': renderNotifsAdmin(); break;
       case 'produtos': renderProdutos(); break;

@@ -165,6 +165,17 @@ h1, h2, h3 { margin: 0 0 .5em; }
 .toast-item.toast-erro { background: #b91c1c; border-left-color: #7f1010; }
 @keyframes tin { from { transform: translateY(8px); opacity: 0; } }
 
+/* Aviso do modo pré-entrega no formulário de reivindicação. Não é um erro nem
+   uma escolha: é o formulário explicando por que mudou sozinho. */
+.pre-entrega-aviso {
+  background: #eef6ff; border: 1px solid #c9e0fb; border-left: 4px solid #1d4ed8;
+  color: #1e3a5f; padding: 11px 14px; border-radius: 4px; margin: 0 0 14px; font-size: 12.5px;
+}
+/* Só o TÍTULO vira bloco. A regra não pode mirar `b` solto: o texto tem
+   negritos no meio das frases, e cada um deles quebraria numa linha própria. */
+.pre-entrega-aviso .pe-titulo { display: block; margin-bottom: 3px; font-size: 13px; }
+.pre-entrega-aviso > span { display: block; line-height: 1.5; }
+
 /* ---------- aviso de pré-venda / backorder ---------- */
 .backorder-aviso { background: #fff3cd; border: 1px solid #ffe08a; border-left: 4px solid #d99a00; color: #6b5200; padding: 10px 14px; border-radius: 4px; margin: 12px 0; font-size: 13px; }
 .backorder-aviso ul { margin: 6px 0 0; padding-left: 18px; }
@@ -444,6 +455,42 @@ main.portal { padding: 0 22px 60px; }
 .veh-card { border: 1px solid var(--line); padding: 18px 20px; max-width: 720px; background: #fff; box-shadow: var(--shadow); }
 .veh-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px 22px; margin: 12px 0 18px; }
 .veh-grid b { display: block; font-size: 12px; color: var(--gray); font-weight: 600; }
+
+/* histórico do veículo — linha do tempo do chassi (dentro de .veh-card) */
+.hist-bloco { margin-top: 22px; border-top: 1px solid var(--line); padding-top: 14px; }
+.hist-head { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+.hist-head h4 { margin: 0; font-size: 14px; }
+.hist-head .btn { margin-left: auto; }
+.hist-lista { max-height: 420px; overflow-y: auto; }
+
+.hist-item { display: flex; gap: 10px; padding: 9px 0; border-bottom: 1px solid #f0f0f0; }
+.hist-item:last-child { border-bottom: none; }
+.hist-ico {
+  flex: 0 0 28px; height: 28px; border-radius: 50%; background: #f2f2f2;
+  display: flex; align-items: center; justify-content: center; font-size: 14px;
+}
+.hist-corpo { flex: 1; min-width: 0; }
+.hist-linha1 { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; font-size: 13px; }
+.hist-data { margin-left: auto; font-size: 11px; color: var(--gray); white-space: nowrap; }
+.hist-ref {
+  font-size: 10px; font-weight: 700; letter-spacing: .3px; color: #555;
+  border: 1px solid var(--line); border-radius: 2px; padding: 1px 5px;
+}
+.hist-detalhe { font-size: 12px; color: #444; margin-top: 2px; line-height: 1.45; word-break: break-word; }
+.hist-rodape { font-size: 11px; color: var(--gray); margin-top: 3px; }
+.hist-x {
+  flex: 0 0 auto; align-self: flex-start; background: none; border: none; cursor: pointer;
+  color: #bbb; font-size: 16px; line-height: 1; padding: 2px 4px;
+}
+.hist-x:hover { color: var(--red); }
+.hist-x:disabled { opacity: .4; cursor: default; }
+
+/* A cor do ícone diz o peso do evento sem precisar ler: recall chama atenção,
+   garantia e venda são marcos, o resto é rotina. */
+.hist-recall .hist-ico { background: #fee2e2; }
+.hist-garantia .hist-ico, .hist-reivindicacao .hist-ico { background: #fff3cd; }
+.hist-venda .hist-ico { background: #dcfce7; }
+.hist-transferencia .hist-ico, .hist-atribuicao .hist-ico { background: #dbeafe; }
 
 /* financeiro */
 .fin-cards { display: flex; gap: 18px; flex-wrap: wrap; margin-bottom: 22px; }
