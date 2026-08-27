@@ -88,26 +88,56 @@ function toNotif(req, r) {
     anexo: urlAbs(req, r.AnexoUrl),
     anexoTipo: r.AnexoTipo || null,
     empresaId: r.EmpresaId || null,
-    empresa: r.EmpresaNome || null                 // null = todas
+    empresa: r.EmpresaNome || null,                // null = todas
+    origem: r.Origem || 'admin',                   // 'admin' (à mão) | 'suporte'
+    chamadoId: r.ChamadoId || null                 // preenchido: veio de um chamado
   };
 }
 
-// GET /api/notificacoes — cliente vê as gerais (EmpresaId NULL) + as da sua
-// empresa; admin vê todas (com o destinatário). `lida` é POR USUÁRIO.
+/* ------------------------------------------------------------------
+   QUEM VÊ O QUÊ
+   ------------------------------------------------------------------
+   Até a migração 036 a caixa tinha um sentido só (admin → concessionárias) e
+   a regra cabia em uma linha: cliente vê as gerais e as suas, admin vê tudo.
+   Com o Suporte Técnico a caixa passou a ter os dois sentidos, e "admin vê
+   tudo" viraria uma caixa de entrada com a conversa de todas as
+   concessionárias com elas mesmas.
+
+     cliente   o que é PARA cliente (Publico='cliente'), geral ou da sua empresa.
+     admin     o que é PARA o suporte (Publico='admin') mais o que ele mesmo
+               escreveu à mão (Origem='admin') — que é o que ele já via.
+
+   A mesma condição vale para o GET e para o PATCH de leitura; por isso mora
+   numa constante só. Uma cópia divergente aqui significaria alguém marcando
+   como lida uma notificação que não pode nem ver.
+   ------------------------------------------------------------------ */
+const VISIVEL_PARA = `(
+  (@admin = 1 AND (n.Publico = 'admin' OR n.Origem = 'admin'))
+  OR
+  (@admin = 0 AND n.Publico = 'cliente' AND (n.EmpresaId IS NULL OR n.EmpresaId = @eid))
+)`;
+
+// Parâmetros que a condição acima exige.
+function escopo(user) {
+  const admin = user.papel === 'admin';
+  return { admin: admin ? 1 : 0, eid: admin ? null : user.empresaId };
+}
+
+// GET /api/notificacoes — a caixa de quem pediu (ver VISIVEL_PARA).
+// `lida` é POR USUÁRIO.
 router.get('/notificacoes', requireAuth, async (req, res, next) => {
   try {
-    const admin = req.user.papel === 'admin';
     const rows = await query(
       `SELECT n.NotificacaoId, n.EmpresaId, n.Titulo, n.Texto, n.Tipo,
-              n.AnexoUrl, n.AnexoTipo, n.CriadoEm,
+              n.AnexoUrl, n.AnexoTipo, n.CriadoEm, n.Origem, n.ChamadoId,
               e.RazaoSocial AS EmpresaNome, l.LidaEm
          FROM dbo.Notificacao n
          LEFT JOIN dbo.Empresa e ON e.EmpresaId = n.EmpresaId
          LEFT JOIN dbo.NotificacaoLida l
            ON l.NotificacaoId = n.NotificacaoId AND l.UsuarioId = @uid
-        WHERE (@eid IS NULL OR n.EmpresaId IS NULL OR n.EmpresaId = @eid)
+        WHERE ${VISIVEL_PARA}
         ORDER BY n.CriadoEm DESC`,
-      { uid: req.user.id, eid: admin ? null : req.user.empresaId }
+      { uid: req.user.id, ...escopo(req.user) }
     );
     res.json(rows.map(r => toNotif(req, r)));
   } catch (e) { next(e); }
@@ -161,13 +191,11 @@ router.patch('/notificacoes/:id/lida', requireAuth, async (req, res, next) => {
     const id = Number(req.params.id);
     if (!id) return res.status(400).json({ erro: 'ID inválido.' });
 
-    // Só notificações visíveis a este usuário.
-    const admin = req.user.papel === 'admin';
+    // Só notificações visíveis a este usuário (mesma condição do GET).
     const vis = (await query(
-      `SELECT 1 FROM dbo.Notificacao
-        WHERE NotificacaoId = @id
-          AND (@eid IS NULL OR EmpresaId IS NULL OR EmpresaId = @eid)`,
-      { id, eid: admin ? null : req.user.empresaId })).length;
+      `SELECT 1 FROM dbo.Notificacao n
+        WHERE n.NotificacaoId = @id AND ${VISIVEL_PARA}`,
+      { id, ...escopo(req.user) })).length;
     if (!vis) return res.status(404).json({ erro: 'Notificação não encontrada.' });
 
     if (req.body?.lida) {

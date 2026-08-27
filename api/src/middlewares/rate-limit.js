@@ -43,6 +43,18 @@ export const limiteSenha = rateLimit({
   handler: bloqueio('Muitos pedidos de recuperação de senha. Tente de novo daqui a uma hora.')
 });
 
+// Abertura de chamado de suporte. O limite é FOLGADO de propósito: a
+// concessionária inteira sai pelo mesmo IP, e barrar quem está tentando pedir
+// ajuda é pior do que engolir alguns chamados repetidos. Serve contra o acidente
+// (formulário em laço, clique nervoso no "enviar") e contra o abuso grosseiro,
+// não contra o revendedor com muitos problemas no mesmo dia.
+export const limiteChamado = rateLimit({
+  ...COMUM,
+  windowMs: 60 * 60 * 1000,
+  limit: 30,
+  handler: bloqueio('Muitos chamados abertos deste endereço na última hora. Responda em um chamado já aberto ou tente de novo mais tarde.')
+});
+
 // Cadastro: cria empresa + usuário e ainda chama o Tiny. Poucos por hora.
 export const limiteCadastro = rateLimit({
   ...COMUM,

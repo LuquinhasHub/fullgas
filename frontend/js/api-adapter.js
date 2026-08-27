@@ -229,7 +229,8 @@
   }
 
   /* =======================================================================
-     ARQUIVOS PROTEGIDOS — fotos de reivindicação e anexos de notificação
+     ARQUIVOS PROTEGIDOS — fotos de reivindicação, anexos de notificação e
+     anexos dos chamados de suporte
      -----------------------------------------------------------------------
      Esse material é de cliente: a foto da peça quebrada de uma concessionária
      não pode ser vista por outra. Ele deixou de ser servido abertamente em
@@ -241,7 +242,7 @@
      por um blob local. O HTML marca esses elementos com data-arquivo em vez de
      src/href, e quem renderiza chama FG.carregarArquivos() depois.
      ======================================================================= */
-  var PROTEGIDO_RE = /\/uploads\/(reivindicacoes|notificacoes)\/([A-Za-z0-9._-]+)/;
+  var PROTEGIDO_RE = /\/uploads\/(reivindicacoes|notificacoes|suporte)\/([A-Za-z0-9._-]+)/;
   var cacheBlob = {};        // URL original -> Promise<URL de blob>
 
   function urlBlob(url) {
@@ -1035,6 +1036,99 @@
   // Força nova tentativa de uma exportação com erro.
   FG.tinyReexportar = function (exportId) {
     return req('POST', '/tiny/pedidos/' + exportId + '/reexportar');
+  };
+
+  /* =======================================================================
+     SUPORTE TÉCNICO (helpdesk por chamados)
+     -----------------------------------------------------------------------
+     Serve as duas janelas para os mesmos dados: o pop-up flutuante do canto
+     da tela (js/suporte.js) e a aba "Suporte Técnico" do portal.
+
+     Os chamados NÃO entram no CACHE que carrega junto com a página. O cache
+     existe para o que a tela lê de forma síncrona ao montar (catálogo,
+     pedidos, veículos); chamado é conversa, muda enquanto a página está
+     aberta e é sempre buscado na hora — um cache aqui só mostraria resposta
+     velha. O único número que circula fora do detalhe é o do badge, e ele tem
+     rota própria e barata (/suporte/resumo).
+     ======================================================================= */
+
+  // POST multipart genérico do suporte (o anexo é opcional em toda mensagem).
+  // Sem Content-Type de propósito: quem monta o boundary é o navegador.
+  // cabecalhos() continua entregando o X-CSRF-Token — escrita por cookie
+  // precisa provar a origem, upload inclusive.
+  function postSuporte(path, campos, arquivo) {
+    var fd = new FormData();
+    Object.keys(campos || {}).forEach(function (k) {
+      if (campos[k] !== undefined && campos[k] !== null) fd.append(k, campos[k]);
+    });
+    if (arquivo) fd.append('anexo', arquivo);
+    return fetch(API_BASE + path, {
+      method: 'POST',
+      headers: cabecalhos(),
+      credentials: 'include',
+      body: fd
+    }).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (data) {
+        if (r.status === 401 && temSessao()) encerrarSessao('expirada');
+        if (!r.ok) return { ok: false, msg: data.erro || ('HTTP ' + r.status) };
+        data.ok = true;
+        return data;
+      });
+    }, function () { return { ok: false, msg: 'Sem conexão com a API.' }; });
+  }
+
+  // Categorias de ajuda. Só mudam com o deploy, então uma cópia por página
+  // basta — o pop-up abre e fecha muitas vezes e não precisa perguntar toda vez.
+  var categoriasSuporte = null;
+  FG.suporteCategorias = function () {
+    if (categoriasSuporte) return Promise.resolve(categoriasSuporte);
+    return apiGet('/suporte/categorias').then(function (l) {
+      categoriasSuporte = l || [];
+      return categoriasSuporte;
+    });
+  };
+
+  // Contadores do badge: { abertos, naoLidas }. Nunca rejeita — o pop-up não
+  // pode quebrar a página por causa de um número.
+  FG.suporteResumo = function () {
+    return apiGet('/suporte/resumo').then(function (d) {
+      return d || { abertos: 0, naoLidas: 0 };
+    });
+  };
+
+  // Lista de chamados (cliente: os da sua concessionária; admin: todos).
+  FG.suporteChamados = function (status) {
+    return apiGet('/suporte/chamados' + (status ? '?status=' + encodeURIComponent(status) : ''))
+      .then(function (l) { return l || []; });
+  };
+
+  // Detalhe com a conversa. Abrir MARCA COMO LIDAS as mensagens do outro lado
+  // (é a API que faz isso), então quem chama deve atualizar o badge depois.
+  FG.suporteChamado = function (id) {
+    return apiGet('/suporte/chamados/' + encodeURIComponent(id));
+  };
+
+  // Abre um chamado. `dados` = { categoria, assunto, descricao, prioridade,
+  // anexo? (File) }. Devolve Promise<{ ok, ...chamado } | { ok:false, msg }>.
+  FG.suporteAbrir = function (dados) {
+    return postSuporte('/suporte/chamados', {
+      categoria: dados.categoria,
+      assunto: dados.assunto,
+      descricao: dados.descricao,
+      prioridade: dados.prioridade || 'normal'
+    }, dados.anexo);
+  };
+
+  // Responde num chamado existente. `dados` = { texto, anexo? (File) }.
+  FG.suporteResponder = function (id, dados) {
+    return postSuporte('/suporte/chamados/' + encodeURIComponent(id) + '/mensagens',
+      { texto: dados.texto || '' }, dados.anexo);
+  };
+
+  // Muda o status. Cliente só encerra ('Fechado') ou reabre ('Aberto') —
+  // a API recusa o resto com 403.
+  FG.suporteStatus = function (id, status) {
+    return req('PATCH', '/suporte/chamados/' + encodeURIComponent(id), { status: status });
   };
 
   // Expõe helpers para depuração no console.

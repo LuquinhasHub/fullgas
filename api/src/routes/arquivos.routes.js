@@ -23,7 +23,7 @@ const UPLOADS_ROOT = path.join(__dirname, '..', '..', 'uploads');
 
 // Pastas que esta rota entrega. O nome vem da URL, então é obrigatório validar
 // contra esta lista: sem isso, `tipo` viraria caminho livre no disco.
-const PASTAS = new Set(['reivindicacoes', 'notificacoes']);
+const PASTAS = new Set(['reivindicacoes', 'notificacoes', 'suporte']);
 
 // Só nome de arquivo simples: sem barra, sem '..', sem dois-pontos. Os nomes
 // são gerados pela API (data + aleatório + extensão), nunca vêm do usuário.
@@ -42,6 +42,21 @@ async function podeVer(tipo, nome, user) {
          FROM dbo.ReivindicacaoAnexo a
          JOIN dbo.Reivindicacao r ON r.ReivindicacaoId = a.ReivindicacaoId
         WHERE a.Url = @url`,
+      { url }
+    );
+    if (!rows.length) return false;
+    return ehAdmin || rows[0].EmpresaId === user.empresaId;
+  }
+
+  if (tipo === 'suporte') {
+    // O anexo pertence a uma mensagem de chamado, que pertence a uma empresa.
+    // Vale para os dois sentidos: a foto que o revendedor mandou e o arquivo
+    // que o suporte respondeu ficam visíveis para a empresa dona do chamado.
+    const rows = await query(
+      `SELECT TOP 1 c.EmpresaId
+         FROM dbo.SuporteMensagem m
+         JOIN dbo.SuporteChamado c ON c.ChamadoId = m.ChamadoId
+        WHERE m.AnexoUrl = @url`,
       { url }
     );
     if (!rows.length) return false;

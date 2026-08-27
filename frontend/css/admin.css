@@ -26,6 +26,14 @@ body.admin { background: var(--adm-bg); color: var(--adm-ink); display: flex; mi
 .adm-side a.item svg { width: 20px; height: 20px; stroke: currentColor; fill: none; stroke-width: 1.8; }
 .adm-side a.item:hover { background: var(--adm-side-hover); color: #fff; }
 .adm-side a.item.on { background: var(--adm-side-hover); color: #fff; border-left-color: var(--adm-orange); }
+/* Item da barra com contador (chamados de suporte esperando resposta). O
+   número fica no canto do ícone, como o sino do topo. */
+.adm-side a.item-badge { position: relative; }
+.adm-side a.item-badge .dot {
+  position: absolute; top: 8px; right: 12px;
+  background: #b91c1c; color: #fff; border-radius: 8px;
+  font-size: 9px; font-weight: 700; padding: 1px 5px; letter-spacing: 0;
+}
 
 /* ---------- área principal ---------- */
 .adm-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
