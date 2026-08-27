@@ -1141,3 +1141,208 @@ main.finder { padding: 8px 28px 70px; }
 /* Anexos nas notificações do portal (enviados pelo admin). */
 .notif .nt-img { max-width: 340px; max-height: 240px; display: block; margin: 8px 0 2px; border: 1px solid var(--line); border-radius: 4px; }
 .notif .nt-video { max-width: 420px; width: 100%; display: block; margin: 8px 0 2px; border-radius: 4px; background: #000; }
+/* Notificação vinda de um chamado de suporte: atalho para a conversa. */
+.notif .nt-chamado { display: inline-block; margin: 8px 0 2px; font-weight: 700; }
+
+/* =========================================================
+   SUPORTE TÉCNICO (helpdesk)
+   ---------------------------------------------------------
+   Quatro peças, na ordem em que aparecem abaixo:
+     1. o pop-up flutuante do canto inferior direito (.sup-widget);
+     2. os rótulos de status, compartilhados pelas três telas;
+     3. a aba "Suporte Técnico" do portal (.sup-page-*);
+     4. a conversa do chamado (.sup-conversa), usada no portal e no painel
+        administrativo — os dois lados leem o mesmo fio.
+   ========================================================= */
+
+/* ---------- 1. pop-up flutuante ---------- */
+.sup-widget { position: fixed; right: 22px; bottom: 22px; z-index: 300; }
+/* Na loja o carrinho já mora no canto: o suporte sobe uma cadeira. */
+.sup-widget.sup-com-carrinho { bottom: 96px; }
+
+.sup-fab {
+  position: relative; width: 60px; height: 60px; border-radius: 50%;
+  background: var(--red); color: var(--ink); cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, .28); border: 2px solid var(--ink);
+  transition: transform .12s, box-shadow .12s;
+}
+.sup-fab:hover { transform: scale(1.08); box-shadow: 0 6px 20px rgba(0, 0, 0, .34); }
+.sup-fab.on { background: var(--ink); }
+.sup-fab .sup-fab-ico { font-size: 26px; line-height: 1; }
+.sup-fab .sup-fab-badge {
+  position: absolute; top: -3px; right: -3px;
+  background: #b91c1c; color: #fff; border: 2px solid #fff;
+  border-radius: 11px; min-width: 20px; height: 20px; padding: 0 5px;
+  font-size: 11px; font-weight: 800; line-height: 16px; text-align: center;
+}
+/* Pulso discreto enquanto há resposta não lida: o revendedor percebe a
+   novidade sem que nada fique piscando na cara dele o tempo todo. */
+.sup-fab.tem-novidade { animation: sup-pulso 2.4s ease-in-out infinite; }
+@keyframes sup-pulso {
+  0%, 100% { box-shadow: 0 4px 16px rgba(0, 0, 0, .28); }
+  50% { box-shadow: 0 4px 16px rgba(0, 0, 0, .28), 0 0 0 8px rgba(229, 177, 0, .28); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sup-fab.tem-novidade { animation: none; }
+}
+
+.sup-panel {
+  position: absolute; right: 0; bottom: 74px; width: 340px;
+  max-height: min(560px, 72vh); background: #fff;
+  border: 1px solid var(--line); border-radius: 12px;
+  box-shadow: 0 10px 34px rgba(0, 0, 0, .26);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.sup-head {
+  display: flex; align-items: flex-start; gap: 8px;
+  background: var(--red); color: var(--ink); padding: 12px 14px;
+}
+.sup-head b { display: block; font-size: 15px; }
+.sup-head span { display: block; font-size: 11.5px; opacity: .85; margin-top: 2px; }
+.sup-head .sup-x {
+  margin-left: auto; background: none; border: none; color: var(--ink);
+  font-size: 22px; line-height: 1; cursor: pointer; padding: 0 2px;
+}
+.sup-body { padding: 14px; overflow-y: auto; }
+.sup-vazio { color: var(--gray); font-size: 13px; margin: 6px 2px; line-height: 1.5; }
+
+.sup-novo {
+  width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px;
+  background: var(--red-soft); border: 1px dashed var(--red-dark); color: var(--ink);
+  border-radius: 8px; padding: 10px; font-size: 13px; font-weight: 700; cursor: pointer;
+  margin-bottom: 12px; font-family: inherit;
+}
+.sup-novo:hover { background: var(--red); }
+.sup-novo .mais { font-size: 15px; font-weight: 800; }
+
+.sup-lista { display: flex; flex-direction: column; gap: 8px; }
+.sup-item {
+  display: flex; flex-direction: column; gap: 4px; width: 100%; text-align: left;
+  background: #fff; border: 1px solid var(--line); border-radius: 8px;
+  padding: 9px 11px; cursor: pointer; font-family: inherit;
+}
+.sup-item:hover { border-color: var(--red-dark); background: #fffdf4; }
+.sup-item.novo { border-left: 4px solid var(--red); }
+.sup-item-top { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.sup-item-assunto { font-size: 13px; color: var(--ink); }
+.sup-item-pe { font-size: 11px; color: var(--gray); display: flex; align-items: center; gap: 6px; }
+.sup-item-novo {
+  background: #b91c1c; color: #fff; border-radius: 8px;
+  padding: 1px 7px; font-size: 10px; font-weight: 700;
+}
+.sup-todos {
+  width: 100%; margin-top: 10px; background: none; border: none;
+  color: var(--red-dark); font-size: 12px; font-weight: 700; cursor: pointer;
+  padding: 6px; font-family: inherit;
+}
+.sup-todos:hover { text-decoration: underline; }
+
+.sup-form .field { margin-bottom: 10px; }
+.sup-form .sup-dica { display: block; color: var(--gray); font-size: 11px; margin-top: 3px; line-height: 1.4; }
+.sup-acoes { display: flex; gap: 8px; margin-top: 4px; }
+.sup-enviar {
+  flex: 1; background: var(--red); border: 1px solid var(--ink); color: var(--ink);
+  font-weight: 700; font-size: 13px; padding: 9px; border-radius: 6px;
+  cursor: pointer; font-family: inherit;
+}
+.sup-enviar:hover { background: var(--red-dark); }
+.sup-enviar:disabled { opacity: .55; cursor: not-allowed; }
+.sup-cancelar {
+  background: #f1f1f1; border: 1px solid var(--line); color: var(--ink);
+  font-size: 13px; padding: 9px 14px; border-radius: 6px; cursor: pointer; font-family: inherit;
+}
+.sup-cancelar:hover { background: #e6e6e6; }
+
+.sup-ok { text-align: center; padding: 8px 4px; }
+.sup-ok .sup-ok-ico {
+  width: 46px; height: 46px; margin: 0 auto 10px; border-radius: 50%;
+  background: #dcfce7; color: #15803d; font-size: 24px; font-weight: 800;
+  display: flex; align-items: center; justify-content: center;
+}
+.sup-ok p { color: var(--gray); font-size: 12.5px; line-height: 1.5; margin: 6px 0 14px; }
+.sup-ok .sup-enviar { width: 100%; margin-bottom: 8px; }
+.sup-ok .sup-cancelar { width: 100%; }
+
+/* Telas estreitas: o painel vira quase uma folha, encostado nas duas bordas. */
+@media (max-width: 480px) {
+  .sup-panel { width: calc(100vw - 32px); right: -6px; }
+}
+
+/* ---------- 2. status do chamado (widget, portal e admin) ---------- */
+.sup-st {
+  display: inline-block; font-size: 10.5px; font-weight: 700; text-transform: uppercase;
+  padding: 2px 8px; border-radius: 10px; white-space: nowrap;
+}
+.sup-st-aberto { background: #fff3cd; color: #8a6d00; }
+.sup-st-atendimento { background: #dbeafe; color: #1d4ed8; }
+.sup-st-aguardando { background: #ffe1cf; color: #9a3412; }
+.sup-st-resolvido { background: #dcfce7; color: #15803d; }
+.sup-st-fechado { background: #e5e7eb; color: #374151; }
+
+/* ---------- 3. aba "Suporte Técnico" do portal ---------- */
+.sup-page-head { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
+.sup-page-head h2 { margin: 0; }
+.sup-page-head .grow { flex: 1; }
+.sup-filtros { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+.sup-filtros button {
+  background: #f1f1f1; border: 1px solid var(--line); border-radius: 14px;
+  padding: 5px 13px; font-size: 12px; cursor: pointer; font-family: inherit;
+}
+.sup-filtros button.on { background: var(--red); border-color: var(--ink); font-weight: 700; }
+
+.sup-tabela .num { font-weight: 700; }
+/* Linha com mensagem que ninguém leu — vale no portal (.table) e no painel
+   administrativo (.tbl), que são duas tabelas de estilos diferentes. */
+.sup-tabela tr.tem-novo td { background: #fffbe9; }
+.sup-tabela tr.tem-novo:hover td { background: #fff6d6; }
+.sup-badge-novo {
+  background: #b91c1c; color: #fff; border-radius: 8px;
+  padding: 1px 7px; font-size: 10px; font-weight: 700; margin-left: 6px;
+}
+
+/* Cabeçalho do chamado aberto (dados fixos, acima da conversa). */
+.sup-det-head {
+  background: #fafafa; border: 1px solid #eee; border-radius: 6px;
+  padding: 12px 14px; margin-bottom: 14px;
+}
+.sup-det-head h3 { margin: 0 0 8px; font-size: 16px; }
+.sup-det-meta {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px 16px; font-size: 12.5px;
+}
+.sup-det-meta .lbl { display: block; font-size: 11px; color: var(--gray); }
+.sup-det-acoes { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 12px; }
+
+/* ---------- 4. a conversa ---------- */
+.sup-conversa { display: flex; flex-direction: column; gap: 12px; margin-bottom: 18px; }
+.sup-msg { max-width: 76%; border-radius: 10px; padding: 10px 13px; font-size: 13px; line-height: 1.5; }
+.sup-msg .sup-msg-quem { display: block; font-size: 11px; font-weight: 700; margin-bottom: 4px; }
+.sup-msg .sup-msg-txt { white-space: pre-line; }
+.sup-msg .sup-msg-hora { display: block; font-size: 10.5px; color: var(--gray); margin-top: 6px; }
+/* O lado é de QUEM ESTÁ LENDO, não do papel de quem escreveu: as próprias
+   mensagens à direita, no amarelo da marca; as do outro lado à esquerda, em
+   cinza. É por isso que as classes são `de-mim`/`de-outro` — a mesma mensagem
+   de um revendedor aparece à direita no portal dele e à esquerda no painel do
+   atendente. Amarrar o lado ao papel deixaria o revendedor lendo a própria
+   conversa espelhada. */
+.sup-msg.de-outro { align-self: flex-start; background: #f1f1f1; border: 1px solid #e2e2e2; }
+.sup-msg.de-mim { align-self: flex-end; background: var(--red-soft); border: 1px solid #f0dfa4; }
+.sup-msg.de-sistema {
+  align-self: center; max-width: 100%; background: none; border: none;
+  color: var(--gray); font-size: 11.5px; font-style: italic; padding: 2px;
+}
+.sup-msg .sup-anexo-img {
+  max-width: 260px; max-height: 200px; display: block; margin: 8px 0 2px;
+  border: 1px solid var(--line); border-radius: 4px;
+}
+.sup-msg .sup-anexo-video { max-width: 320px; width: 100%; display: block; margin: 8px 0 2px; border-radius: 4px; background: #000; }
+
+.sup-responder { border-top: 1px solid var(--line); padding-top: 14px; }
+.sup-responder textarea { width: 100%; min-height: 90px; padding: 9px 10px; border: 1px solid var(--line); border-radius: 4px; }
+.sup-responder .sup-resp-foot { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
+.sup-responder .sup-resp-foot .grow { flex: 1; }
+.sup-fechado-aviso {
+  background: #e5e7eb; color: #374151; border-radius: 6px;
+  padding: 10px 14px; font-size: 13px; margin-top: 14px;
+}

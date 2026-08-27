@@ -72,7 +72,8 @@
     // Duas populações, dois filtros: quem compra (clientes das concessionárias)
     // e quem opera o sistema (administradores da Fullgas).
     clientes: { status: '', tipo: '', busca: '' },
-    admins:   { status: '', busca: '' }
+    admins:   { status: '', busca: '' },
+    suporte:  { status: '', categoria: '', busca: '' }
   };
 
   function filtroAtivo(aba) {
@@ -579,7 +580,11 @@
      ========================================================= */
   function renderNotifsAdmin() {
     h1.textContent = 'Notificações'; setOn('notificacoes');
-    var notifs = FG.all('notifications');
+    // Esta tela é a caixa de SAÍDA do administrador: só o que ele escreveu à
+    // mão. Os avisos automáticos dos chamados (origem 'suporte') chegam na
+    // caixa dele no portal, junto com a carta ✉️ — aqui só fariam volume, e
+    // ainda com um botão "Apagar" que não faz sentido para um evento.
+    var notifs = FG.all('notifications').filter(function (n) { return n.origem !== 'suporte'; });
 
     view.innerHTML =
       /* ---- envio ---- */
@@ -2496,6 +2501,222 @@
   }
 
   /* =========================================================
+     SUPORTE TÉCNICO — atendimento dos chamados
+     ---------------------------------------------------------
+     O outro lado do pop-up flutuante que o revendedor usa no portal. Aqui o
+     administrador lê a fila, responde e move o chamado pelos status.
+
+     A lista NÃO passa pelo cache do FG (que carrega junto com a página): ela é
+     buscada ao entrar na aba e guardada só em memória, para os filtros
+     redesenharem sem ir à rede de novo. Conversa envelhece rápido demais para
+     entrar no pacote que a página carrega uma vez e usa a sessão inteira.
+     ========================================================= */
+  var supLista = null;          // último resultado carregado (memória da aba)
+
+  var SUP_STATUS = ['Aberto', 'Em atendimento', 'Aguardando cliente', 'Resolvido', 'Fechado'];
+  var SUP_SLUG = {
+    'Aberto': 'aberto',
+    'Em atendimento': 'atendimento',
+    'Aguardando cliente': 'aguardando',
+    'Resolvido': 'resolvido',
+    'Fechado': 'fechado'
+  };
+  function supPill(st) {
+    return '<span class="sup-st sup-st-' + (SUP_SLUG[st] || 'aberto') + '">' + esc(st) + '</span>';
+  }
+  // O banco guarda a urgência em minúscula ('alta'); a tela mostra o rótulo.
+  var SUP_PRIO = { baixa: 'Baixa', normal: 'Normal', alta: 'Alta' };
+  function supPrio(p) { return SUP_PRIO[p] || p || 'Normal'; }
+
+  // Contador da barra lateral: mensagens de revendedor que ninguém leu ainda.
+  function atualizarDotSuporte() {
+    var dot = document.getElementById('adm-sup-dot');
+    if (!dot || !FG.suporteResumo) return;
+    FG.suporteResumo().then(function (r) {
+      var n = (r && r.naoLidas) || 0;
+      dot.textContent = n > 9 ? '9+' : String(n);
+      dot.classList.toggle('hidden', !n);
+    });
+  }
+
+  function renderSuporte(recarregar) {
+    h1.textContent = 'Suporte Técnico'; setOn('suporte');
+
+    if (!supLista || recarregar) {
+      view.innerHTML = '<div class="adm-card"><div class="c-body">Carregando chamados…</div></div>';
+      FG.suporteChamados().then(function (l) {
+        supLista = l;
+        renderSuporte();
+      }, function () {
+        view.innerHTML = '<div class="adm-card"><div class="c-body">' +
+          'Não foi possível carregar os chamados agora. Tente de novo em instantes.</div></div>';
+      });
+      return;
+    }
+
+    var todos = supLista;
+    var lista = todos.filter(function (c) {
+      var f = filtros.suporte;
+      if (f.status && c.status !== f.status) return false;
+      if (f.categoria && c.categoria !== f.categoria) return false;
+      return casaBusca('suporte', [c.numero, c.assunto, c.empresa, c.autor, c.categoriaNome]);
+    });
+
+    // As categorias do filtro saem dos próprios chamados: sem lista fixa aqui,
+    // nada a corrigir no painel quando o portal ganha uma categoria nova.
+    var cats = {};
+    todos.forEach(function (c) { if (c.categoria) cats[c.categoria] = c.categoriaNome; });
+    var opcoesCat = Object.keys(cats).sort().map(function (k) { return [k, cats[k]]; });
+
+    var esperando = todos.filter(function (c) { return c.naoLidas > 0; }).length;
+
+    view.innerHTML =
+      (esperando
+        ? '<div class="adm-banner"><b>' + esperando + '</b> chamado' + (esperando > 1 ? 's' : '') +
+          ' com mensagem sem resposta.</div>'
+        : '') +
+      '<div class="adm-card"><div class="c-head">Chamados (' +
+      contagem('suporte', lista.length, todos.length) + ')' +
+      '<button class="btn-line btn-mini" id="sup-recarregar" style="float:right;">Atualizar</button></div>' +
+      '<div class="c-body">' +
+      barraFiltro('suporte', [
+        { k: 'status', rotulo: 'Status', opcoes: SUP_STATUS.map(function (s) { return [s, s]; }) },
+        { k: 'categoria', rotulo: 'Categoria', opcoes: opcoesCat }
+      ], 'Buscar por número, assunto ou concessionária') +
+      '<table class="tbl sup-tabela"><thead><tr><th>Chamado</th><th>Concessionária</th><th>Assunto</th>' +
+      '<th>Categoria</th><th>Urgência</th><th>Status</th><th>Última movimentação</th></tr></thead><tbody>' +
+      (lista.length ? lista.map(function (c) {
+        return '<tr class="' + (c.naoLidas ? 'tem-novo' : '') + '">' +
+          '<td class="nowrap"><a href="#suporte/' + c.id + '"><b>' + esc(c.numero) + '</b></a></td>' +
+          '<td>' + esc(c.empresa) + '<br><span class="muted" style="font-size:11px;">' + esc(c.autor) + '</span></td>' +
+          '<td>' + esc(c.assunto) +
+          (c.naoLidas ? '<span class="sup-badge-novo">' + c.naoLidas + ' nova' +
+            (c.naoLidas > 1 ? 's' : '') + '</span>' : '') + '</td>' +
+          '<td>' + esc(c.categoriaNome) + '</td>' +
+          '<td>' + esc(supPrio(c.prioridade)) + '</td>' +
+          '<td>' + supPill(c.status) + '</td>' +
+          '<td class="nowrap">' + FG.fmtDateTime(c.atualizadoEm) + '</td></tr>';
+      }).join('') : vazioFiltro(7, 'Nenhum chamado por aqui.')) +
+      '</tbody></table></div></div>';
+
+    bindFiltro(renderSuporte);
+    document.getElementById('sup-recarregar').addEventListener('click', function () { renderSuporte(true); });
+  }
+
+  function renderSuporteChamado(id) {
+    h1.textContent = 'Suporte Técnico'; setOn('suporte');
+    view.innerHTML = '<div class="adm-card"><div class="c-body">Carregando chamado…</div></div>';
+
+    FG.suporteChamado(id).then(function (c) {
+      if (!c) {
+        view.innerHTML = '<div class="adm-card"><div class="c-body">Chamado não encontrado. ' +
+          '<a href="#suporte">Voltar à fila</a>.</div></div>';
+        return;
+      }
+      // Abrir marcou as mensagens do revendedor como lidas no servidor; a lista
+      // guardada em memória ficou velha e o contador da barra também.
+      supLista = null;
+      atualizarDotSuporte();
+
+      var fechado = c.status === 'Fechado';
+      view.innerHTML =
+        '<div class="adm-card"><div class="c-head">' + esc(c.numero) + ' — ' + esc(c.assunto) +
+        '<a href="#suporte" class="btn-line btn-mini" style="float:right;">Voltar à fila</a></div>' +
+        '<div class="c-body">' +
+        '<div class="sup-det-head">' +
+        '<div class="sup-det-meta">' +
+        '<div><span class="lbl">Concessionária</span>' + esc(c.empresa) + '</div>' +
+        '<div><span class="lbl">Aberto por</span>' + esc(c.autor) +
+        (c.autorEmail ? '<br><span class="muted" style="font-size:11px;">' + esc(c.autorEmail) + '</span>' : '') + '</div>' +
+        '<div><span class="lbl">Categoria</span>' + esc(c.categoriaNome) + '</div>' +
+        '<div><span class="lbl">Urgência</span>' + esc(supPrio(c.prioridade)) + '</div>' +
+        '<div><span class="lbl">Abertura</span>' + FG.fmtDateTime(c.criadoEm) + '</div>' +
+        '<div><span class="lbl">Status</span>' + supPill(c.status) + '</div>' +
+        '</div>' +
+        '<div class="sup-det-acoes">' +
+        '<label style="font-size:12px;">Mudar status: ' +
+        '<select id="sup-status">' + SUP_STATUS.map(function (s) {
+          return '<option value="' + esc(s) + '"' + (s === c.status ? ' selected' : '') + '>' + esc(s) + '</option>';
+        }).join('') + '</select></label>' +
+        '<button class="btn-line btn-mini" id="sup-salvar-status" type="button">Aplicar</button>' +
+        '</div></div>' +
+
+        '<div class="sup-conversa">' + (c.conversa || []).map(supMensagemHtml).join('') + '</div>' +
+
+        (fechado
+          ? '<div class="sup-fechado-aviso">Chamado fechado. Mude o status acima para voltar a responder.</div>'
+          : '<div class="sup-responder">' +
+            '<div class="field"><label for="sup-resp-txt">Resposta ao revendedor</label>' +
+            '<textarea id="sup-resp-txt" rows="4" maxlength="4000" ' +
+            'placeholder="Escreva a resposta que o revendedor vai ler no portal…"></textarea></div>' +
+            '<div class="sup-resp-foot">' +
+            '<input type="file" id="sup-resp-anexo" accept="image/*,video/*,.pdf,.zip,.doc,.docx,.xls,.xlsx,.csv,.txt">' +
+            '<span class="grow"></span>' +
+            '<button class="btn-orange" id="sup-resp-enviar" type="button">Enviar resposta</button>' +
+            '</div></div>') +
+        '</div></div>';
+
+      FG.carregarArquivos(view);       // anexos privados: vêm por fetch autenticado
+
+      document.getElementById('sup-salvar-status').addEventListener('click', function () {
+        var novo = document.getElementById('sup-status').value;
+        if (novo === c.status) { FG.toast('O status já é esse.'); return; }
+        FG.suporteStatus(c.id, novo).then(function (r) {
+          if (!r.ok) { FG.toast(r.msg || 'Não foi possível mudar o status.', 'erro'); return; }
+          FG.toast('Status alterado para "' + novo + '".');
+          supLista = null;
+          renderSuporteChamado(c.id);
+        });
+      });
+
+      var bEnv = document.getElementById('sup-resp-enviar');
+      if (bEnv) bEnv.addEventListener('click', function () {
+        var txt = document.getElementById('sup-resp-txt').value.trim();
+        var arq = document.getElementById('sup-resp-anexo').files[0] || null;
+        if (!txt && !arq) { FG.toast('Escreva a resposta (ou anexe um arquivo).', 'erro'); return; }
+        bEnv.disabled = true; bEnv.textContent = 'Enviando…';
+        FG.suporteResponder(c.id, { texto: txt, anexo: arq }).then(function (r) {
+          if (!r.ok) {
+            bEnv.disabled = false; bEnv.textContent = 'Enviar resposta';
+            FG.toast(r.msg || 'Não foi possível enviar.', 'erro');
+            return;
+          }
+          FG.toast('Resposta enviada ao revendedor.');
+          supLista = null;
+          renderSuporteChamado(c.id);
+        });
+      });
+    }, function () {
+      view.innerHTML = '<div class="adm-card"><div class="c-body">' +
+        'Não foi possível carregar o chamado agora. <a href="#suporte">Voltar à fila</a>.</div></div>';
+    });
+  }
+
+  // Uma mensagem da conversa. 'sistema' (mudança de status) entra como linha
+  // discreta no meio do fio; as outras, em balões separados por lado.
+  function supMensagemHtml(m) {
+    if (m.autor === 'sistema') {
+      return '<div class="sup-msg de-sistema">' + esc(m.texto) + ' · ' + FG.fmtDateTime(m.criadoEm) + '</div>';
+    }
+    var anexo = '';
+    if (m.anexo) {
+      if (m.anexoTipo === 'imagem') anexo = '<img class="sup-anexo-img fnd-thumb" data-arquivo="' + esc(m.anexo) + '" alt="Anexo do chamado" loading="lazy">';
+      else if (m.anexoTipo === 'video') anexo = '<video class="sup-anexo-video" data-arquivo="' + esc(m.anexo) + '" controls preload="metadata"></video>';
+      else anexo = '<a class="link-action" data-arquivo="' + esc(m.anexo) + '" target="_blank" rel="noopener">📎 Abrir anexo</a>';
+    }
+    // Aqui quem lê é o atendente: as respostas do suporte ficam à direita e as
+    // do revendedor à esquerda — o espelho exato do que o portal mostra a ele.
+    return '<div class="sup-msg de-' + (m.autor === 'admin' ? 'mim' : 'outro') + '">' +
+      '<span class="sup-msg-quem">' + esc(m.autor === 'admin'
+        ? ('Suporte' + (m.autorNome ? ' · ' + m.autorNome : ''))
+        : (m.autorNome || 'Revendedor')) + '</span>' +
+      (m.texto ? '<span class="sup-msg-txt">' + esc(m.texto) + '</span>' : '') +
+      anexo +
+      '<span class="sup-msg-hora">' + FG.fmtDateTime(m.criadoEm) + '</span>' +
+      '</div>';
+  }
+
+  /* =========================================================
      ROUTER
      ========================================================= */
   function route() {
@@ -2510,6 +2731,10 @@
       case 'usuarios': renderClientes(); break;
       case 'chassis': renderChassis(); break;
       case 'notificacoes': renderNotifsAdmin(); break;
+      // #suporte = fila; #suporte/12 = o chamado 12.
+      case 'suporte':
+        if (seg[1]) renderSuporteChamado(seg[1]); else renderSuporte();
+        break;
       case 'produtos': renderProdutos(); break;
       case 'pedidos': renderPedidos(); break;
       case 'prevenda': renderPreVenda(); break;
@@ -2523,11 +2748,19 @@
       default: renderDash();
     }
     refreshBell();
+    atualizarDotSuporte();
     window.scrollTo(0, 0);
   }
 
   window.addEventListener('hashchange', route);
   route();
+
+  // Chamado novo chega enquanto o painel está aberto. 3 minutos, e só com a
+  // aba visível: é helpdesk, não chat — e painel esquecido aberto não precisa
+  // conversar com o servidor a noite inteira.
+  setInterval(function () {
+    if (document.visibilityState === 'visible') atualizarDotSuporte();
+  }, 3 * 60 * 1000);
 
   }); // fim FG.pronto.then — tela montada só após o cache chegar
 })();
