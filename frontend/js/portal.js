@@ -60,6 +60,22 @@
     pill.style.display = n ? '' : 'none';
   }
 
+  /* O destaque da carta ✉️ quando algo chega COM A PÁGINA ABERTA.
+     Um número que troca de 2 para 3 num canto da tela passa despercebido por
+     quem está olhando outra coisa. A classe .novo (ver css/styles.css) faz o
+     badge pulsar por alguns segundos e depois some — anuncia a novidade sem
+     virar um alerta permanente piscando na cara do revendedor. */
+  function piscarPill() {
+    var pill = document.getElementById('notif-pill');
+    if (!pill) return;
+    pill.classList.remove('novo');
+    // Reinicia a animação mesmo se ela já estava rodando (duas mensagens
+    // seguidas): sem ler offsetWidth o navegador não repara na troca.
+    void pill.offsetWidth;
+    pill.classList.add('novo');
+    setTimeout(function () { pill.classList.remove('novo'); }, 6500);
+  }
+
   /* dropdowns das abas */
   Array.prototype.forEach.call(document.querySelectorAll('.tabs .drop > button'), function (btn) {
     btn.addEventListener('click', function (e) {
@@ -2120,6 +2136,19 @@
   // 'andamento' (o que ainda espera alguém) | 'encerrados' | 'todos'
   var supFiltro = 'andamento';
 
+  /* Qual chamado está desenhado na tela AGORA, e qual foi a última mensagem
+     que já apareceu nele. É o que permite ao batimento (js/ao-vivo.js) colar
+     só as mensagens novas no fim da conversa em vez de redesenhar a tela —
+     redesenhar apagaria o que o revendedor está digitando na caixa de
+     resposta. null = não estamos dentro de um chamado. */
+  var supAberto = null;   // { id, ultimoId, status }
+
+  function supMaiorId(conversa) {
+    return (conversa || []).reduce(function (mx, m) {
+      return Number(m.id) > mx ? Number(m.id) : mx;
+    }, 0);
+  }
+
   var SUP_SLUG = {
     'Aberto': 'aberto',
     'Em atendimento': 'atendimento',
@@ -2151,6 +2180,10 @@
   function supMudou() {
     window.dispatchEvent(new Event('fg-suporte-mudou'));
     FG.recarregarNotifs().then(refreshPill);
+    // Realinha o batimento com o que ACABOU de acontecer. Sem isto, o próximo
+    // ciclo compararia os números novos com um retrato anterior à ação do
+    // usuário e anunciaria como "novidade" a resposta que ele mesmo enviou.
+    if (FG.aoVivo) FG.aoVivo.agora();
   }
 
   function renderSuporte() {
@@ -2265,6 +2298,10 @@
       view.innerHTML = html;
       FG.carregarArquivos(view);      // anexos são privados: vêm por fetch autenticado
 
+      // A partir daqui o batimento sabe o que está na tela e até onde a
+      // conversa já foi desenhada.
+      supAberto = { id: c.id, ultimoId: supMaiorId(c.conversa), status: c.status };
+
       var bEnc = document.getElementById('sup-encerrar');
       if (bEnc) bEnc.addEventListener('click', function () {
         if (!confirm('Encerrar o chamado ' + c.numero + '?')) return;
@@ -2333,6 +2370,101 @@
       '</div>';
   }
 
+  /* =========================================================
+     AO VIVO — o que fazer quando o batimento diz que mudou
+     ---------------------------------------------------------
+     js/ao-vivo.js pergunta ao servidor de 10 em 10 segundos e dispara
+     `fg-pulso` só quando algum número se mexeu. Aqui decidimos o efeito na
+     tela, e a regra que organiza tudo é uma só:
+
+       NUNCA REDESENHAR O QUE O USUÁRIO ESTÁ USANDO.
+
+     Dentro de um chamado, as mensagens novas são COLADAS no fim da conversa.
+     Redesenhar a tela inteira apagaria o texto meio digitado na caixa de
+     resposta e o arquivo já escolhido no anexo — e faria isso no meio de uma
+     frase, a cada 10 segundos.
+     ========================================================= */
+
+  // Cola no fim da conversa as mensagens que ainda não estão na tela.
+  function supAnexarNovas() {
+    var alvo = supAberto;
+    if (!alvo) return;
+
+    FG.suporteChamado(alvo.id).then(function (c) {
+      // A resposta demorou e o usuário já saiu (ou trocou de chamado):
+      // despejar as mensagens agora as colaria na tela errada.
+      if (!c || !supAberto || supAberto.id !== alvo.id) return;
+
+      var novas = (c.conversa || []).filter(function (m) {
+        return Number(m.id) > alvo.ultimoId;
+      });
+
+      // O status muda sem mensagem nova? O rótulo do topo é trocado no lugar,
+      // sem tocar no resto da tela.
+      if (c.status !== supAberto.status) {
+        var pill = view.querySelector('.sup-det-head .sup-st');
+        if (pill) pill.outerHTML = supPill(c.status);
+        supAberto.status = c.status;
+      }
+
+      if (!novas.length) return;
+
+      var fio = view.querySelector('.sup-conversa');
+      if (!fio) return;
+
+      // innerHTML num elemento solto e depois append: o innerHTML += no
+      // próprio fio recriaria os balões antigos, e os anexos já resolvidos
+      // (URLs de blob) morreriam junto.
+      var caixa = document.createElement('div');
+      caixa.innerHTML = novas.map(supMensagemHtml).join('');
+      var ultimo = null;
+      while (caixa.firstChild) { ultimo = fio.appendChild(caixa.firstChild); }
+
+      FG.carregarArquivos(fio);       // anexos das mensagens recém-coladas
+      supAberto.ultimoId = supMaiorId(c.conversa);
+
+      // Buscar o chamado marcou as mensagens como lidas no servidor: a carta
+      // ✉️ e o badge 🎧 precisam saber, senão ficariam acesos apontando para
+      // uma conversa que o usuário está lendo neste instante.
+      supMudou();
+
+      // Só avisa se veio alguém do outro lado. Mensagem do próprio revendedor
+      // (enviada de outra aba) e linha de sistema não merecem interromper.
+      if (novas.some(function (m) { return m.autor === 'admin'; })) {
+        FG.toast('O suporte respondeu no chamado ' + c.numero + '.');
+      }
+      if (ultimo && ultimo.scrollIntoView) {
+        ultimo.scrollIntoView({ block: 'nearest' });
+      }
+    });
+  }
+
+  window.addEventListener('fg-pulso', function (e) {
+    var mudou = e.detail.mudou;
+
+    // A carta ✉️ do topo. É o pedido central: o número acende sozinho, sem
+    // recarregar a página. `refreshPill` já existia — só nunca era chamado
+    // por iniciativa do servidor.
+    if (mudou.notificacoes) {
+      FG.recarregarNotifs().then(function () {
+        refreshPill();
+        // Só quando SOBE. Piscar porque o número caiu (o usuário leu a
+        // notificação em outra aba) seria alarme ao contrário.
+        if (mudou.chegouNotificacao) piscarPill();
+        // A caixa de entrada aberta na tela também fica velha.
+        if (location.hash === '#notificacoes') renderNotifs();
+      });
+    }
+
+    if (!mudou.suporte) return;
+
+    if (supAberto) {
+      supAnexarNovas();                 // dentro do chamado: cola as novas
+    } else if (location.hash === '#suporte') {
+      renderSuporte();                  // na lista: redesenhar não perde nada
+    }
+  });
+
   // O pop-up avisa quando abriu um chamado novo: a lista atrás dele se atualiza
   // sozinha, em vez de mostrar um estado que já não é verdade.
   window.addEventListener('fg-suporte-novo', function () {
@@ -2397,6 +2529,10 @@
       location.hash = '#home';
       return;
     }
+    // Sair de um chamado (para onde for) apaga o alvo do batimento. Quem
+    // continuar num chamado o preenche de novo ao terminar de desenhar.
+    supAberto = null;
+
     switch (rota) {
       case 'home': renderHome(); break;
       case 'notificacoes': renderNotifs(); break;

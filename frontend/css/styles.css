@@ -336,6 +336,22 @@ img.logo { display: block; height: 38px; width: auto; }
   background: var(--red); color: var(--ink); border: 1px solid var(--ink);
   border-radius: 9px; font-size: 10px; font-weight: 800; padding: 0 5px;
 }
+/* Chegou algo AGORA, sem recarregar a página. O número sozinho mudando de 2
+   para 3 no canto do ✉️ passa despercebido — quem estava olhando outra parte
+   da tela não vê. Estes 6 segundos de destaque são o "símbolo de notificação"
+   que anuncia a novidade; depois o badge volta ao normal e para de incomodar.
+   A classe é posta e retirada por portal.js quando o batimento (js/ao-vivo.js)
+   diz que o contador SUBIU. */
+.icon-btn .pill.novo { animation: notif-chegou 1.2s ease-in-out 5; }
+@keyframes notif-chegou {
+  0%, 100% { transform: scale(1); box-shadow: none; }
+  30%      { transform: scale(1.35); box-shadow: 0 0 0 6px rgba(229, 177, 0, .35); }
+  60%      { transform: scale(1); box-shadow: 0 0 0 10px rgba(229, 177, 0, 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .icon-btn .pill.novo { animation: none; outline: 2px solid var(--ink); outline-offset: 2px; }
+}
+
 .pf-link { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 700; color: var(--ink); }
 .pf-link:hover { text-decoration: none; color: var(--red); }
 .topbar .spacer { flex: 1; }

@@ -1131,6 +1131,19 @@
     return req('PATCH', '/suporte/chamados/' + encodeURIComponent(id), { status: status });
   };
 
+  /* ---------- o pulso (ver js/ao-vivo.js) ---------- */
+  // Quatro números que dizem se algo mudou: { notificacoes, suporteAbertos,
+  // suporteNaoLidas, ultimaMensagem }. É a requisição mais frequente do
+  // portal (uma a cada 10s por aba), por isso não traz lista nenhuma — quem
+  // percebe uma mudança é que vai buscar o conteúdo.
+  //
+  // NUNCA rejeita: uma falha de rede no meio de uma tarefa não pode virar erro
+  // na tela por causa de um contador. Devolve null e o laço tenta de novo no
+  // batimento seguinte.
+  FG.pulso = function () {
+    return apiGet('/pulso');
+  };
+
   // Expõe helpers para depuração no console.
   FG._api = api;
   FG._cache = CACHE;
