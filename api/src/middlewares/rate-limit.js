@@ -89,14 +89,31 @@ export const limiteVerificacaoSenha = rateLimit({
   handler: bloqueio('Muitas tentativas. Aguarde alguns minutos e tente de novo.')
 });
 
-// Piso geral para toda a API. NÃO substitui os limites específicos acima — é
-// uma rede de segurança para as rotas que ninguém lembrou de proteger e para
-// varredura automatizada. O teto é alto de propósito: um revendedor navegando
-// pela loja dispara dezenas de requisições por minuto (catálogo, imagens,
-// notificações), e a concessionária inteira costuma sair por um IP só.
+/* Piso geral para toda a API. NÃO substitui os limites específicos acima — é
+   uma rede de segurança para as rotas que ninguém lembrou de proteger e para
+   varredura automatizada.
+   ------------------------------------------------------------
+   O TETO PRECISA SER ALTO, e a conta é o GET /api/pulso: o portal o chama a
+   cada 10 segundos por ABA ABERTA (ver routes/pulso.routes.js e
+   frontend/js/ao-vivo.js). São 6 requisições por minuto por aba, antes de o
+   usuário clicar em qualquer coisa. E o limite é por IP, enquanto a
+   concessionária inteira costuma sair por um só.
+
+   A conta do pior caso plausível:
+     20 pessoas x 2 abas         =  40 abas
+     40 abas x 6 req/min         = 240 req/min  só de batimento
+     x 5 min da janela           = 1200 requisições
+     + navegação normal (catálogo, pedidos, imagens)
+
+   Com o teto anterior de 600 por 5 minutos, essa concessionária levaria 429
+   no meio do expediente — sem ter feito nada de errado. 3000 dá folga para o
+   dobro disso e ainda estrangula um varredor, que trabalha em milhares por
+   minuto.
+
+   Ao mexer no intervalo do ao-vivo.js, refaça esta conta. */
 export const limiteGlobal = rateLimit({
   ...COMUM,
   windowMs: 5 * 60 * 1000,
-  limit: 600,
+  limit: 3000,
   handler: bloqueio('Muitas requisições deste endereço. Aguarde um instante e tente de novo.')
 });
