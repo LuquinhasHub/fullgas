@@ -12,8 +12,8 @@
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import { query, getPool, sql } from '../db.js';
-import { requireAuth, AREAS, parsePermissoes } from '../auth.js';
-import { erroEndereco, limparIe } from '../validacao.js';
+import { requireAuth, AREAS, parsePermissoes, invalidarCacheSessao } from '../auth.js';
+import { erroEndereco, limparIe, erroSenha } from '../validacao.js';
 import { atualizarContatoTiny } from '../tiny-contatos.js';
 
 const router = Router();
@@ -174,7 +174,8 @@ router.post('/conta/subdealers', requireAuth, requireGestor, async (req, res, ne
   try {
     const { nome, email, senha } = req.body;
     if (!nome || !email || !senha) return res.status(400).json({ erro: 'Informe nome, e-mail e senha.' });
-    if (senha.length < 6) return res.status(400).json({ erro: 'A senha precisa de ao menos 6 caracteres.' });
+    const errSenha = erroSenha(senha, { email, nome });
+    if (errSenha) return res.status(400).json({ erro: errSenha });
 
     const existe = await query('SELECT 1 FROM dbo.Usuario WHERE Email = @email', { email });
     if (existe.length) return res.status(409).json({ erro: 'Já existe um usuário com este e-mail.' });
@@ -210,7 +211,7 @@ router.patch('/conta/subdealers/:id', requireAuth, requireGestor, async (req, re
 
     // Só contas internas (Gestor = 0) da própria empresa.
     const alvo = (await query(
-      'SELECT UsuarioId, Status FROM dbo.Usuario WHERE UsuarioId = @id AND EmpresaId = @eid AND Gestor = 0',
+      'SELECT UsuarioId, Status, Email, Nome FROM dbo.Usuario WHERE UsuarioId = @id AND EmpresaId = @eid AND Gestor = 0',
       { id, eid: req.user.empresaId }
     ))[0];
     if (!alvo) return res.status(404).json({ erro: 'Conta interna não encontrada.' });
@@ -223,8 +224,12 @@ router.patch('/conta/subdealers/:id', requireAuth, requireGestor, async (req, re
     // passa pela mesma porta que a de qualquer concessionário.
     if (status === 'aprovado' && alvo.Status === 'pendente')
       return res.status(403).json({ erro: 'A liberação de contas pendentes é feita pelo administrador Fullgas.' });
-    if (senha !== undefined && String(senha).length < 6)
-      return res.status(400).json({ erro: 'A senha precisa de ao menos 6 caracteres.' });
+    if (senha !== undefined) {
+      // `alvo` já veio do banco na checagem de propriedade acima — é dele que
+      // saem o e-mail e o nome para recusar senha que repete o cadastro.
+      const errSenha = erroSenha(senha, { email: alvo.Email, nome: alvo.Nome });
+      if (errSenha) return res.status(400).json({ erro: errSenha });
+    }
 
     const request = (await getPool()).request().input('id', sql.Int, id);
     const sets = [];
@@ -238,11 +243,19 @@ router.patch('/conta/subdealers/:id', requireAuth, requireGestor, async (req, re
     if (senha !== undefined) {
       const hash = await bcrypt.hash(String(senha), 10);
       sets.push('SenhaHash = @hash'); request.input('hash', sql.VarBinary(256), Buffer.from(hash, 'utf8'));
+      // Trocar a senha de uma conta interna derruba as sessões dela. É o que
+      // o gestor espera ao resetar a senha de um funcionário que saiu.
+      sets.push('TokenVersion = TokenVersion + 1');
     }
+    // Bloquear também expulsa na hora, em vez de valer só no próximo login.
+    if (status === 'bloqueado') sets.push('TokenVersion = TokenVersion + 1');
     if (!sets.length) return res.status(400).json({ erro: 'Nada para atualizar.' });
     sets.push('AtualizadoEm = SYSUTCDATETIME()');
 
     await request.query(`UPDATE dbo.Usuario SET ${sets.join(', ')} WHERE UsuarioId = @id`);
+    // Permissões novas (e revogação, quando houve) valem já na próxima
+    // requisição, sem esperar o TTL do cache de sessão.
+    invalidarCacheSessao(id);
     res.json({ ok: true });
   } catch (e) { next(e); }
 });

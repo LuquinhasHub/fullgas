@@ -57,7 +57,7 @@
 
   var mega = document.getElementById('shop-mega');
   mega.innerHTML = FG.categoriasTopo().map(function (c) {
-    return '<a href="#/categoria/' + c.id + '">' + esc(c.nome) + ' <span>' + contaCategoria(c.id) + ' ›</span></a>';
+    return '<a href="#/categoria/' + esc(c.id) + '">' + esc(c.nome) + ' <span>' + contaCategoria(c.id) + ' ›</span></a>';
   }).join('');
 
   var menuBtn = document.getElementById('menu-btn');
@@ -98,7 +98,7 @@
 
   function stockHTML(p) {
     if (p.estoque > 0) return '<span class="stock-ok">Em estoque</span>';
-    if (p.previsao) return '<span class="stock-date">' + p.previsao + '</span>';
+    if (p.previsao) return '<span class="stock-date">' + esc(p.previsao) + '</span>';
     return '<span class="stock-out">Indisponível</span>';
   }
 
@@ -136,7 +136,7 @@
       var midia = c.imagem
         ? '<img class="cat-photo" src="' + esc(c.imagem) + '" alt="' + esc(c.nome) + '">'
         : catIcon(c.icone);
-      return '<button class="cat-tile" data-cat="' + c.id + '">' + midia +
+      return '<button class="cat-tile" data-cat="' + esc(c.id) + '">' + midia +
         '<div class="cat-name">' + esc(c.nome) + '</div>' +
         (subs.length ? '<div class="cat-sub muted">' + subs.length + ' subcategoria' + (subs.length > 1 ? 's' : '') + '</div>' : '') +
         '</button>';
@@ -162,7 +162,7 @@
     if (termoBusca != null) trilha = [{ nome: 'Busca' }];
     else if (cat && cat.pai) {
       var paiCat = FG.category(cat.pai);
-      trilha = [{ nome: paiCat ? paiCat.nome : cat.pai, href: '#/categoria/' + cat.pai }, { nome: cat.nome }];
+      trilha = [{ nome: paiCat ? paiCat.nome : cat.pai, href: '#/categoria/' + esc(cat.pai) }, { nome: cat.nome }];
     } else trilha = cat ? [{ nome: cat.nome }] : [{ nome: 'Categoria' }];
     setBand(titulo, trilha);
 
@@ -193,13 +193,13 @@
     var side = '<aside class="shop-side"><h4>CATEGORIAS</h4>' +
       FG.categoriasTopo().map(function (c) {
         var ativa = c.id === catId || (cat && cat.pai === c.id);
-        var html = '<button class="cat-link' + (c.id === catId ? ' on' : '') + '" data-cat="' + c.id + '">' +
+        var html = '<button class="cat-link' + (c.id === catId ? ' on' : '') + '" data-cat="' + esc(c.id) + '">' +
           esc(c.nome) + ' <span>(' + contaCat(c.id) + ')</span></button>';
         var subs = FG.subcategorias(c.id);
         if (subs.length && ativa) {
           html += subs.map(function (s) {
             var ns = FG.all('products').filter(function (p) { return p.cat === s.id; }).length;
-            return '<button class="cat-link sub' + (s.id === catId ? ' on' : '') + '" data-cat="' + s.id + '">↳ ' +
+            return '<button class="cat-link sub' + (s.id === catId ? ' on' : '') + '" data-cat="' + esc(s.id) + '">↳ ' +
               esc(s.nome) + ' <span>(' + ns + ')</span></button>';
           }).join('');
         }
@@ -236,15 +236,15 @@
     var rows = lista.map(function (p) {
       return '<div class="prod-row">' +
         '<div class="prod-img">' + prodImg(p) + '</div>' +
-        '<div><div class="prod-name"><a href="#/produto/' + p.artigo + '">' + esc(p.nome) + '</a></div>' +
+        '<div><div class="prod-name"><a href="#/produto/' + esc(p.artigo) + '">' + esc(p.nome) + '</a></div>' +
         '<div class="prod-desc">' + esc(p.descricao) + '</div>' +
         '<div class="prod-meta">' +
-        '<div class="m"><b>Article No.</b>' + p.artigo + '</div>' +
+        '<div class="m"><b>Article No.</b>' + esc(p.artigo) + '</div>' +
         '<div class="m"><b>Stock</b>' + stockHTML(p) + '</div>' +
         '<div class="m"><b>Preço</b>' + FG.fmtMoney(p.preco) + '</div>' +
         (FG.compravel(p.artigo)
-          ? '<div class="prod-buy"><input class="qty-in" type="number" min="1" value="1"' + (p.estoque > 0 ? ' max="' + p.estoque + '"' : '') + ' data-art="' + p.artigo + '">' +
-            '<button class="btn dark add-cart" data-art="' + p.artigo + '">🛒 Adicionar</button></div>'
+          ? '<div class="prod-buy"><input class="qty-in" type="number" min="1" value="1"' + (p.estoque > 0 ? ' max="' + p.estoque + '"' : '') + ' data-art="' + esc(p.artigo) + '">' +
+            '<button class="btn dark add-cart" data-art="' + esc(p.artigo) + '">🛒 Adicionar</button></div>'
           : '<div class="prod-buy"><button class="btn dark" disabled style="opacity:.55;cursor:not-allowed;">Indisponível</button></div>') +
         '</div></div></div>';
     }).join('');
@@ -312,7 +312,7 @@
     var p = FG.product(artigo);
     if (!p) { view.innerHTML = '<div class="empty-box">Artigo não encontrado.</div>'; setBand('Artigo', []); return; }
     var cat = FG.category(p.cat);
-    setBand(p.nome, [{ nome: cat ? cat.nome : '', href: '#/categoria/' + p.cat }, { nome: p.artigo }]);
+    setBand(p.nome, [{ nome: cat ? cat.nome : '', href: '#/categoria/' + esc(p.cat) }, { nome: p.artigo }]);
 
     /* modelos que usam o artigo (link para o finder) */
     var usados = FG.all('models').filter(function (m) { return FG.modelArticles(m.id).indexOf(p.artigo) >= 0; });
@@ -321,19 +321,19 @@
       '<div class="prod-page">' +
       '<div class="big-img">' + prodImg(p, 240) + '</div>' +
       '<div><div class="prod-name">' + esc(p.nome) + '</div>' +
-      '<p class="muted">Article No. ' + p.artigo + '</p>' +
+      '<p class="muted">Article No. ' + esc(p.artigo) + '</p>' +
       '<div class="prod-desc prod-desc-full">' + esc(p.descricao) + '</div>' +
       '<div class="price-big">' + FG.fmtMoney(p.preco) + '</div>' +
       '<p><b>Stock:</b> ' + stockHTML(p) + (p.estoque > 0 ? ' <span class="muted">(' + p.estoque + ' un.)</span>' : '') + '</p>' +
       (FG.compravel(p.artigo)
         ? '<div class="prod-buy" style="margin:0 0 18px;justify-content:flex-start;">' +
-          '<input class="qty-in" type="number" min="1" value="1"' + (p.estoque > 0 ? ' max="' + p.estoque + '"' : '') + ' data-art="' + p.artigo + '">' +
-          '<button class="btn dark add-cart" data-art="' + p.artigo + '">🛒 Adicionar ao carrinho</button></div>'
+          '<input class="qty-in" type="number" min="1" value="1"' + (p.estoque > 0 ? ' max="' + p.estoque + '"' : '') + ' data-art="' + esc(p.artigo) + '">' +
+          '<button class="btn dark add-cart" data-art="' + esc(p.artigo) + '">🛒 Adicionar ao carrinho</button></div>'
         : '<div class="prod-buy" style="margin:0 0 18px;justify-content:flex-start;">' +
           '<button class="btn dark" disabled style="opacity:.55;cursor:not-allowed;">Indisponível</button>' +
           '<span class="muted" style="font-size:12px;">Produto sem estoque e sem previsão de chegada.</span></div>') +
       (usados.length ? '<p class="muted" style="font-size:12px;">Aplicação (Parts Finder): ' +
-        usados.map(function (m) { return '<a href="/finder#/modelo/' + m.id + '/chassi">' + esc(m.nome + ' ' + m.ano) + '</a>'; }).join(' · ') + '</p>' : '') +
+        usados.map(function (m) { return '<a href="/finder#/modelo/' + esc(m.id) + '/chassi">' + esc(m.nome + ' ' + m.ano) + '</a>'; }).join(' · ') + '</p>' : '') +
       '</div></div>';
     bindAddCart();
   }
@@ -418,12 +418,12 @@
       var p = FG.product(i.artigo); if (!p) return;
       html += '<div class="cart-line">' +
         '<span class="cart-img">' + prodImg(p, 70) + '</span>' +
-        '<span><b><a href="#/produto/' + p.artigo + '">' + esc(p.nome) + '</a></b><br><span class="muted">' + p.artigo + '</span>' +
+        '<span><b><a href="#/produto/' + esc(p.artigo) + '">' + esc(p.nome) + '</a></b><br><span class="muted">' + esc(p.artigo) + '</span>' +
         '<br>' + stockHTML(p) + '</span>' +
         '<span>' + FG.fmtMoney(p.preco) + '</span>' +
-        '<span><input class="qty-in ct-qty" data-art="' + p.artigo + '" type="number" min="0"' + (p.estoque > 0 ? ' max="' + p.estoque + '"' : '') + ' value="' + i.qtd + '"></span>' +
+        '<span><input class="qty-in ct-qty" data-art="' + esc(p.artigo) + '" type="number" min="0"' + (p.estoque > 0 ? ' max="' + p.estoque + '"' : '') + ' value="' + i.qtd + '"></span>' +
         '<span class="right"><b>' + FG.fmtMoney(p.preco * i.qtd) + '</b></span>' +
-        '<button class="del link-action ct-del" data-art="' + p.artigo + '" title="Remover">✕</button></div>';
+        '<button class="del link-action ct-del" data-art="' + esc(p.artigo) + '" title="Remover">✕</button></div>';
     });
     // Itens indisponíveis (sem estoque e sem previsão) não podem ser comprados;
     // bloqueiam o envio. Itens em pré-venda (sem estoque, com previsão) entram
@@ -437,7 +437,7 @@
         indispItens.length + ' item(ns) sem estoque e sem previsão de chegada.<ul>' +
         indispItens.map(function (i) {
           var p = FG.product(i.artigo);
-          return '<li>' + esc(p.nome) + ' <span class="muted">(' + p.artigo + ')</span></li>';
+          return '<li>' + esc(p.nome) + ' <span class="muted">(' + esc(p.artigo) + ')</span></li>';
         }).join('') + '</ul></div>';
     }
     if (preVenda.length) {
@@ -445,7 +445,7 @@
         ' item(ns) será(ão) enviado(s) em <b>pré-venda</b>. Prazo de envio depende de reposição.<ul>' +
         preVenda.map(function (i) {
           var p = FG.product(i.artigo);
-          return '<li>' + esc(p.nome) + ' <span class="muted">(' + p.artigo + ')</span> — ' + i.qtd + ' un.' +
+          return '<li>' + esc(p.nome) + ' <span class="muted">(' + esc(p.artigo) + ')</span> — ' + i.qtd + ' un.' +
             (p.previsao ? ' · previsão: ' + esc(p.previsao) : '') + '</li>';
         }).join('') + '</ul></div>';
     }
@@ -522,8 +522,8 @@
           '<span><span class="pill-status ' + esc(o.status) + '">' + esc(o.status) + '</span></span>' +
           '<span style="margin-left:auto;"><b>' + FG.fmtMoney(o.total) + '</b></span></div>' +
           '<div class="oc-items">' + o.itens.map(function (it) {
-            return '<div>' + it.qtd + '× <a href="#/produto/' + it.artigo + '">' + esc(it.nome) + '</a> ' +
-              '<span class="muted">(' + it.artigo + ')</span> — ' + FG.fmtMoney(it.preco * it.qtd) + '</div>';
+            return '<div>' + it.qtd + '× <a href="#/produto/' + esc(it.artigo) + '">' + esc(it.nome) + '</a> ' +
+              '<span class="muted">(' + esc(it.artigo) + ')</span> — ' + FG.fmtMoney(it.preco * it.qtd) + '</div>';
           }).join('') + '</div></div>';
       }).join('');
     document.getElementById('ho-chk').addEventListener('change', function (e) { verEmpresa = e.target.checked; renderHistorico(); });

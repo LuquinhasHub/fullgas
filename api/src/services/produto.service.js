@@ -8,6 +8,7 @@ import * as catRepo from '../repositories/categoria.repository.js';
 import { PROD_URL_BASE } from '../middlewares/upload-produto.js';
 import { apagarUpload } from '../routes/finder.routes.js';
 import { erroValidacao, naoEncontrado } from '../lib/errors.js';
+import { erroSku, erroTextoProduto } from '../validacao.js';
 
 export function listar(categoria) {
   return repo.listar(categoria);
@@ -21,6 +22,16 @@ export async function obter(sku) {
 
 export async function criar({ artigo, nome, cat, preco, estoque, previsao, descricao }) {
   if (!artigo || !nome || !(preco >= 0)) throw erroValidacao('Dados incompletos.');
+
+  // O SKU vira atributo de HTML no front (data-art=, href=). A allowlist em
+  // validacao.js impede que ele carregue aspas ou marcação — ver o comentário
+  // de RE_SKU lá. Os limites de texto batem com o tamanho das colunas: sem a
+  // checagem, o SQL Server trunca em silêncio.
+  const errSku = erroSku(artigo);
+  if (errSku) throw erroValidacao(errSku);
+  const errTxt = erroTextoProduto({ nome, descricao, previsao });
+  if (errTxt) throw erroValidacao(errTxt);
+
   const catId = await catRepo.idPorCodigo(cat);
   if (catId == null) throw erroValidacao('Categoria inválida.');
   await repo.inserir({ sku: artigo, nome, catId, descricao, preco, estoque, previsao });
@@ -29,6 +40,9 @@ export async function criar({ artigo, nome, cat, preco, estoque, previsao, descr
 // Edita. Produto do Tiny (espelho do ERP): nome, preço, estoque, descrição e
 // foto NÃO mudam aqui — só categoria e previsão de chegada. Devolve { tiny }.
 export async function atualizar(sku, { nome, cat, preco, estoque, previsao, descricao }) {
+  const errTxt = erroTextoProduto({ nome, descricao, previsao });
+  if (errTxt) throw erroValidacao(errTxt);
+
   const catId = await catRepo.idPorCodigo(cat);
   if (catId == null) throw erroValidacao('Categoria inválida.');
 

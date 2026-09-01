@@ -1,13 +1,34 @@
 /* ============================================================================
    FULLGAS B2B - Dados de teste (seeds) para SQL Server
    ----------------------------------------------------------------------------
-   Pre-requisito: rode antes o fullgas_schema_sqlserver.sql.
-   Este script LIMPA as tabelas e insere dados ficticios para desenvolvimento.
+   *** SOMENTE DESENVOLVIMENTO. NUNCA RODE ISTO EM PRODUCAO. ***
 
-   Logins de teste:
+   Duas razoes, ambas destrutivas:
+     1. O script COMECA apagando as tabelas (DELETE FROM em cascata, mais
+        abaixo). Rodar num banco com dado real apaga pedidos, faturas,
+        reivindicacoes e cadastros de cliente.
+     2. Ele cria contas com SENHA CONHECIDA E PUBLICADA neste arquivo, que e'
+        versionado no Git. Uma delas e' ADMIN aprovado. Num banco exposto,
+        isso e' takeover de administrador em um passo.
+
+   Por isso ha DUAS travas logo abaixo: um opt-in explicito (-v ALLOW_SEEDS=1)
+   e uma checagem de que o banco esta mesmo vazio de dado transacional. O
+   deploy.sh nao chama este arquivo (roda so database/migrations/), mas nada
+   impedia alguem executa-lo a mao no servidor errado.
+
+   Pre-requisito: rode antes o fullgas_schema_sqlserver.sql.
+
+   COMO RODAR (em desenvolvimento):
+     sqlcmd -S localhost -E -C -d FullgasB2B -v ALLOW_SEEDS=1 \
+            -i database/fullgas_seeds.sql
+
+   Logins de teste (senhas fracas de proposito — so existem aqui):
      admin@fullgas.com.br   / admin123     (admin, aprovado)
      cliente@exemplo.com    / cliente123   (cliente, aprovado)
      maria@silvaracing.com  / maria123     (cliente, PENDENTE)
+
+   Para criar o PRIMEIRO ADMIN DE VERDADE (producao), nao use este arquivo:
+     node api/scripts/criar-admin.mjs
 
    Estrategia: sem GO entre os blocos; os relacionamentos sao resolvidos por
    subconsulta usando as chaves naturais (RazaoSocial, Sku, Email, Codigo, Niv).
@@ -19,6 +40,43 @@ GO
 
 SET NOCOUNT ON;
 SET XACT_ABORT ON;
+
+/* ----------------------------------------------------------------------------
+   TRAVA 1 — opt-in explicito.
+   Sem -v ALLOW_SEEDS=1 na linha de comando, o sqlcmd nem substitui a variavel
+   e o lote inteiro e' abortado. Rodar o arquivo "sem querer" nao apaga nada.
+
+   O SET NOEXEC ON e' o que faz o RESTO DO ARQUIVO ser apenas compilado, sem
+   executar — inclusive os DELETE. Ele fica ligado ate o SET NOEXEC OFF no
+   final, entao nao ha caminho em que a limpeza rode com a trava fechada.
+   ---------------------------------------------------------------------------- */
+:setvar ALLOW_SEEDS "0"
+IF '$(ALLOW_SEEDS)' <> '1'
+BEGIN
+    RAISERROR('SEEDS BLOQUEADOS: este script APAGA as tabelas e cria contas com senha publicada. Se e'' mesmo um banco de desenvolvimento, repita com  -v ALLOW_SEEDS=1', 16, 1);
+    SET NOEXEC ON;
+END
+GO
+
+/* ----------------------------------------------------------------------------
+   TRAVA 2 — o banco parece producao?
+   Dado transacional (pedido, fatura, reivindicacao) nunca existe num banco
+   recem-criado de desenvolvimento. Se houver qualquer linha nessas tabelas,
+   este e' um banco em uso e a limpeza abaixo seria uma perda de dados.
+
+   Deliberadamente NAO olhamos dbo.Usuario nem dbo.Produto: um dev pode ter
+   criado um usuario de teste ou importado o catalogo do Tiny, e travar por
+   causa disso tornaria a trava irritante o bastante para alguem remove-la.
+   ---------------------------------------------------------------------------- */
+IF EXISTS (SELECT 1 FROM dbo.Pedido)
+   OR EXISTS (SELECT 1 FROM dbo.Fatura)
+   OR EXISTS (SELECT 1 FROM dbo.Reivindicacao)
+BEGIN
+    RAISERROR('SEEDS BLOQUEADOS: este banco tem pedidos/faturas/reivindicacoes — ou seja, esta EM USO. O script apagaria tudo. Se realmente quer zerar um banco de desenvolvimento, esvazie essas tabelas antes, a mao.', 16, 1);
+    SET NOEXEC ON;
+END
+GO
+
 BEGIN TRANSACTION;
 
 /* ----- Limpeza (ordem reversa de dependencia) ----- */
@@ -417,4 +475,10 @@ UNION ALL SELECT 'Fatura', COUNT(*) FROM dbo.Fatura
 UNION ALL SELECT 'Entrega', COUNT(*) FROM dbo.Entrega
 UNION ALL SELECT 'Reivindicacao', COUNT(*) FROM dbo.Reivindicacao
 UNION ALL SELECT 'Notificacao', COUNT(*) FROM dbo.Notificacao;
+GO
+
+/* Desliga o NOEXEC das travas do topo. Sem isto a sessao do sqlcmd continuaria
+   sem executar nada depois deste arquivo — e um script encadeado logo em
+   seguida falharia em silencio, parecendo ter rodado. */
+SET NOEXEC OFF;
 GO

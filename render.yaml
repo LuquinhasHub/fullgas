@@ -17,6 +17,19 @@ services:
     envVars:
       - key: NODE_VERSION
         value: "20"
+      # ATENÇÃO: as três variáveis abaixo parecem burocracia e não são.
+      # Sem NODE_ENV=production a aplicação continua subindo e funcionando —
+      # e em silêncio: (1) os cookies de sessão saem SEM a marca Secure
+      # (api/src/auth.js), podendo trafegar em texto claro; (2) o corpo do
+      # e-mail de recuperação de senha, COM o link e o token válido por uma
+      # hora, é despejado no log (api/src/mail.js) — quem lê o log troca a
+      # senha de qualquer conta. Não há erro, não há sintoma.
+      - key: NODE_ENV
+        value: "production"
+      # Redundante com NODE_ENV acima; fica explícito para o dia em que
+      # alguém mexer numa das duas linhas.
+      - key: COOKIE_SECURE
+        value: "1"
       - key: PORT
         value: "3000"
       - key: DB_SERVER
@@ -39,6 +52,31 @@ services:
         sync: false
       - key: JWT_EXPIRES
         value: "8h"
+      # Verificação anti-robô (Cloudflare Turnstile). AS DUAS precisam estar
+      # preenchidas: faltando qualquer uma, api/src/captcha.js PULA a
+      # verificação inteira e a tela de acesso fica sem proteção contra robô,
+      # sem avisar. Cadastre o domínio do front no widget da Cloudflare.
+      - key: TURNSTILE_SITE_KEY
+        sync: false
+      - key: TURNSTILE_SECRET_KEY
+        sync: false
+      # SMTP — sem SMTP_HOST a recuperação de senha não envia nada e o
+      # cliente nunca recebe o link (ver o aviso em NODE_ENV acima).
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: SMTP_FROM
+        sync: false
+      # Base do link de recuperação de senha (o endereço público do FRONT,
+      # sem barra no fim). Preenchido, o link não depende mais do cabeçalho
+      # Origin de quem pediu — ver origemConfiavel() em api/src/mail.js.
+      - key: APP_URL
+        sync: false
 
   # --- Front-end (site estático) ---
   - type: web
@@ -51,3 +89,28 @@ services:
       - type: rewrite
         source: /*
         destination: /index.html
+    # Cabeçalhos de segurança. Na VPS quem os emite é o Nginx
+    # (deploy/nginx/fullgas.conf, bloco `location /`); aqui não há Nginx
+    # nenhum, então sem este bloco o front no Render vai para o ar sem CSP,
+    # sem HSTS e sem proteção contra clickjacking.
+    #
+    # A CSP é a MESMA string do Nginx — se mudar lá, mude aqui. O comentário
+    # extenso que explica cada diretiva (por que 'unsafe-inline' no style-src,
+    # por que blob:, por que os dois domínios de imagem do Tiny) está no
+    # arquivo do Nginx; não vale duplicar, mas vale ler antes de editar.
+    headers:
+      - path: /*
+        name: Content-Security-Policy
+        value: "default-src 'self'; script-src 'self' https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com; connect-src 'self' https://viacep.com.br https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://anexos.tiny.com.br https://s3.amazonaws.com/tiny-anexos-us/; media-src 'self' blob:; font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+      - path: /*
+        name: Strict-Transport-Security
+        value: "max-age=31536000; includeSubDomains"
+      - path: /*
+        name: X-Frame-Options
+        value: DENY
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+      - path: /*
+        name: Referrer-Policy
+        value: strict-origin-when-cross-origin

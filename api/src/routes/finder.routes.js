@@ -20,7 +20,7 @@ import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { EXT_IMAGEM, nomeArquivo, filtroImagem } from '../middlewares/upload-comum.js';
 import { query, getPool, sql } from '../db.js';
-import { requireAuth, requireAdmin } from '../auth.js';
+import { requireAuth, requireAdmin, requireArea } from '../auth.js';
 
 const router = Router();
 
@@ -175,7 +175,7 @@ function intOuNull(v) {
    ========================================================================= */
 
 // GET /api/finder/modelos — lista com árvore (só ativos; admin: ?todos=1).
-router.get('/finder/modelos', requireAuth, async (req, res, next) => {
+router.get('/finder/modelos', requireAuth, requireArea('finder'), async (req, res, next) => {
   try {
     const todos = req.user.papel === 'admin' && String(req.query.todos) === '1';
     const rows = await query(
@@ -187,11 +187,18 @@ router.get('/finder/modelos', requireAuth, async (req, res, next) => {
 
 // GET /api/finder/busca?vin=...&motor=... — resolve VIN ou nº de motor para o
 // modelo. Registra a busca no LogBusca (alimenta o dashboard do admin).
-router.get('/finder/busca', requireAuth, async (req, res, next) => {
+router.get('/finder/busca', requireAuth, requireArea('finder'), async (req, res, next) => {
   try {
     const vin = String(req.query.vin || '').trim();
     const motor = String(req.query.motor || '').trim();
     if (!vin && !motor) return res.status(400).json({ erro: 'Informe vin ou motor.' });
+
+    // ESCOPO POR EMPRESA — o mesmo padrão de veiculos.routes.js (escopoEmpresa).
+    // Sem ele, esta rota respondia sobre QUALQUER chassi da base: bastava estar
+    // logado para descobrir, a partir de um número de chassi, o modelo, a cor e
+    // se a moto já foi vendida — inclusive de outra concessionária. Era o único
+    // ponto do sistema onde dado de veículo escapava do isolamento por empresa.
+    const eid = req.user.papel === 'admin' ? null : req.user.empresaId;
 
     const rows = await query(
       `SELECT TOP 1 v.Niv, v.NumeroMotor, v.Cor, v.Status, m.ModeloId, m.Codigo, m.Nome, m.Ano,
@@ -199,8 +206,9 @@ router.get('/finder/busca', requireAuth, async (req, res, next) => {
               m.Categoria, m.Ativo
          FROM dbo.Veiculo v
          JOIN dbo.ModeloMoto m ON m.ModeloId = v.ModeloId
-        WHERE ${vin ? 'v.Niv = @termo' : 'v.NumeroMotor = @termo'}`,
-      { termo: vin || motor }
+        WHERE ${vin ? 'v.Niv = @termo' : 'v.NumeroMotor = @termo'}
+          AND (@eid IS NULL OR v.EmpresaId = @eid)`,
+      { termo: vin || motor, eid }
     );
 
     // Log da busca (não derruba a resposta se falhar).
@@ -227,7 +235,7 @@ router.get('/finder/busca', requireAuth, async (req, res, next) => {
 // uma peça, buscada pelo número do artigo (SKU) e/ou pela descrição. Alimenta a
 // tela "Usage list": o cliente digita um SKU e vê em quais modelos/seções ele
 // aparece, com link para abrir a seção. Busca parcial (LIKE) em ambos os campos.
-router.get('/finder/uso', requireAuth, async (req, res, next) => {
+router.get('/finder/uso', requireAuth, requireArea('finder'), async (req, res, next) => {
   try {
     const sku = String(req.query.sku || '').trim();
     const descricao = String(req.query.descricao || '').trim();
@@ -266,7 +274,7 @@ router.get('/finder/uso', requireAuth, async (req, res, next) => {
 });
 
 // GET /api/finder/modelos/:codigo — modelo + seções agrupadas por lado.
-router.get('/finder/modelos/:codigo', requireAuth, async (req, res, next) => {
+router.get('/finder/modelos/:codigo', requireAuth, requireArea('finder'), async (req, res, next) => {
   try {
     const m = await acharModelo(req.params.codigo);
     if (!m) return res.status(404).json({ erro: 'Modelo não encontrado.' });
@@ -290,7 +298,7 @@ router.get('/finder/modelos/:codigo', requireAuth, async (req, res, next) => {
 // GET /api/finder/secoes/:id — seção com peças + hotspots + vizinhas (anterior/
 // próxima do mesmo lado, para as setas e o "NEXT CATEGORY" do cliente).
 // Cliente vê só peças ativas; admin vê todas (para o painel).
-router.get('/finder/secoes/:id', requireAuth, async (req, res, next) => {
+router.get('/finder/secoes/:id', requireAuth, requireArea('finder'), async (req, res, next) => {
   try {
     const id = Number(req.params.id);
     const s = await acharSecao(id);

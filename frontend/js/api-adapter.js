@@ -526,6 +526,8 @@
   };
 
   // Cadastro. Devolve Promise<{ ok, msg? }>.
+  // `dados.captcha` é o token do widget anti-robô do formulário de cadastro
+  // (vazio quando não há chave configurada — aí o servidor não o exige).
   FG.register = function (dados) {
     return api('/auth/register', { method: 'POST', body: dados })
       .then(function () { return { ok: true }; },

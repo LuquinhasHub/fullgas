@@ -1684,8 +1684,11 @@
     var total = itens.length ? somaItens : i.valor;
     var endLinhas = linhasEndereco(i.endereco).map(esc).join('<br>');
     var nomeEmpresa = esc(i.empresa || sess.empresa || '');
-    var pais = esc(i.pais || (i.endereco && i.endereco.pais) || '');
-    var pedidos = (i.pedidos || []).length ? (i.pedidos || []).map(esc).join(', ') : '—';
+    // Crus de propósito: os dois só alimentam campo(), que escapa por conta
+    // própria. O separador ', ' não é dado de usuário, então juntar antes de
+    // escapar é seguro.
+    var paisCru = i.pais || (i.endereco && i.endereco.pais) || '';
+    var pedidos = (i.pedidos || []).length ? (i.pedidos || []).join(', ') : '';
 
     // Estilos inline (o print-area é isolado; nada de classes externas).
     // Corpos maiores para leitura confortável no A4 — mesma estrutura, letras
@@ -1695,9 +1698,13 @@
     var lbl = 'font-size:12px;color:#888;text-transform:uppercase;letter-spacing:.4px;';
     var val = 'font-size:15px;font-weight:700;color:#222;';
 
+    // O escape acontece AQUI DENTRO, não em cada chamada. Antes o helper
+    // interpolava o valor cru e cabia a quem chamasse lembrar do esc() — os
+    // seis call sites lembravam, mas é o tipo de contrato que se perde no
+    // sétimo. Com o escape no helper, esquecer deixa de ser possível.
     function campo(rotulo, valor) {
-      return '<div style="margin-bottom:10px;"><div style="' + lbl + '">' + rotulo + '</div>' +
-        '<div style="' + val + '">' + (valor || '—') + '</div></div>';
+      return '<div style="margin-bottom:10px;"><div style="' + lbl + '">' + esc(rotulo) + '</div>' +
+        '<div style="' + val + '">' + (valor ? esc(valor) : '—') + '</div></div>';
     }
 
     // Logo da marca (data URI carregado por js/logo-data.js). Se por algum
@@ -1727,12 +1734,14 @@
 
       /* ---- grade de dados do documento ---- */
       '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0 24px;margin-top:22px;">' +
-      campo('Fatura n°', esc(i.numero)) +
+      // Valores CRUS: quem escapa é o campo() (ver o helper acima). Passar
+      // esc() aqui escaparia duas vezes e um "&" viraria "&amp;" na tela.
+      campo('Fatura n°', i.numero) +
       campo('Data da fatura', FG.fmtDate(i.data)) +
       campo('Pedido(s)', pedidos) +
-      campo('CNPJ', esc(i.cnpj) || '—') +
-      campo('País', pais || '—') +
-      campo('Documento', esc(i.tipo)) +
+      campo('CNPJ', i.cnpj) +
+      campo('País', paisCru) +
+      campo('Documento', i.tipo) +
       '</div>' +
 
       /* ---- destinatário ---- */
@@ -1997,7 +2006,7 @@
         '<div class="conta-grid">' +
         '<div class="field"><label for="sd-nome">Nome</label><input id="sd-nome" type="text" placeholder="Nome do funcionário"></div>' +
         '<div class="field"><label for="sd-email">E-mail</label><input id="sd-email" type="email" placeholder="email@suaempresa.com.br"></div>' +
-        '<div class="field"><label for="sd-senha">Senha</label><input id="sd-senha" type="password" placeholder="Mínimo 6 caracteres"></div>' +
+        '<div class="field"><label for="sd-senha">Senha</label><input id="sd-senha" type="password" autocomplete="new-password" placeholder="Mínimo 8 caracteres"></div>' +
         '</div>' +
         '<div class="field"><label>Áreas permitidas</label><div class="perm-list" id="sd-perms">' +
         c.areas.map(function (a) {
@@ -2020,7 +2029,7 @@
           permissoes: perms
         };
         if (!dados.nome || !dados.email || !dados.senha) { FG.toast('Preencha nome, e-mail e senha.', 'erro'); return; }
-        if (dados.senha.length < 6) { FG.toast('A senha precisa de ao menos 6 caracteres.', 'erro'); return; }
+        if (dados.senha.length < 8) { FG.toast('A senha precisa de ao menos 8 caracteres.', 'erro'); return; }
         FG.subdealerCriar(dados).then(function (r) {
           if (!r.ok) { FG.toast(r.msg || 'Não foi possível criar a conta.', 'erro'); return; }
           FG.toast(r.msg || 'Conta interna criada. Aguarde a aprovação do administrador.');
@@ -2041,9 +2050,9 @@
       });
       Array.prototype.forEach.call(view.querySelectorAll('[data-sn]'), function (b) {
         b.addEventListener('click', function () {
-          var senha = prompt('Nova senha para esta conta (mínimo 6 caracteres):');
+          var senha = prompt('Nova senha para esta conta (mínimo 8 caracteres):');
           if (senha == null) return;
-          if (senha.length < 6) { FG.toast('A senha precisa de ao menos 6 caracteres.', 'erro'); return; }
+          if (senha.length < 8) { FG.toast('A senha precisa de ao menos 8 caracteres.', 'erro'); return; }
           FG.subdealerEditar(b.getAttribute('data-sn'), { senha: senha }).then(function (r) {
             if (!r.ok) { FG.toast(r.msg || 'Falhou.', 'erro'); return; }
             FG.toast('Senha redefinida.');

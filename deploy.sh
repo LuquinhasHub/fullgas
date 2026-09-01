@@ -46,6 +46,10 @@ echo "==> [2/4] Instalando dependencias da API ..."
 ( cd "$REPO/api" && npm ci --omit=dev )
 
 echo "==> [3/4] Aplicando migrations (são idempotentes, podem rodar sempre) ..."
+# So database/migrations/ entra aqui. database/fullgas_seeds.sql NAO e' e nunca
+# deve ser incluido neste laco: ele apaga as tabelas e cria contas com senha
+# publicada no Git (o proprio arquivo tem duas travas contra isso desde
+# 2026-08-27, mas a regra e' nao apontar o deploy para ele).
 for f in database/migrations/*.sql; do
   echo "        - $(basename "$f")"
   docker exec -i "$DB_CONTAINER" "$SQLCMD" \

@@ -13,7 +13,9 @@
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import { query, getPool, sql } from '../db.js';
-import { requireAuth, requireAdmin, signToken, parsePermissoes, abrirSessao } from '../auth.js';
+import { requireAuth, requireAdmin, signToken, parsePermissoes, abrirSessao, invalidarCacheSessao } from '../auth.js';
+import { auditar, ACOES } from '../auditoria.js';
+import { erroSenha } from '../validacao.js';
 
 const router = Router();
 
@@ -90,8 +92,8 @@ router.post('/usuarios', requireAuth, requireAdmin, async (req, res, next) => {
       return res.status(400).json({ erro: 'Informe nome, e-mail e senha.' });
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email))
       return res.status(400).json({ erro: 'E-mail inválido.' });
-    if (senha.length < SENHA_MINIMA_ADMIN)
-      return res.status(400).json({ erro: `A senha do administrador precisa de ao menos ${SENHA_MINIMA_ADMIN} caracteres.` });
+    const errSenha = erroSenha(senha, { email, nome, min: SENHA_MINIMA_ADMIN });
+    if (errSenha) return res.status(400).json({ erro: errSenha });
 
     const existe = await query('SELECT 1 FROM dbo.Usuario WHERE Email = @email', { email });
     if (existe.length) return res.status(409).json({ erro: 'Já existe um usuário com este e-mail.' });
@@ -109,7 +111,15 @@ router.post('/usuarios', requireAuth, requireAdmin, async (req, res, next) => {
               VALUES (@eid, @nome, @email, @hash, 'admin', 'aprovado', 1, NULL)`);
 
     const id = ins.recordset[0].UsuarioId;
-    console.log(`+ Administrador criado: #${id} (${email}) por admin #${req.user.id} (${req.user.email}).`);
+    auditar({
+      req, acao: ACOES.ADMIN_CRIADO,
+      alvoId: id, alvoEmail: email, alvoEmpresaId: req.user.empresaId,
+      detalhe: { nome: nome.toUpperCase() }
+    });
+    // O e-mail saiu do log: ele agora vive na trilha, que é consultável e tem
+    // dono. Log de servidor é lido por quem tem acesso ao servidor, e não
+    // precisa carregar PII para ser útil.
+    console.log(`+ Administrador criado: #${id} por admin #${req.user.id}.`);
 
     const rows = await query(SELECT_USUARIO + ' WHERE u.UsuarioId = @id', { id });
     res.status(201).json(toUsuario(rows[0]));
@@ -139,10 +149,30 @@ router.patch('/usuarios/:id', requireAuth, requireAdmin, async (req, res, next) 
     const sets = [];
     if (status) { sets.push('Status = @status'); request.input('status', sql.VarChar(12), status); }
     if (papel) { sets.push('Papel = @papel'); request.input('papel', sql.VarChar(10), papel); }
+
+    /* REVOGAÇÃO (migration 037). Mudar status ou papel precisa valer AGORA,
+       não no próximo login:
+
+         • bloquear alguém que continua com um token válido não bloqueia nada;
+         • rebaixar um admin a cliente deixava o token antigo — que carrega
+           `papel: 'admin'` — passando pelo requireAdmin até expirar.
+
+       O revalidarSessao já sobrescreve papel/permissões a cada requisição, o
+       que resolve o rebaixamento sozinho; o TokenVersion aqui é o que fecha o
+       caso do bloqueio e serve de rede para qualquer rota que venha a ler o
+       papel direto do token. */
+    if (status === 'bloqueado' || papel) sets.push('TokenVersion = TokenVersion + 1');
     sets.push('AtualizadoEm = SYSUTCDATETIME()');
 
     const r = await request.query(`UPDATE dbo.Usuario SET ${sets.join(', ')} WHERE UsuarioId = @id`);
     if (!r.rowsAffected[0]) return res.status(404).json({ erro: 'Usuário não encontrado.' });
+    invalidarCacheSessao(id);
+
+    // Promover alguém a admin e bloquear uma conta são as duas mudanças de
+    // privilégio que mais interessam numa investigação. Ficam na trilha.
+    if (papel) auditar({ req, acao: ACOES.PAPEL_ALTERADO, alvoId: id, detalhe: { papel } });
+    if (status) auditar({ req, acao: ACOES.STATUS_ALTERADO, alvoId: id, detalhe: { status } });
+
     res.json({ ok: true });
   } catch (e) { next(e); }
 });
@@ -169,6 +199,13 @@ router.delete('/usuarios/:id', requireAuth, requireAdmin, async (req, res, next)
         });
       throw e;
     }
+    // A linha sumiu do banco, então o revalidarSessao já derrubaria a sessão
+    // sozinho — mas só depois de o cache expirar. Limpar aqui torna a
+    // exclusão imediata.
+    invalidarCacheSessao(id);
+    // O nome vai no detalhe porque a linha do usuário deixou de existir: sem
+    // isto a trilha guardaria um id que não resolve para nada.
+    auditar({ req, acao: ACOES.USUARIO_EXCLUIDO, alvoId: id, detalhe: { nome: alvo.Nome } });
     res.json({ ok: true });
   } catch (e) { next(e); }
 });
@@ -201,7 +238,7 @@ router.post('/usuarios/:id/identidade', requireAuth, requireAdmin, async (req, r
 
     const alvo = (await query(
       `SELECT u.UsuarioId, u.Nome, u.Email, u.Papel, u.Status, u.EmpresaId, u.Gestor, u.Permissoes,
-              e.RazaoSocial AS Empresa
+              u.TokenVersion, e.RazaoSocial AS Empresa
          FROM dbo.Usuario u
          JOIN dbo.Empresa e ON e.EmpresaId = u.EmpresaId
         WHERE u.UsuarioId = @id`, { id }))[0];
@@ -209,8 +246,15 @@ router.post('/usuarios/:id/identidade', requireAuth, requireAdmin, async (req, r
     if (alvo.Papel === 'admin')
       return res.status(400).json({ erro: 'Não é possível assumir a identidade de outro administrador.' });
 
-    console.log(`↪ Identidade assumida: admin #${req.user.id} (${req.user.email}) → ` +
-                `#${alvo.UsuarioId} (${alvo.Email}) da empresa "${alvo.Empresa}".`);
+    // Trilha PERSISTENTE (migration 038). Daqui em diante tudo o que este
+    // admin fizer será gravado no banco com o UsuarioId do CLIENTE — esta
+    // linha é a única coisa que liga aquelas ações a quem realmente as fez.
+    auditar({
+      req, acao: ACOES.IMPERSONAR_INICIO,
+      alvoId: alvo.UsuarioId, alvoEmail: alvo.Email, alvoEmpresaId: alvo.EmpresaId,
+      detalhe: { empresa: alvo.Empresa, papelAlvo: alvo.Papel, statusAlvo: alvo.Status }
+    });
+    console.log(`↪ Identidade assumida: admin #${req.user.id} → #${alvo.UsuarioId} (empresa "${alvo.Empresa}").`);
 
     // Sobrescreve os cookies de sessão com a identidade assumida. O token do
     // admin não é guardado em lugar nenhum: a volta reemite a partir do claim

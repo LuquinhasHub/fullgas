@@ -3,7 +3,7 @@
 // ============================================================
 import { Router } from 'express';
 import { query } from '../db.js';
-import { requireAuth, requireAdmin } from '../auth.js';
+import { requireAuth, requireAdmin, requireArea, requireAreaAny } from '../auth.js';
 import {
   registrarEvento, historicoDoVeiculo, TIPOS_MANUAIS
 } from '../historico-veiculo.js';
@@ -138,7 +138,9 @@ router.post('/veiculos', requireAuth, requireAdmin, async (req, res, next) => {
 });
 
 // GET /api/veiculos — lista da empresa do usuário; admin vê todos.
-router.get('/veiculos', requireAuth, async (req, res, next) => {
+// 'estoque' OU 'acoes': a mesma lista alimenta a tela de estoque do
+// revendedor e a busca de chassi da tela de ações.
+router.get('/veiculos', requireAuth, requireAreaAny(['estoque', 'acoes']), async (req, res, next) => {
   try {
     const esc = escopoEmpresa(req.user);
     const rows = await query(
@@ -150,7 +152,7 @@ router.get('/veiculos', requireAuth, async (req, res, next) => {
 });
 
 // GET /api/veiculos/:niv — detalhe pelo NIV (respeita o escopo de empresa).
-router.get('/veiculos/:niv', requireAuth, async (req, res, next) => {
+router.get('/veiculos/:niv', requireAuth, requireAreaAny(['estoque', 'acoes']), async (req, res, next) => {
   try {
     const esc = escopoEmpresa(req.user);
     const rows = await query(
@@ -176,7 +178,9 @@ async function acharVeiculo(niv, user) {
 // POST /api/veiculos/:niv/venda  { cliente } — registra a venda.
 // Muda Status para 'Vendido', grava data/cliente e ativa a garantia se ainda
 // não estiver ativa. Só vale para veículo 'Disponível'.
-router.post('/veiculos/:niv/venda', requireAuth, async (req, res, next) => {
+// Registrar a venda grava PII do consumidor final (nome, CPF, e-mail,
+// telefone, endereço) — é ação, não consulta, e exige a área 'acoes'.
+router.post('/veiculos/:niv/venda', requireAuth, requireArea('acoes'), async (req, res, next) => {
   try {
     const { cliente, cpf, email, telefone, endereco } = req.body;
     const nome = (cliente || '').trim();
@@ -296,7 +300,7 @@ router.put('/veiculos/:niv/transferir', requireAuth, requireAdmin, async (req, r
 });
 
 // POST /api/veiculos/:niv/garantia — ativa a garantia (se ainda não ativa).
-router.post('/veiculos/:niv/garantia', requireAuth, async (req, res, next) => {
+router.post('/veiculos/:niv/garantia', requireAuth, requireArea('acoes'), async (req, res, next) => {
   try {
     const veic = await acharVeiculo(req.params.niv, req.user);
     if (!veic) return res.status(404).json({ erro: 'Veículo não encontrado.' });
@@ -331,7 +335,7 @@ router.post('/veiculos/:niv/garantia', requireAuth, async (req, res, next) => {
 
 // GET /api/veiculos/:niv/historico — respeita o mesmo escopo do veículo:
 // o cliente só lê o histórico de um chassi que é dele.
-router.get('/veiculos/:niv/historico', requireAuth, async (req, res, next) => {
+router.get('/veiculos/:niv/historico', requireAuth, requireAreaAny(['estoque', 'acoes']), async (req, res, next) => {
   try {
     const veic = await acharVeiculo(req.params.niv, req.user);
     if (!veic) return res.status(404).json({ erro: 'Veículo não encontrado.' });
