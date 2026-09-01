@@ -85,20 +85,33 @@
 
   var aberto = false;
   var enviando = false;
+  // 'lista' | 'form' | 'ok' — qual das três telas está no painel. O batimento
+  // só pode redesenhar a LISTA: trocar o formulário embaixo de quem está
+  // digitando um chamado seria perder o texto dele.
+  var tela = 'lista';
 
-  /* ---------- badge de mensagens não lidas ---------- */
+  /* ---------- badge de mensagens não lidas ----------
+     Pintar e buscar são coisas separadas de propósito: o batimento
+     (js/ao-vivo.js) já traz o número pronto de 10 em 10 segundos, e mandá-lo
+     buscar de novo seria uma segunda ida ao servidor para saber o que ele
+     acabou de dizer. */
+  function pintarBadge(n) {
+    n = Number(n) || 0;
+    badge.textContent = n > 9 ? '9+' : String(n);
+    badge.classList.toggle('hidden', !n);
+    fab.classList.toggle('tem-novidade', !!n);
+  }
+
   function atualizarBadge() {
     return FG.suporteResumo().then(function (r) {
-      var n = (r && r.naoLidas) || 0;
-      badge.textContent = n > 9 ? '9+' : String(n);
-      badge.classList.toggle('hidden', !n);
-      fab.classList.toggle('tem-novidade', !!n);
+      pintarBadge((r && r.naoLidas) || 0);
       return r;
     });
   }
 
   /* ---------- tela 1: lista de chamados ---------- */
   function renderLista() {
+    tela = 'lista';
     corpo.innerHTML = '<p class="sup-vazio">Carregando…</p>';
     FG.suporteChamados().then(function (lista) {
       var recentes = lista.slice(0, 5);
@@ -145,6 +158,7 @@
 
   /* ---------- tela 2: abrir chamado ---------- */
   function renderForm() {
+    tela = 'form';
     corpo.innerHTML = '<p class="sup-vazio">Carregando…</p>';
     FG.suporteCategorias().then(function (cats) {
       corpo.innerHTML =
@@ -228,6 +242,7 @@
   }
 
   function renderSucesso(c) {
+    tela = 'ok';
     corpo.innerHTML =
       '<div class="sup-ok">' +
       '<div class="sup-ok-ico" aria-hidden="true">✓</div>' +
@@ -284,12 +299,27 @@
     atualizarBadge: atualizarBadge
   };
 
-  /* ---------- badge: primeira carga e conferência periódica ----------
-     3 minutos é o intervalo de quem não está esperando resposta imediata (é um
-     helpdesk, não um chat). E só com a aba visível: computador esquecido aberto
-     não precisa perguntar ao servidor a noite inteira. */
+  /* ---------- badge: primeira carga e o batimento ----------
+     Antes havia aqui um laço próprio de 3 minutos. Ele saiu: quem confere
+     agora é o batimento compartilhado (js/ao-vivo.js), a cada 10 segundos e
+     em UMA requisição que serve a carta ✉️, este badge e o painel admin
+     juntos. Três laços separados fariam três perguntas para responder a mesma
+     coisa. */
   atualizarBadge();
-  setInterval(function () {
-    if (document.visibilityState === 'visible' && !aberto) atualizarBadge();
-  }, 3 * 60 * 1000);
+
+  window.addEventListener('fg-pulso', function (e) {
+    pintarBadge(e.detail.pulso.suporteNaoLidas);
+    // Painel aberto na lista: a resposta que acabou de chegar entra nela
+    // sozinha. Nas outras telas (formulário, confirmação) não se mexe.
+    if (aberto && tela === 'lista') renderLista();
+  });
+
+  // Sem o batimento na página (script não incluído), o badge voltaria a ficar
+  // parado até alguém abrir o pop-up. O laço antigo fica como rede de
+  // segurança — e só neste caso.
+  if (!FG.aoVivo) {
+    setInterval(function () {
+      if (document.visibilityState === 'visible' && !aberto) atualizarBadge();
+    }, 3 * 60 * 1000);
+  }
 })();

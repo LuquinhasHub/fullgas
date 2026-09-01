@@ -111,14 +111,17 @@ function toNotif(req, r) {
    numa constante só. Uma cópia divergente aqui significaria alguém marcando
    como lida uma notificação que não pode nem ver.
    ------------------------------------------------------------------ */
-const VISIVEL_PARA = `(
+// Exportado porque o /api/pulso (pulso.routes.js) conta as NÃO LIDAS desta
+// mesma caixa. Uma segunda cópia da condição ali significaria um contador que
+// acende para uma notificação que o usuário não pode nem abrir.
+export const VISIVEL_PARA = `(
   (@admin = 1 AND (n.Publico = 'admin' OR n.Origem = 'admin'))
   OR
   (@admin = 0 AND n.Publico = 'cliente' AND (n.EmpresaId IS NULL OR n.EmpresaId = @eid))
 )`;
 
 // Parâmetros que a condição acima exige.
-function escopo(user) {
+export function escopo(user) {
   const admin = user.papel === 'admin';
   return { admin: admin ? 1 : 0, eid: admin ? null : user.empresaId };
 }

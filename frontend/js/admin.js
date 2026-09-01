@@ -2513,6 +2513,18 @@
      ========================================================= */
   var supLista = null;          // último resultado carregado (memória da aba)
 
+  /* Qual chamado está desenhado agora e até onde a conversa já foi
+     desenhada. É o que deixa o batimento (js/ao-vivo.js) colar só as
+     mensagens novas no fim do fio, em vez de redesenhar a tela e apagar a
+     resposta que o atendente está digitando. null = não estamos num chamado. */
+  var supAberto = null;   // { id, ultimoId, status }
+
+  function supMaiorId(conversa) {
+    return (conversa || []).reduce(function (mx, m) {
+      return Number(m.id) > mx ? Number(m.id) : mx;
+    }, 0);
+  }
+
   var SUP_STATUS = ['Aberto', 'Em atendimento', 'Aguardando cliente', 'Resolvido', 'Fechado'];
   var SUP_SLUG = {
     'Aberto': 'aberto',
@@ -2529,14 +2541,20 @@
   function supPrio(p) { return SUP_PRIO[p] || p || 'Normal'; }
 
   // Contador da barra lateral: mensagens de revendedor que ninguém leu ainda.
-  function atualizarDotSuporte() {
+  // Pintar e buscar são separados porque o batimento (js/ao-vivo.js) já traz
+  // o número pronto de 10 em 10 segundos — pedi-lo de novo seria uma segunda
+  // ida ao servidor para saber o que ele acabou de dizer.
+  function pintarDotSuporte(n) {
     var dot = document.getElementById('adm-sup-dot');
-    if (!dot || !FG.suporteResumo) return;
-    FG.suporteResumo().then(function (r) {
-      var n = (r && r.naoLidas) || 0;
-      dot.textContent = n > 9 ? '9+' : String(n);
-      dot.classList.toggle('hidden', !n);
-    });
+    if (!dot) return;
+    n = Number(n) || 0;
+    dot.textContent = n > 9 ? '9+' : String(n);
+    dot.classList.toggle('hidden', !n);
+  }
+
+  function atualizarDotSuporte() {
+    if (!FG.suporteResumo) return;
+    FG.suporteResumo().then(function (r) { pintarDotSuporte((r && r.naoLidas) || 0); });
   }
 
   function renderSuporte(recarregar) {
@@ -2617,6 +2635,9 @@
       // guardada em memória ficou velha e o contador da barra também.
       supLista = null;
       atualizarDotSuporte();
+      // Abrir o chamado zerou contadores no servidor: o batimento recomeça
+      // deste estado, em vez de anunciar como novidade o que acabou de ser lido.
+      if (FG.aoVivo) FG.aoVivo.agora();
 
       var fechado = c.status === 'Fechado';
       view.innerHTML =
@@ -2657,6 +2678,9 @@
         '</div></div>';
 
       FG.carregarArquivos(view);       // anexos privados: vêm por fetch autenticado
+
+      // A partir daqui o batimento sabe o que está na tela.
+      supAberto = { id: c.id, ultimoId: supMaiorId(c.conversa), status: c.status };
 
       document.getElementById('sup-salvar-status').addEventListener('click', function () {
         var novo = document.getElementById('sup-status').value;
@@ -2722,6 +2746,10 @@
   function route() {
     var h = (location.hash || '#dashboard').slice(1);
     var seg = h.split('/');
+    // Sair de um chamado apaga o alvo do batimento; quem continuar num chamado
+    // o preenche de novo ao terminar de desenhar.
+    supAberto = null;
+
     switch (seg[0]) {
       case 'dashboard': renderDash(); break;
       case 'clientes': renderClientes(); break;
@@ -2755,12 +2783,90 @@
   window.addEventListener('hashchange', route);
   route();
 
-  // Chamado novo chega enquanto o painel está aberto. 3 minutos, e só com a
-  // aba visível: é helpdesk, não chat — e painel esquecido aberto não precisa
-  // conversar com o servidor a noite inteira.
-  setInterval(function () {
-    if (document.visibilityState === 'visible') atualizarDotSuporte();
-  }, 3 * 60 * 1000);
+  /* =========================================================
+     AO VIVO — o painel acompanha o revendedor sem F5
+     ---------------------------------------------------------
+     Havia aqui um laço próprio de 3 minutos só para o contador da barra
+     lateral. Ele saiu: quem confere agora é o batimento compartilhado
+     (js/ao-vivo.js), a cada 10 segundos e em UMA requisição.
+
+     A regra ao reagir é a mesma do portal: nunca redesenhar o que o atendente
+     está usando. Dentro de um chamado as mensagens novas são COLADAS no fim
+     da conversa — redesenhar apagaria a resposta meio digitada, a cada 10
+     segundos.
+     ========================================================= */
+
+  // Cola no fim da conversa as mensagens que ainda não estão na tela.
+  function supAnexarNovas() {
+    var alvo = supAberto;
+    if (!alvo) return;
+
+    FG.suporteChamado(alvo.id).then(function (c) {
+      // A resposta demorou e o atendente já saiu (ou trocou de chamado).
+      if (!c || !supAberto || supAberto.id !== alvo.id) return;
+
+      var novas = (c.conversa || []).filter(function (m) {
+        return Number(m.id) > alvo.ultimoId;
+      });
+
+      if (c.status !== supAberto.status) {
+        var sel = document.getElementById('sup-status');
+        if (sel) sel.value = c.status;
+        supAberto.status = c.status;
+      }
+
+      if (!novas.length) return;
+
+      var fio = view.querySelector('.sup-conversa');
+      if (!fio) return;
+
+      // innerHTML num elemento solto e depois append: o innerHTML += no
+      // próprio fio recriaria os balões antigos, e os anexos já resolvidos
+      // (URLs de blob) morreriam junto.
+      var caixa = document.createElement('div');
+      caixa.innerHTML = novas.map(supMensagemHtml).join('');
+      var ultimo = null;
+      while (caixa.firstChild) { ultimo = fio.appendChild(caixa.firstChild); }
+
+      FG.carregarArquivos(fio);
+      supAberto.ultimoId = supMaiorId(c.conversa);
+      supLista = null;                  // a fila em memória ficou velha
+
+      // Buscar o chamado marcou as mensagens como lidas no servidor: o
+      // contador da barra precisa saber, e o batimento tem que recomeçar do
+      // estado novo em vez de reanunciar o que já foi tratado.
+      atualizarDotSuporte();
+      if (FG.aoVivo) FG.aoVivo.agora();
+
+      if (novas.some(function (m) { return m.autor === 'cliente'; })) {
+        FG.toast('Nova mensagem do revendedor no chamado ' + c.numero + '.');
+      }
+      if (ultimo && ultimo.scrollIntoView) ultimo.scrollIntoView({ block: 'nearest' });
+    });
+  }
+
+  window.addEventListener('fg-pulso', function (e) {
+    pintarDotSuporte(e.detail.pulso.suporteNaoLidas);
+    if (!e.detail.mudou.suporte) return;
+
+    if (supAberto) {
+      supAnexarNovas();                 // dentro do chamado: cola as novas
+    } else if (location.hash === '#suporte') {
+      // Comparação EXATA de propósito: '#suporte/12' é um chamado aberto, e
+      // um `indexOf(...) === 0` o traria para cá e redesenharia a fila por
+      // cima da conversa se o batimento chegasse antes de `supAberto` estar
+      // preenchido.
+      renderSuporte(true);              // na fila: redesenhar não perde nada
+    }
+  });
+
+  // Sem o batimento na página, o contador voltaria a ficar parado. O laço
+  // antigo fica como rede de segurança — e só neste caso.
+  if (!FG.aoVivo) {
+    setInterval(function () {
+      if (document.visibilityState === 'visible') atualizarDotSuporte();
+    }, 3 * 60 * 1000);
+  }
 
   }); // fim FG.pronto.then — tela montada só após o cache chegar
 })();

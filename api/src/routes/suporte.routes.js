@@ -11,7 +11,11 @@
 //   - POST  /suporte/chamados/:id/mensagens  responde (multipart)
 //   - PATCH /suporte/chamados/:id            muda o status
 //
-// NÃO é chat ao vivo: cada mensagem é gravada e fica esperando o outro lado.
+// Continua sendo um HELPDESK, não uma sala de chat: não há presença ("fulano
+// está digitando"), o chamado tem número e sobrevive a todo mundo fechar o
+// navegador. O que mudou é só a ENTREGA — desde o /api/pulso (pulso.routes.js)
+// a mensagem aparece do outro lado em até 10 segundos, sem recarregar a
+// página. Ver docs/11-suporte-tecnico.md, seção "Ao vivo".
 // O pop-up do canto da tela e a aba "Suporte Técnico" são duas janelas para
 // estes mesmos dados.
 //
@@ -111,7 +115,10 @@ function toIso(d) { return d instanceof Date ? d.toISOString() : (d || null); }
    `colunaLida` entra em SQL por interpolação, e isso é seguro: o valor sai
    DESTE objeto, nunca do pedido. Nome de coluna não pode ser parâmetro.
    ------------------------------------------------------------------ */
-function ladosDa(user) {
+// Exportado: o /api/pulso (pulso.routes.js) conta as mesmas mensagens não
+// lidas de 10 em 10 segundos. Duas cópias desta escolha de coluna dariam dois
+// contadores discordando sobre o mesmo chamado.
+export function ladosDa(user) {
   return user.papel === 'admin'
     ? { eu: 'admin', colunaLida: 'LidaAdminEm', colunaLidaOutro: 'LidaClienteEm' }
     : { eu: 'cliente', colunaLida: 'LidaClienteEm', colunaLidaOutro: 'LidaAdminEm' };
