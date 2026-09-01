@@ -5,12 +5,13 @@ import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import crypto from 'node:crypto';
 import { query, getPool, sql } from '../db.js';
-import { signToken, parsePermissoes, abrirSessao, fecharSessao, requireAuth } from '../auth.js';
-import { erroEndereco, limparIe } from '../validacao.js';
+import { signToken, parsePermissoes, abrirSessao, fecharSessao, requireAuth, invalidarCacheSessao } from '../auth.js';
+import { erroEndereco, limparIe, erroSenha } from '../validacao.js';
 import { vincularContatoTiny } from '../tiny-contatos.js';
 import { enviarEmail, emailRecuperacaoSenha, appUrl } from '../mail.js';
 import { verificarCaptcha, captchaSiteKey } from '../captcha.js';
-import { limiteLogin, limiteSenha, limiteCadastro } from '../middlewares/rate-limit.js';
+import { auditar, ACOES } from '../auditoria.js';
+import { limiteLogin, limiteSenha, limiteCadastro, limiteVerificacaoSenha } from '../middlewares/rate-limit.js';
 
 const router = Router();
 
@@ -42,7 +43,7 @@ router.post('/login', limiteLogin, async (req, res, next) => {
 
     const rows = await query(
       `SELECT u.UsuarioId, u.Nome, u.Email, u.SenhaHash, u.Papel, u.Status,
-              u.EmpresaId, u.Gestor, u.Permissoes, e.RazaoSocial AS Empresa
+              u.EmpresaId, u.Gestor, u.Permissoes, u.TokenVersion, e.RazaoSocial AS Empresa
          FROM dbo.Usuario u
          JOIN dbo.Empresa e ON e.EmpresaId = u.EmpresaId
         WHERE u.Email = @email`,
@@ -95,8 +96,15 @@ router.post('/register', limiteCadastro, async (req, res, next) => {
     const end = req.body.endereco || {};
     if (!nome || !empresa || !email || !senha)
       return res.status(400).json({ erro: 'Preencha nome, empresa, e-mail e senha.' });
-    if (senha.length < 6)
-      return res.status(400).json({ erro: 'A senha precisa de ao menos 6 caracteres.' });
+
+    // Anti-robô, como no login. Esta rota é pública e cara: cria empresa +
+    // usuário numa transação e ainda chama o Tiny. O limiteCadastro (5/h por
+    // IP) segura o volume; o captcha segura a automação. Sem chave
+    // configurada a verificação é pulada — ver api/src/captcha.js.
+    const cap = await verificarCaptcha(req.body?.captcha, req.ip);
+    if (!cap.ok) return res.status(400).json({ erro: cap.erro });
+    const errSenha = erroSenha(senha, { email, nome });
+    if (errSenha) return res.status(400).json({ erro: errSenha });
     if (!cnpj)
       return res.status(400).json({ erro: 'Informe o CNPJ da empresa.' });
     const errEnd = erroEndereco(end);
@@ -302,7 +310,7 @@ router.post('/senha/esqueci', limiteSenha, async (req, res, next) => {
 });
 
 // POST /api/auth/senha/verificar  { token } -> { ok, email mascarado, nome }
-router.post('/senha/verificar', async (req, res, next) => {
+router.post('/senha/verificar', limiteVerificacaoSenha, async (req, res, next) => {
   try {
     const r = await tokenValido(req.body?.token);
     if (!r) return res.status(400).json({ erro: 'Link inválido ou expirado. Peça um novo.' });
@@ -311,14 +319,18 @@ router.post('/senha/verificar', async (req, res, next) => {
 });
 
 // POST /api/auth/senha/redefinir  { token, senha }
-router.post('/senha/redefinir', async (req, res, next) => {
+router.post('/senha/redefinir', limiteVerificacaoSenha, async (req, res, next) => {
   try {
     const senha = String(req.body?.senha || '');
-    if (senha.length < 6)
-      return res.status(400).json({ erro: 'A senha precisa de ao menos 6 caracteres.' });
 
+    // O token é validado ANTES da senha porque a mensagem de erro da senha
+    // ("não pode conter o seu e-mail") precisa saber de quem é a conta — e
+    // porque não faz sentido criticar a senha de um link já expirado.
     const r = await tokenValido(req.body?.token);
     if (!r) return res.status(400).json({ erro: 'Link inválido ou expirado. Peça um novo.' });
+
+    const errSenha = erroSenha(senha, { email: r.Email, nome: r.Nome });
+    if (errSenha) return res.status(400).json({ erro: errSenha });
     if (r.Status === 'bloqueado')
       return res.status(403).json({ erro: 'Usuário bloqueado. Procure o administrador.' });
 
@@ -331,7 +343,17 @@ router.post('/senha/redefinir', async (req, res, next) => {
       await new sql.Request(tx)
         .input('uid', sql.Int, r.UsuarioId)
         .input('hash', sql.VarBinary(256), Buffer.from(hash, 'utf8'))
-        .query('UPDATE dbo.Usuario SET SenhaHash = @hash, AtualizadoEm = SYSUTCDATETIME() WHERE UsuarioId = @uid');
+        // TokenVersion + 1 DERRUBA todas as sessões vivas deste usuário, em
+        // qualquer dispositivo (migration 037). É o ponto mais importante de
+        // toda esta rota: quem redefine a senha normalmente o faz porque
+        // suspeita de invasão — e, sem esta linha, o invasor com um token
+        // válido continuaria dentro por horas, agora sem a vítima conseguir
+        // sequer descobrir como.
+        .query(`UPDATE dbo.Usuario
+                   SET SenhaHash = @hash,
+                       TokenVersion = TokenVersion + 1,
+                       AtualizadoEm = SYSUTCDATETIME()
+                 WHERE UsuarioId = @uid`);
       // Queima ESTE token e qualquer outro pendente do mesmo usuário.
       await new sql.Request(tx)
         .input('uid', sql.Int, r.UsuarioId)
@@ -341,6 +363,10 @@ router.post('/senha/redefinir', async (req, res, next) => {
       try { await tx.rollback(); } catch { /* já desfeita */ }
       throw e;
     }
+
+    // O revalidarSessao guarda o estado por alguns segundos; sem isto a
+    // revogação só valeria ao fim do TTL.
+    invalidarCacheSessao(r.UsuarioId);
 
     res.json({ ok: true, msg: 'Senha alterada! Faça login com a nova senha.' });
   } catch (e) { next(e); }
@@ -370,7 +396,7 @@ router.get('/sessao', requireAuth, async (req, res, next) => {
   try {
     const rows = await query(
       `SELECT u.UsuarioId, u.Nome, u.Email, u.Papel, u.Status, u.EmpresaId,
-              u.Gestor, u.Permissoes, e.RazaoSocial AS Empresa
+              u.Gestor, u.Permissoes, u.TokenVersion, e.RazaoSocial AS Empresa
          FROM dbo.Usuario u
          JOIN dbo.Empresa e ON e.EmpresaId = u.EmpresaId
         WHERE u.UsuarioId = @id`,
@@ -421,8 +447,19 @@ router.post('/identidade/voltar', requireAuth, async (req, res, next) => {
         erro: 'Sua conta de administrador não está mais ativa. Faça login de novo.'
       });
     }
+    // Fecha o par com o impersonar_inicio: junto com ele, a trilha delimita a
+    // JANELA em que as ações gravadas no nome do cliente foram, na verdade,
+    // deste admin. Um sem o outro deixaria a janela em aberto.
+    //
+    // Cuidado: aqui req.user ainda é o ALVO (a sessão só troca no abrirSessao
+    // acima), e o auditar() resolve o autor pelo req.user.imp justamente por
+    // isso — ver o comentário em auditoria.js.
+    auditar({
+      req, acao: ACOES.IMPERSONAR_FIM,
+      alvoId: req.user.id, alvoEmpresaId: req.user.empresaId
+    });
     abrirSessao(res, signToken(adm));
-    console.log(`↩ Identidade devolvida: admin #${adm.UsuarioId} (${adm.Email})`);
+    console.log(`↩ Identidade devolvida: admin #${adm.UsuarioId}`);
     res.json({
       usuario: {
         id: adm.UsuarioId, nome: adm.Nome, email: adm.Email,

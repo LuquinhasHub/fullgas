@@ -90,11 +90,17 @@
      3. O token vale UMA VEZ SÓ e expira. Por isso o widget é REINICIADO a
         cada tentativa que falha — sem isso, o segundo clique em "Entrar"
         reenviaria um token já queimado e o usuário ficaria preso num erro
-        que não tem como entender. É o erro clássico desta integração. */
-  var captchaId = null;   // id do widget renderizado, ou null se não há captcha
+        que não tem como entender. É o erro clássico desta integração.
+
+     4. São DOIS widgets — um no login, outro no cadastro. Um token do
+        Turnstile é de uso único, então não dá para desenhar um só e mandar o
+        mesmo valor nas duas rotas. Cada formulário tem o seu, com o seu id. */
+  var captchaId = null;      // widget do login, ou null se não há captcha
+  var captchaIdCad = null;   // widget do cadastro, idem
 
   function iniciarCaptcha(siteKey) {
     var bloco = document.getElementById('captcha-bloco');
+    var blocoCad = document.getElementById('captcha-bloco-cad');
     var s = document.createElement('script');
     s.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
     s.async = true;
@@ -108,10 +114,20 @@
         'expired-callback': function () { turnstile.reset(captchaId); }
       });
       bloco.classList.remove('hidden');
+
+      captchaIdCad = turnstile.render('#captcha-widget-cad', {
+        sitekey: siteKey,
+        language: 'pt-br',
+        'expired-callback': function () { turnstile.reset(captchaIdCad); }
+      });
+      blocoCad.classList.remove('hidden');
     };
-    // Provedor fora do ar ou bloqueado na rede do cliente: o bloco fica
-    // escondido e o login continua. O servidor também libera nesse caso.
-    s.onerror = function () { bloco.classList.add('hidden'); };
+    // Provedor fora do ar ou bloqueado na rede do cliente: os blocos ficam
+    // escondidos e login/cadastro continuam. O servidor também libera nesse caso.
+    s.onerror = function () {
+      bloco.classList.add('hidden');
+      blocoCad.classList.add('hidden');
+    };
     document.head.appendChild(s);
   }
 
@@ -198,7 +214,7 @@
     if (!dados.nome || !dados.empresa || !dados.email || !dados.senha) {
       showMsg('Preencha nome, empresa, e-mail e senha.'); return;
     }
-    if (dados.senha.length < 6) { showMsg('A senha precisa de ao menos 6 caracteres.'); return; }
+    if (dados.senha.length < 8) { showMsg('A senha precisa de ao menos 8 caracteres.'); return; }
     if (!/^\S+@\S+\.\S+$/.test(dados.email)) { showMsg('E-mail inválido.'); return; }
     if (dados.cnpj.replace(/\D/g, '').length !== 14) { showMsg('CNPJ incompleto — use os 14 dígitos.'); return; }
     var telDig = dados.telefone.replace(/\D/g, '');
@@ -211,8 +227,19 @@
     if (!/^\d+$/.test(e.numero)) { showMsg('Número do endereço deve conter apenas dígitos.'); return; }
     if (/[^A-Za-zÀ-ÖØ-öø-ÿ'. -]/.test(e.cidade)) { showMsg('Cidade não pode conter números ou caracteres especiais.'); return; }
 
+    // Anti-robô, no fim das validações: só faz sentido queimar o token depois
+    // que o formulário está bom, senão o usuário perde a verificação a cada
+    // campo errado.
+    dados.captcha = captchaIdCad !== null ? turnstile.getResponse(captchaIdCad) : '';
+    if (captchaIdCad !== null && !dados.captcha) { showMsg('Confirme que você não é um robô.'); return; }
+
     var r = await FG.register(dados);
-    if (!r.ok) { showMsg(r.msg); return; }
+    if (!r.ok) {
+      // Token é de uso único: queima junto com a tentativa.
+      if (captchaIdCad !== null) turnstile.reset(captchaIdCad);
+      showMsg(r.msg);
+      return;
+    }
     switchTab('login');
     showMsg('Cadastro enviado! Assim que um administrador aprovar, você poderá entrar.', 'ok');
     document.getElementById('lg-email').value = dados.email;

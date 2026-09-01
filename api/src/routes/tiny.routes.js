@@ -19,6 +19,7 @@ import {
   sincronizarLote, registrarLog
 } from '../tiny.js';
 import { exportarPedido } from '../tiny-pedidos.js';
+import { erroSku } from '../validacao.js';
 
 const router = Router();
 
@@ -106,6 +107,18 @@ router.post('/tiny/importar', requireAuth, requireAdmin, async (req, res, next) 
         if (!dados.sku) {
           await registrarLog(tinyId, null, 'importacao', 'erro', 'Produto sem código (SKU) no Tiny.');
           resultados.push({ tinyId, status: 'erro', msg: 'Produto sem código (SKU) no Tiny.' });
+          continue;
+        }
+
+        // O SKU do Tiny passa pela MESMA allowlist do cadastro manual. O ERP é
+        // de terceiros e o campo lá é texto livre: sem esta checagem, um código
+        // com aspas ou marcação entraria no catálogo por um caminho que ninguém
+        // revisa, e o front o usa como atributo de HTML. Recusar o produto é
+        // preferível a importar um SKU que a loja não sabe renderizar.
+        const errSku = erroSku(dados.sku);
+        if (errSku) {
+          await registrarLog(tinyId, dados.sku, 'importacao', 'erro', errSku);
+          resultados.push({ tinyId, sku: dados.sku, status: 'erro', msg: errSku });
           continue;
         }
 

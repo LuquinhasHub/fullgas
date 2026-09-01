@@ -98,7 +98,7 @@
           </div>
           <div class="field">
             <label for="cd-senha">Senha</label>
-            <input id="cd-senha" type="password" placeholder="Mínimo 6 caracteres">
+            <input id="cd-senha" type="password" autocomplete="new-password" placeholder="Mínimo 8 caracteres">
           </div>
 
           <div class="field-title">Endereço da empresa</div>
@@ -135,6 +135,16 @@
               <label for="cd-uf">UF</label>
               <input id="cd-uf" type="text" maxlength="2" placeholder="SP" style="text-transform:uppercase;">
             </div>
+          </div>
+
+          <!-- Mesma verificação anti-robô do login, e pelo mesmo motivo: sem
+               ela, o cadastro é um formulário público que cria empresa +
+               usuário no banco e ainda dispara uma chamada ao Tiny. É um
+               SEGUNDO widget, não o do login reaproveitado: o token do
+               Turnstile vale uma vez só, e um widget escondido (o formulário
+               de login fica display:none aqui) não renderiza. -->
+          <div id="captcha-bloco-cad" class="hidden" style="margin:14px 0;">
+            <div id="captcha-widget-cad" style="display:flex;justify-content:center;"></div>
           </div>
 
           <button class="btn red" id="btn-cad" type="button" style="width:100%;justify-content:center;">Enviar cadastro para aprovação</button>

@@ -12,7 +12,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { query, getPool, sql } from '../db.js';
-import { requireAuth, requireAdmin } from '../auth.js';
+import { requireAuth, requireAdmin, requireArea } from '../auth.js';
 import { EXT_IMAGEM, EXT_VIDEO, nomeArquivo, filtroMidia } from '../middlewares/upload-comum.js';
 import {
   exportacaoLigada, atualizarEstoqueCesta, inserirExportacao, processarExportacoes
@@ -341,7 +341,7 @@ async function montarLista(rows, req) {
 }
 
 // GET /api/reivindicacoes — cliente vê as da própria empresa; admin vê todas.
-router.get('/reivindicacoes', requireAuth, async (req, res, next) => {
+router.get('/reivindicacoes', requireAuth, requireArea('reivindicacoes'), async (req, res, next) => {
   try {
     const eid = req.user.papel === 'admin' ? null : req.user.empresaId;
     const status = STATUS_VALIDOS.includes(req.query.status) ? req.query.status : null;
@@ -357,7 +357,7 @@ router.get('/reivindicacoes', requireAuth, async (req, res, next) => {
 });
 
 // GET /api/reivindicacoes/:numero — detalhe (respeita o escopo de empresa).
-router.get('/reivindicacoes/:numero', requireAuth, async (req, res, next) => {
+router.get('/reivindicacoes/:numero', requireAuth, requireArea('reivindicacoes'), async (req, res, next) => {
   try {
     const eid = req.user.papel === 'admin' ? null : req.user.empresaId;
     const rows = await query(
@@ -372,7 +372,7 @@ router.get('/reivindicacoes/:numero', requireAuth, async (req, res, next) => {
 // POST /api/reivindicacoes — cria (sempre "Em processo", tudo obrigatório).
 // origem='varejo' abre garantia de peça de um PEDIDO (sem NIV/prazo); o padrão
 // 'veiculo' mantém o fluxo por NIV, agora com o prazo de 90 dias.
-router.post('/reivindicacoes', requireAuth, async (req, res, next) => {
+router.post('/reivindicacoes', requireAuth, requireArea('reivindicacoes'), async (req, res, next) => {
   const origem = String(req.body?.origem || '').trim();
   const varejo = origem === 'varejo';
   const preEntrega = origem === 'preentrega';
@@ -457,7 +457,7 @@ router.post('/reivindicacoes', requireAuth, async (req, res, next) => {
 // PUT /api/reivindicacoes/:numero — edita/reenvia (cliente da própria empresa ou
 // admin). Usado quando a reivindicação foi DEVOLVIDA: o revendedor completa e
 // reenvia, o que limpa o estado "devolvido". Bloqueado se já estiver terminal.
-router.put('/reivindicacoes/:numero', requireAuth, async (req, res, next) => {
+router.put('/reivindicacoes/:numero', requireAuth, requireArea('reivindicacoes'), async (req, res, next) => {
   const pool = await getPool();
   const tx = new sql.Transaction(pool);
   try {
@@ -526,7 +526,7 @@ router.put('/reivindicacoes/:numero', requireAuth, async (req, res, next) => {
 });
 
 // POST /api/reivindicacoes/:numero/anexos — sobe fotos (campo multipart "fotos").
-router.post('/reivindicacoes/:numero/anexos', requireAuth, uploadFotos, async (req, res, next) => {
+router.post('/reivindicacoes/:numero/anexos', requireAuth, requireArea('reivindicacoes'), uploadFotos, async (req, res, next) => {
   const files = req.files || [];
   try {
     if (!files.length) return res.status(400).json({ erro: 'Nenhuma foto enviada.' });

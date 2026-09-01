@@ -7,7 +7,7 @@
 // ============================================================
 import { Router } from 'express';
 import { query, getPool, sql } from '../db.js';
-import { requireAuth, requireAdmin } from '../auth.js';
+import { requireAuth, requireAdmin, requireAreaAny } from '../auth.js';
 import {
   exportacaoLigada, atualizarEstoqueCesta, inserirExportacao,
   processarExportacoes, cancelarExportacoesDoPedido
@@ -39,6 +39,32 @@ function montarItem(r) {
     backorder: !!r.EmBackorder,
     // Nº da reivindicação de varejo aprovada que atingiu este item (ou null).
     garantiaNumero: r.GarantiaNumero || null
+  };
+}
+
+/* ------------------------------------------------------------
+   Quem pode ver DINHEIRO
+   ------------------------------------------------------------
+   "Pedidos" e "Financeiro" são áreas SEPARADAS na tela de contas internas: o
+   gestor pode dar a uma conta o acompanhamento dos pedidos sem lhe abrir os
+   valores. Só que preço, total e as faturas ligadas viajam dentro da própria
+   resposta de pedido — quem tem a área 'pedidos' recebia o financeiro junto,
+   de graça, e a separação existia só no desenho da tela.
+
+   Admin, gestor e token sem lista de permissões continuam vendo tudo.
+   ------------------------------------------------------------ */
+function podeVerFinanceiro(u) {
+  return u.papel === 'admin' || u.gestor || !Array.isArray(u.perm) || u.perm.includes('financeiro');
+}
+
+// Remove os valores monetários de um pedido já montado. Os campos somem em
+// vez de virem zerados: zero é um valor, e a tela o exibiria como "R$ 0,00"
+// — pior do que não mostrar o campo.
+function semValores(pedido) {
+  const { total, faturas, ...resto } = pedido;
+  return {
+    ...resto,
+    itens: (resto.itens || []).map(({ preco, ...i }) => i)
   };
 }
 
@@ -123,7 +149,11 @@ async function agendarExportacaoNaAprovacao(tx, pedidoId) {
 }
 
 // GET /api/pedidos — cliente vê os da sua empresa; admin vê todos.
-router.get('/pedidos', requireAuth, async (req, res, next) => {
+// 'loja' OU 'pedidos': a loja tem a própria tela de histórico de compras, e a
+// aba Pedidos do portal tem a visão completa. Barrar aqui só por 'pedidos'
+// esvaziaria o histórico de quem compra pela loja. Os VALORES, esses sim,
+// dependem da área 'financeiro' — ver podeVerFinanceiro/semValores.
+router.get('/pedidos', requireAuth, requireAreaAny(['loja', 'pedidos']), async (req, res, next) => {
   try {
     const admin = req.user.papel === 'admin';
     const eid = admin ? null : req.user.empresaId;
@@ -141,13 +171,14 @@ router.get('/pedidos', requireAuth, async (req, res, next) => {
          ORDER BY pi.PedidoItemId`,
       { eid }
     );
-    res.json(montarPedidos(pedidoRows, itemRows));
+    const pedidos = montarPedidos(pedidoRows, itemRows);
+    res.json(podeVerFinanceiro(req.user) ? pedidos : pedidos.map(semValores));
   } catch (e) { next(e); }
 });
 
 // GET /api/pedidos/:numero — detalhe + itens (com estoque atual de cada item)
 // + entregas/faturas ligadas + progresso de envio.
-router.get('/pedidos/:numero', requireAuth, async (req, res, next) => {
+router.get('/pedidos/:numero', requireAuth, requireAreaAny(['loja', 'pedidos']), async (req, res, next) => {
   try {
     const admin = req.user.papel === 'admin';
     const eid = admin ? null : req.user.empresaId;
@@ -191,7 +222,7 @@ router.get('/pedidos/:numero', requireAuth, async (req, res, next) => {
     const somaQtd = itens.reduce((s, i) => s + i.qtd, 0);
     const somaEnv = itens.reduce((s, i) => s + i.qtdEnviada, 0);
 
-    res.json({
+    const detalhe = {
       id: p.NumeroPedido,
       data: toIso(p.DataPedido),
       usuario: p.UsuarioEmail,
@@ -208,7 +239,10 @@ router.get('/pedidos/:numero', requireAuth, async (req, res, next) => {
         parcial: somaEnv > 0 && somaEnv < somaQtd
       },
       temBackorder: itens.some(i => i.backorder)
-    });
+    };
+    // Era por AQUI que a área 'financeiro' vazava: o detalhe do pedido carrega
+    // o total, o preço de cada item e a lista de faturas ligadas.
+    res.json(podeVerFinanceiro(req.user) ? detalhe : semValores(detalhe));
   } catch (e) { next(e); }
 });
 
@@ -216,7 +250,11 @@ router.get('/pedidos/:numero', requireAuth, async (req, res, next) => {
 // Itens com estoque suficiente baixam estoque normalmente (EmBackorder=0). Itens
 // sem estoque entram em pré-venda (EmBackorder=1) SEM decrementar — o pedido
 // inteiro é aceito, nunca rejeitado por falta de estoque. Tudo em transação.
-router.post('/pedidos', requireAuth, async (req, res, next) => {
+// Aceita QUALQUER uma das duas áreas de propósito. O checkout é o botão
+// "Enviar pedido" da LOJA, então uma conta marcada só como 'loja' precisa
+// poder fechar a compra — gatear isto apenas em 'pedidos' tiraria dela a
+// única coisa que ela deveria fazer. Quem não tem nenhuma das duas não passa.
+router.post('/pedidos', requireAuth, requireAreaAny(['loja', 'pedidos']), async (req, res, next) => {
   const itensReq = Array.isArray(req.body?.itens) ? req.body.itens : [];
   if (!itensReq.length) return res.status(400).json({ erro: 'A cesta está vazia.' });
 

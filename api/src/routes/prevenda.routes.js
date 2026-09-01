@@ -10,12 +10,17 @@
 // ============================================================
 import { Router } from 'express';
 import { query } from '../db.js';
-import { requireAuth } from '../auth.js';
+import { requireAuth, requireAreaAny } from '../auth.js';
 
 const router = Router();
 
 // GET /api/prevenda — cliente vê as suas; admin vê todas (para organizar por cliente).
-router.get('/prevenda', requireAuth, async (req, res, next) => {
+//
+// Sobre a área exigida: o conteúdo aqui é logística, não dinheiro (ver o
+// cabeçalho do arquivo), mas o portal desenha esta lista DENTRO da tela
+// Financeiro. Por isso 'financeiro' passa — é onde o usuário a encontra — e
+// 'pedidos' também, porque a informação é sobre pedidos dele.
+router.get('/prevenda', requireAuth, requireAreaAny(['financeiro', 'pedidos']), async (req, res, next) => {
   try {
     const eid = req.user.papel === 'admin' ? null : req.user.empresaId;
     const rows = await query(

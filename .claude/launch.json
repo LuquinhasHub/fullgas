@@ -6,6 +6,20 @@
       "runtimeExecutable": "npx",
       "runtimeArgs": ["-y", "http-server", "frontend", "-p", "8080", "-c-1", "--silent"],
       "port": 8080
+    },
+    {
+      "//": "API + front na MESMA origem (a API serve frontend/ via express.static).",
+      "//2": "É assim que a produção roda, e é a única forma de ver a CSP e os",
+      "//3": "cookies de sessão se comportando como se comportam lá. O 'frontend'",
+      "//4": "acima serve só os arquivos estáticos, sem API.",
+      "//5": "autoPort: a porta 3000 costuma já estar ocupada pela instância de",
+      "//6": "desenvolvimento aberta à mão. A API respeita process.env.PORT, então",
+      "//7": "sobe numa porta livre sem conflitar com ela.",
+      "name": "api",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "api", "start"],
+      "port": 3000,
+      "autoPort": true
     }
   ]
 }

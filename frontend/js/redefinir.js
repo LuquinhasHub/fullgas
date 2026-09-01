@@ -44,7 +44,7 @@
     var b = document.getElementById('btn-rd');
     var s1 = document.getElementById('rd-senha').value;
     var s2 = document.getElementById('rd-senha2').value;
-    if (s1.length < 6) { showMsg('A senha precisa de ao menos 6 caracteres.'); return; }
+    if (s1.length < 8) { showMsg('A senha precisa de ao menos 8 caracteres.'); return; }
     if (s1 !== s2) { showMsg('As duas senhas não são iguais.'); return; }
 
     b.disabled = true; b.textContent = 'Salvando…';
